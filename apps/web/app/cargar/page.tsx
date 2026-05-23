@@ -19,6 +19,12 @@ export default function CargarPage() {
   const [sincronizando, setSincronizando] = useState(false);
   const [sincDesktop, setSincDesktop] = useState(false);
 
+  // El boton "Actualizar desde Power BI" (Desktop) solo sirve cuando la app corre en
+  // el MISMO PC que Power BI (modo local). En la nube no aplica, asi que se oculta.
+  const apiEsLocal = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").includes(
+    "localhost"
+  );
+
   useEffect(() => {
     api
       .powerbiEstado()
@@ -76,27 +82,43 @@ export default function CargarPage() {
         </p>
       </div>
 
-      {/* Power BI Desktop abierto (interino local) */}
-      <Card className="border-brand/30 bg-gradient-to-br from-brand-50 to-white">
-        <CardContent className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand text-white">
-              <RefreshCw size={20} />
+      {/* Power BI Desktop abierto (solo modo LOCAL; en la nube se oculta) */}
+      {apiEsLocal && (
+        <Card className="border-brand/30 bg-gradient-to-br from-brand-50 to-white">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand text-white">
+                <RefreshCw size={20} />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-slate-900">Actualizar desde Power BI</p>
+                <p className="text-[13px] text-slate-500">
+                  Ten Power BI Desktop <b>abierto</b> con el modelo y haz clic. Lee los datos
+                  directo, sin exportar archivos.
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="text-sm font-semibold text-slate-900">Actualizar desde Power BI</p>
-              <p className="text-[13px] text-slate-500">
-                Ten Power BI Desktop <b>abierto</b> con el modelo y haz clic. Lee los datos
-                directo, sin exportar archivos.
-              </p>
-            </div>
-          </div>
-          <Button onClick={sincronizarDesktop} disabled={sincDesktop}>
-            <RefreshCw size={15} className={sincDesktop ? "animate-spin" : ""} />
-            {sincDesktop ? "Leyendo…" : "Actualizar ahora"}
-          </Button>
-        </CardContent>
-      </Card>
+            <Button onClick={sincronizarDesktop} disabled={sincDesktop}>
+              <RefreshCw size={15} className={sincDesktop ? "animate-spin" : ""} />
+              {sincDesktop ? "Leyendo…" : "Actualizar ahora"}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Nota para la version en la nube: como actualizar los datos */}
+      {!apiEsLocal && (
+        <Card className="border-brand/30 bg-brand-50">
+          <CardContent className="text-[13px] text-slate-700">
+            <p className="font-semibold text-slate-900">¿Cómo se actualizan los datos?</p>
+            <p className="mt-1">
+              Esta es la versión en la nube. Los datos los actualiza el administrador desde su
+              PC (con Power BI), usando el script <b>push_to_cloud.ps1</b>. También puedes subir
+              un archivo Excel/CSV aquí abajo manualmente.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Sincronizacion automatica via API (solo si hay service principal configurado) */}
       {powerbiOk && (
