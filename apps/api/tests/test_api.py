@@ -142,29 +142,23 @@ def test_cargar_desde_powerbi_no_configurado(client):
     assert client.post("/api/admin/cargar-desde-powerbi").status_code == 503
 
 
-def test_sync_desktop_carga(client, db_session, monkeypatch):
-    # Mockea el script de PowerShell: simula filas leidas de un Power BI abierto.
+def test_sync_desktop_carga(client, db_session, monkeypatch, tmp_path):
+    # Mockea el script de PowerShell: genera un CSV como el que produce el script real
+    # (cabeceras ya limpias) y devuelve su ruta.
     from src.services import powerbi_desktop_loader
 
-    fake = {
-        "ok": True,
-        "port": 5000,
-        "rows": [
-            {
-                "Sugerido por Sucursal[producto]": "PBI-1",
-                "'Sugerido por Sucursal'[sucursal_id]": "LINDEROS VTA MOVIL",
-                "Sugerido por Sucursal[nombre_sucursal]": "Linderos Vta Movil",
-                "[total_sugerido_suc]": 8,
-                "[pedir]": "Si",
-            }
-        ],
-    }
+    csv = tmp_path / "pbi.csv"
+    csv.write_text(
+        "Producto,SucursalID,Nombre Sucursal,total_sugerido_suc,Pedir\n"
+        "PBI-1,LINDEROS VTA MOVIL,Linderos Vta Movil,8,Si\n",
+        encoding="utf-8",
+    )
+    fake = {"ok": True, "port": 5000, "rows": 1, "csv": str(csv)}
     monkeypatch.setattr(powerbi_desktop_loader, "_ejecutar_script", lambda dax: fake)
 
     r = client.post("/api/admin/cargar-desde-powerbi-desktop")
     assert r.status_code == 200
     assert r.json()["filas_cargadas"] == 1
-    # Reemplazo el snapshot: ahora solo existe la fila leida del "Power BI".
     assert client.get("/api/sugerido").json()["items"][0]["producto"] == "PBI-1"
 
 

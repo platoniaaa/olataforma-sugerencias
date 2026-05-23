@@ -11,7 +11,7 @@ import unicodedata
 from typing import Any
 
 from openpyxl import load_workbook
-from sqlalchemy import delete
+from sqlalchemy import delete, insert
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -236,7 +236,7 @@ def persistir_filas(
     # Reemplazo total (snapshot): vaciar y reinsertar.
     db.execute(delete(Sugerido).where(Sugerido.tenant_id == tenant))
 
-    objetos: list[Sugerido] = []
+    registros_sugerido: list[dict[str, Any]] = []
     productos_vistos: dict[str, dict] = {}
     sucursales_vistas: dict[str, dict] = {}
     saltadas = 0
@@ -245,8 +245,7 @@ def persistir_filas(
         if not valores.get("producto") or not valores.get("sucursal_id"):
             saltadas += 1
             continue
-        valores = {**valores, "tenant_id": tenant}
-        objetos.append(Sugerido(**valores))
+        registros_sugerido.append({**valores, "tenant_id": tenant})
 
         p = valores["producto"]
         if p not in productos_vistos:
@@ -270,18 +269,23 @@ def persistir_filas(
                 "prioridad_cd": valores.get("prioridad_cd"),
             }
 
-    db.add_all(objetos)
+    # Inserts por lotes (Core) -> mucho mas rapido que ORM para miles de filas.
+    def _bulk(model, registros: list[dict], chunk: int = 1000) -> None:
+        for i in range(0, len(registros), chunk):
+            db.execute(insert(model), registros[i : i + chunk])
+
+    _bulk(Sugerido, registros_sugerido)
     db.execute(delete(DimProducto).where(DimProducto.tenant_id == tenant))
     db.execute(delete(DimSucursal).where(DimSucursal.tenant_id == tenant))
-    db.add_all([DimProducto(**v) for v in productos_vistos.values()])
-    db.add_all([DimSucursal(**v) for v in sucursales_vistas.values()])
+    _bulk(DimProducto, list(productos_vistos.values()))
+    _bulk(DimSucursal, list(sucursales_vistas.values()))
     db.commit()
 
     if saltadas:
         advertencias.append(f"{saltadas} fila(s) sin producto/sucursal fueron omitidas.")
 
     return {
-        "filas_cargadas": len(objetos),
+        "filas_cargadas": len(registros_sugerido),
         "productos": len(productos_vistos),
         "sucursales": len(sucursales_vistas),
         "columnas_detectadas": detectadas,

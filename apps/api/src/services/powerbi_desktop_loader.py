@@ -10,13 +10,14 @@ solo orquesta y procesa el JSON resultante.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import subprocess
 
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
-from . import excel_loader, powerbi_loader
+from . import excel_loader
 
 settings = get_settings()
 
@@ -66,13 +67,21 @@ def sync_desktop(db: Session, dax: str | None = None) -> dict:
             )
         raise RuntimeError(error)
 
-    rows = data.get("rows") or []
-    if isinstance(rows, dict):  # PowerShell serializa 1 fila como objeto, no como lista.
-        rows = [rows]
+    csv_path = data.get("csv")
+    if not csv_path or not os.path.exists(csv_path):
+        raise RuntimeError("El script no genero el archivo de datos esperado.")
 
-    registros = powerbi_loader.transformar(rows)
-    filas, detectadas, ignoradas = excel_loader.procesar_registros(registros)
-    resultado = excel_loader.persistir_filas(db, filas, detectadas, ignoradas)
+    try:
+        with open(csv_path, "rb") as f:
+            contenido = f.read()
+        # Reutiliza el cargador de CSV (las cabeceras ya vienen limpias: Producto, SucursalID...).
+        resultado = excel_loader.cargar_sugerido(db, "sugerido_powerbi.csv", contenido)
+    finally:
+        try:
+            os.remove(csv_path)
+        except OSError:
+            pass
+
     resultado["origen"] = "powerbi-desktop"
-    resultado["filas_recibidas"] = len(rows)
+    resultado["filas_recibidas"] = int(data.get("rows") or 0)
     return resultado
