@@ -15,6 +15,12 @@ from .sugerencia_manual import (
     SugerenciaManualMasivaResultado,
 )
 from .catalogo import ProductoOut, ProductoPage, SucursalOut
+from .compras import (
+    LineaCarro,
+    CarroProveedor,
+    CarrosResponse,
+    ExportCarrosRequest,
+)
 
 __all__ = [
     "SugeridoRow",
@@ -31,4 +37,8 @@ __all__ = [
     "ProductoOut",
     "ProductoPage",
     "SucursalOut",
+    "LineaCarro",
+    "CarroProveedor",
+    "CarrosResponse",
+    "ExportCarrosRequest",
 ]

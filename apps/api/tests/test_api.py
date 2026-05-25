@@ -116,6 +116,25 @@ def test_crear_sugerencia_masiva(client):
     assert len(client.get("/api/sugerencias-manuales").json()) == 1
 
 
+def test_carros_compra(client):
+    r = client.get("/api/compras/carros")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total_proveedores"] == 1
+    carro = body["carros"][0]
+    assert carro["proveedor"] == "Ford Motor Company Chile"
+    # cantidad = sugerido_compra_neto del seed (6)
+    assert carro["lineas"][0]["cantidad"] == 6
+    assert carro["lineas"][0]["producto"] == "20 BXO5W30AA"
+
+
+def test_carros_export_excel(client):
+    r = client.post("/api/compras/export-excel", json={"filtros": {"solo_pedir": True}})
+    assert r.status_code == 200
+    assert "spreadsheetml" in r.headers["content-type"]
+    assert len(r.content) > 0
+
+
 def test_powerbi_transformar_columnas():
     # Las claves "Tabla[Columna]" / "'Tabla'[Columna]" / "[Medida]" se reducen a la columna.
     from src.services.powerbi_loader import transformar

@@ -52,6 +52,12 @@ export default function RootLayout({
                 Dashboard
               </Link>
               <Link
+                href="/compras"
+                className="rounded-md px-3 py-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+              >
+                Compras
+              </Link>
+              <Link
                 href="/cargar"
                 className="rounded-md px-3 py-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
               >

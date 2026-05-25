@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .db import create_all
-from .routers import admin, health, productos, sugerencias_manuales, sugerido
+from .routers import admin, compras, health, productos, sugerencias_manuales, sugerido
 
 settings = get_settings()
 
@@ -42,6 +42,7 @@ app.include_router(health.router)
 app.include_router(sugerido.router)
 app.include_router(productos.router)
 app.include_router(sugerencias_manuales.router)
+app.include_router(compras.router)
 app.include_router(admin.router)
 
 

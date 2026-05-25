@@ -2,6 +2,7 @@
 import type {
   AgrupadoRow,
   CargaResultado,
+  CarrosResponse,
   DimensionAgrupado,
   Producto,
   Sucursal,
@@ -58,6 +59,31 @@ export const api = {
     const p = filtrosToParams(f);
     p.set("por", por);
     return getJSON(`/api/sugerido/agrupado?${p.toString()}`);
+  },
+
+  /** Carros de compra agrupados por proveedor (agente comprador). */
+  async carros(f: SugeridoFiltros): Promise<CarrosResponse> {
+    return getJSON(`/api/compras/carros?${filtrosToParams(f).toString()}`);
+  },
+
+  /** Descarga la orden de compra en Excel. Si `proveedor`, solo ese carro. */
+  async exportOrden(f: SugeridoFiltros, proveedor?: string): Promise<void> {
+    const res = await fetch(`${BASE}/api/compras/export-excel`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filtros: f, proveedor: proveedor ?? null }),
+    });
+    if (!res.ok) throw new Error("No se pudo generar la orden");
+    const blob = await res.blob();
+    const dispo = res.headers.get("Content-Disposition") ?? "";
+    const match = dispo.match(/filename="?([^"]+)"?/);
+    const nombre = match?.[1] ?? "orden_compra.xlsx";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = nombre;
+    a.click();
+    URL.revokeObjectURL(url);
   },
 
   async detalle(producto: string, sucursalId: string) {

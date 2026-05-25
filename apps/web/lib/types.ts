@@ -102,6 +102,30 @@ export interface SugerenciaManual {
   usado_en_compra: boolean;
 }
 
+export interface LineaCarro {
+  producto: string;
+  descripcion: string | null;
+  clasificacion_abc: string | null;
+  cantidad: number;
+  costo_unitario: number | null;
+  subtotal_clp: number;
+}
+
+export interface CarroProveedor {
+  proveedor: string;
+  n_productos: number;
+  total_unidades: number;
+  total_clp: number;
+  lineas: LineaCarro[];
+}
+
+export interface CarrosResponse {
+  carros: CarroProveedor[];
+  total_proveedores: number;
+  total_clp: number;
+  total_unidades: number;
+}
+
 export interface CargaResultado {
   filas_cargadas: number;
   productos: number;
