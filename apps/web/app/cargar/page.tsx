@@ -113,8 +113,8 @@ export default function CargarPage() {
             <p className="font-semibold text-slate-900">¿Cómo se actualizan los datos?</p>
             <p className="mt-1">
               Esta es la versión en la nube. Los datos los actualiza el administrador desde su
-              PC (con Power BI), usando el script <b>push_to_cloud.ps1</b>. También puedes subir
-              un archivo Excel/CSV aquí abajo manualmente.
+              PC: abre Power BI Desktop y ejecuta el script <b>push_to_cloud.ps1</b>. Eso trae el
+              sugerido con todas sus medidas y lo publica para todo el equipo.
             </p>
           </CardContent>
         </Card>
@@ -145,11 +145,16 @@ export default function CargarPage() {
         </Card>
       )}
 
+      {/* Subida manual: SOLO en modo local. En la nube se oculta para evitar que un
+          Excel de la tabla base (sin medidas) pise los datos buenos por accidente. */}
+      {apiEsLocal && (
       <div className="flex items-center gap-3 text-[12px] text-slate-400">
         <span className="h-px flex-1 bg-slate-200" />o sube un archivo manualmente
         <span className="h-px flex-1 bg-slate-200" />
       </div>
+      )}
 
+      {apiEsLocal && (
       <Card>
         <CardContent className="space-y-4">
           <label
@@ -202,6 +207,7 @@ export default function CargarPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
       {resultado && (
         <Card className="border-emerald-200">
