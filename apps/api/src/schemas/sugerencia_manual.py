@@ -44,3 +44,4 @@ class SugerenciaManualOut(BaseModel):
     creado_en: datetime
     aprobado: bool
     usado_en_compra: bool
+    archivada: bool = False

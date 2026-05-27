@@ -9,18 +9,31 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import Sugerido
+from ..models import Sugerido, SugerenciaManual
 from ..schemas import CarroProveedor, CarrosResponse, LineaCarro, SugeridoFiltros
 from .sugerido_service import _apply_filters
 
 
-def _cantidad_expr():
-    # Lo que hay que COMPRAR al proveedor (excluye lo cubierto por traslado del CD).
-    return func.coalesce(Sugerido.sugerido_compra_neto, Sugerido.total_sugerido_suc, 0)
+def _manuales_vigentes_subq():
+    """Suma de unidades manuales vigentes (no archivadas) por producto x sucursal."""
+    return (
+        select(
+            SugerenciaManual.producto.label("producto"),
+            SugerenciaManual.sucursal_id.label("sucursal_id"),
+            func.sum(SugerenciaManual.unidades).label("manual"),
+        )
+        .where(SugerenciaManual.archivada.is_(False))
+        .group_by(SugerenciaManual.producto, SugerenciaManual.sucursal_id)
+        .subquery()
+    )
 
 
 def carros_por_proveedor(db: Session, f: SugeridoFiltros) -> CarrosResponse:
-    cant = _cantidad_expr()
+    man = _manuales_vigentes_subq()
+    # Cantidad a comprar = compra neta del sistema + ajuste manual vigente del usuario.
+    cant = func.coalesce(Sugerido.sugerido_compra_neto, Sugerido.total_sugerido_suc, 0) + func.coalesce(
+        man.c.manual, 0
+    )
     stmt = (
         _apply_filters(
             select(
@@ -32,6 +45,11 @@ def carros_por_proveedor(db: Session, f: SugeridoFiltros) -> CarrosResponse:
                 func.sum(cant).label("cantidad"),
             ),
             f,
+        )
+        .join(
+            man,
+            (man.c.producto == Sugerido.producto) & (man.c.sucursal_id == Sugerido.sucursal_id),
+            isouter=True,
         )
         .where(Sugerido.proveedor.isnot(None))
         .group_by(Sugerido.proveedor, Sugerido.producto)

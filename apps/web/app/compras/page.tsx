@@ -52,7 +52,8 @@ export default function ComprasPage() {
           </h1>
           <p className="text-[13px] text-slate-500">
             El sugerido agrupado por proveedor, listo para ordenar. La cantidad es la
-            compra neta (descontando lo que se cubre con traslado desde el CD).
+            compra neta (descontando lo que se cubre con traslado desde el CD) más los
+            ajustes manuales vigentes.
           </p>
         </div>
         {data && data.carros.length > 0 && (

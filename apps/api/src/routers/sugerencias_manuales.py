@@ -23,6 +23,7 @@ settings = get_settings()
 def listar(
     producto: str | None = Query(None),
     sucursal_id: str | None = Query(None),
+    incluir_archivadas: bool = Query(False, description="Incluir las de ciclos anteriores"),
     db: Session = Depends(get_db),
 ):
     stmt = select(SugerenciaManual)
@@ -30,6 +31,8 @@ def listar(
         stmt = stmt.where(SugerenciaManual.producto == producto)
     if sucursal_id:
         stmt = stmt.where(SugerenciaManual.sucursal_id == sucursal_id)
+    if not incluir_archivadas:
+        stmt = stmt.where(SugerenciaManual.archivada.is_(False))
     stmt = stmt.order_by(SugerenciaManual.creado_en.desc())
     return list(db.scalars(stmt).all())
 

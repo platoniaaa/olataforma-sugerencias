@@ -185,6 +185,18 @@ def test_carros_compra(client):
     assert carro["lineas"][0]["producto"] == "20 BXO5W30AA"
 
 
+def test_carro_incluye_manual_vigente(client):
+    # Sin manual: la cantidad del carro es 6 (sugerido_compra_neto del seed).
+    assert client.get("/api/compras/carros").json()["carros"][0]["lineas"][0]["cantidad"] == 6
+    # Al agregar una sugerencia manual de +5, el carro pasa a 11.
+    client.post(
+        "/api/sugerencias-manuales",
+        json={"producto": "20 BXO5W30AA", "sucursal_id": "LINDEROS", "unidades": 5},
+    )
+    body = client.get("/api/compras/carros").json()
+    assert body["carros"][0]["lineas"][0]["cantidad"] == 11
+
+
 def test_carros_export_excel(client):
     r = client.post("/api/compras/export-excel", json={"filtros": {"solo_pedir": True}})
     assert r.status_code == 200

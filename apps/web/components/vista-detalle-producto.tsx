@@ -88,6 +88,7 @@ export function VistaDetalleProducto({
     (d.demanda_diaria ?? 0) * (5 + (d.lt_efectivo ?? 0)) + (d.stock_seguridad ?? 0);
   const pctStock = stockOptimo > 0 ? Math.min(100, ((d.stock_activo_suc ?? 0) / stockOptimo) * 100) : 0;
   const reemplazos = (d.reemplazos ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const manualTotal = manuales.reduce((s, m) => s + (m.unidades ?? 0), 0);
 
   return (
     <div className="space-y-5">
@@ -182,12 +183,18 @@ export function VistaDetalleProducto({
         <CardContent className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <p className="text-[13px] font-medium uppercase tracking-wide text-brand">
-              Sugerido Total
+              {manualTotal > 0 ? "Total a comprar" : "Sugerido Total"}
             </p>
             <p className="tabular text-4xl font-bold text-slate-900">
-              {formatoNumero(d.total_sugerido_suc)}{" "}
+              {formatoNumero((d.total_sugerido_suc ?? 0) + manualTotal)}{" "}
               <span className="text-lg font-normal text-slate-500">unidades</span>
             </p>
+            {manualTotal > 0 && (
+              <p className="mt-1 text-[13px] text-slate-500">
+                {formatoNumero(d.total_sugerido_suc)} del sistema
+                <span className="font-medium text-brand"> + {formatoNumero(manualTotal)} manual</span>
+              </p>
+            )}
           </div>
           <GraficoComposicion
             traslado={d.sugerido_traslado ?? 0}
