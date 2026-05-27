@@ -14,6 +14,7 @@ from .routers import (
     admin,
     auth,
     compras,
+    cron,
     health,
     post_venta,
     productos,
@@ -55,6 +56,7 @@ app.add_middleware(
 # Publicos:
 app.include_router(health.router)
 app.include_router(auth.router)
+app.include_router(cron.router)  # protegido por secreto propio (X-Cron-Secret)
 
 # Protegidos (requieren sesion):
 _protegido = [Depends(requiere_auth)]

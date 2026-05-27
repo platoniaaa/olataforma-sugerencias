@@ -1,0 +1,18 @@
+name: sugerencias-recurrentes
+
+# Cada día crea las sugerencias manuales de las reglas recurrentes que "tocan" ese día.
+# Llama a un endpoint protegido por el secreto CRON_SECRET (configúralo en los Secrets
+# del repo y como variable CRON_SECRET en Render).
+on:
+  schedule:
+    - cron: "0 11 * * *"   # 11:00 UTC ≈ 07-08:00 en Chile
+  workflow_dispatch: {}
+
+jobs:
+  procesar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Procesar recurrentes
+        run: |
+          curl -fsS -X POST https://sugerido-api.onrender.com/api/cron/procesar-recurrentes \
+            -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}"

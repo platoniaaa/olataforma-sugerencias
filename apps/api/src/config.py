@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     auth_secret: str = "cambiar-en-produccion-AUTH_SECRET"
     token_horas: int = 12  # duracion de la sesion
 
+    # Clave para el cron de sugerencias recurrentes (GitHub Actions -> endpoint publico).
+    # Si queda vacia, el endpoint de cron rechaza todo. Definir CRON_SECRET en Render y
+    # como secret del repo en GitHub.
+    cron_secret: str = ""
+
     # Origenes permitidos por CORS (separados por coma).
     cors_origins: str = "http://localhost:3000"
 

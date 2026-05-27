@@ -15,6 +15,8 @@ from .sugerencia_manual import (
     SugerenciaManualUpdate,
     SugerenciaManualMasiva,
     SugerenciaManualMasivaResultado,
+    RecurrenteCreate,
+    RecurrenteOut,
 )
 from .catalogo import ProductoOut, ProductoPage, SucursalOut
 from .compras import (
@@ -39,6 +41,8 @@ __all__ = [
     "SugerenciaManualUpdate",
     "SugerenciaManualMasiva",
     "SugerenciaManualMasivaResultado",
+    "RecurrenteCreate",
+    "RecurrenteOut",
     "ProductoOut",
     "ProductoPage",
     "SucursalOut",

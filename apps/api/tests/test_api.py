@@ -212,6 +212,69 @@ def test_carro_incluye_manual_vigente(client):
     assert body["carros"][0]["lineas"][0]["cantidad"] == 11
 
 
+def test_recurrente_crea_aplica_y_suma_al_carro(client):
+    r = client.post(
+        "/api/sugerencias-manuales/recurrentes",
+        json={"modo": "individual", "producto": "20 BXO5W30AA", "sucursal_id": "LINDEROS",
+              "unidades": 5, "cada_dias": 7},
+    )
+    assert r.status_code == 201
+    # Aparece en la lista de recurrentes activas.
+    assert len(client.get("/api/sugerencias-manuales/recurrentes").json()) == 1
+    # Aplicó de inmediato: el carro pasa de 6 a 11.
+    assert client.get("/api/compras/carros").json()["carros"][0]["lineas"][0]["cantidad"] == 11
+
+
+def test_recurrente_eliminar_archiva_su_aporte(client):
+    rid = client.post(
+        "/api/sugerencias-manuales/recurrentes",
+        json={"modo": "individual", "producto": "20 BXO5W30AA", "sucursal_id": "LINDEROS",
+              "unidades": 5, "cada_dias": 7},
+    ).json()["id"]
+    assert client.delete(f"/api/sugerencias-manuales/recurrentes/{rid}").status_code == 204
+    assert client.get("/api/sugerencias-manuales/recurrentes").json() == []
+    # Su aporte fue archivado: el carro vuelve a 6.
+    assert client.get("/api/compras/carros").json()["carros"][0]["lineas"][0]["cantidad"] == 6
+
+
+def test_recurrente_procesar_reemplaza_instancia(client, db_session):
+    from datetime import date
+
+    from src.models import SugerenciaManual, SugerenciaRecurrente
+    from src.schemas import RecurrenteCreate
+    from src.services import recurrentes_service
+    from sqlalchemy import select
+
+    rec = recurrentes_service.crear(
+        db_session,
+        RecurrenteCreate(modo="individual", producto="20 BXO5W30AA",
+                         sucursal_id="LINDEROS", unidades=5, cada_dias=7),
+    )
+    # Forzar que toque hoy y procesar.
+    db_session.get(SugerenciaRecurrente, rec.id).proxima_ejecucion = date.today()
+    db_session.commit()
+    recurrentes_service.procesar(db_session, date.today())
+    vigentes = db_session.scalars(
+        select(SugerenciaManual).where(
+            SugerenciaManual.recurrente_id == rec.id, SugerenciaManual.archivada.is_(False)
+        )
+    ).all()
+    assert len(vigentes) == 1  # mantiene una sola vigente (no acumula)
+
+
+def test_cron_requiere_secret(client):
+    assert client.post("/api/cron/procesar-recurrentes").status_code == 403
+
+
+def test_cron_con_secret_ok(client, monkeypatch):
+    from src.routers import cron
+
+    monkeypatch.setattr(cron.settings, "cron_secret", "s3cr3t")
+    r = client.post("/api/cron/procesar-recurrentes", headers={"X-Cron-Secret": "s3cr3t"})
+    assert r.status_code == 200
+    assert "sugerencias_creadas" in r.json()
+
+
 def test_carros_export_excel(client):
     r = client.post("/api/compras/export-excel", json={"filtros": {"solo_pedir": True}})
     assert r.status_code == 200

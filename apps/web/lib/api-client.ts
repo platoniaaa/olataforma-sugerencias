@@ -13,6 +13,8 @@ import type {
   SugeridoPage,
   PostVentaFiltros,
   PostVentaMeta,
+  Recurrente,
+  RecurrenteCreate,
   VentasResponse,
 } from "./types";
 
@@ -191,6 +193,28 @@ export const api = {
       throw new Error(err.detail ?? "No se pudo crear la carga masiva");
     }
     return res.json();
+  },
+
+  async crearRecurrente(payload: RecurrenteCreate): Promise<Recurrente> {
+    const res = await req("/api/sugerencias-manuales/recurrentes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail ?? "No se pudo crear la recurrencia");
+    }
+    return res.json();
+  },
+
+  async recurrentes(): Promise<Recurrente[]> {
+    return getJSON("/api/sugerencias-manuales/recurrentes");
+  },
+
+  async eliminarRecurrente(id: string): Promise<void> {
+    const res = await req(`/api/sugerencias-manuales/recurrentes/${id}`, { method: "DELETE" });
+    if (!res.ok && res.status !== 204) throw new Error("No se pudo eliminar la recurrencia");
   },
 
   async contar(filtros: SugeridoFiltros): Promise<number> {

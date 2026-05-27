@@ -35,3 +35,5 @@ class SugerenciaManual(Base):
     usado_en_compra: Mapped[bool] = mapped_column(Boolean, default=False)
     # Archivada = de un ciclo anterior; ya no suma a la compra (pero se conserva el historial).
     archivada: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    # Si vino de una regla recurrente, su id (para reemplazar/archivar la instancia anterior).
+    recurrente_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)

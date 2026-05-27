@@ -1,5 +1,6 @@
 """Schemas de las sugerencias manuales."""
-from datetime import datetime
+from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -45,3 +46,27 @@ class SugerenciaManualOut(BaseModel):
     aprobado: bool
     usado_en_compra: bool
     archivada: bool = False
+
+
+class RecurrenteCreate(BaseModel):
+    modo: Literal["individual", "grupo"]
+    producto: str | None = None
+    sucursal_id: str | None = None
+    filtros: SugeridoFiltros | None = None  # modo grupo
+    unidades: int = Field(gt=0)
+    motivo: str | None = None
+    cada_dias: int = Field(gt=0, le=365, description="Repetir cada N días")
+    fecha_fin: date | None = None
+
+
+class RecurrenteOut(BaseModel):
+    id: str
+    modo: str
+    resumen: str
+    unidades: int
+    motivo: str | None = None
+    cada_dias: int
+    proxima_ejecucion: date
+    fecha_fin: date | None = None
+    activa: bool
+    ultima_ejecucion: date | None = None

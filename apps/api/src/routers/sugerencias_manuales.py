@@ -7,13 +7,24 @@ from ..config import get_settings
 from ..db import get_db
 from ..models import SugerenciaManual
 from ..schemas import (
+    RecurrenteCreate,
+    RecurrenteOut,
     SugerenciaManualCreate,
     SugerenciaManualMasiva,
     SugerenciaManualMasivaResultado,
     SugerenciaManualOut,
     SugerenciaManualUpdate,
 )
-from ..services import sugerido_service
+from ..services import recurrentes_service, sugerido_service
+
+
+def _recurrente_out(rec) -> RecurrenteOut:
+    return RecurrenteOut(
+        id=rec.id, modo=rec.modo, resumen=recurrentes_service.resumen(rec),
+        unidades=rec.unidades, motivo=rec.motivo, cada_dias=rec.cada_dias,
+        proxima_ejecucion=rec.proxima_ejecucion, fecha_fin=rec.fecha_fin,
+        activa=rec.activa, ultima_ejecucion=rec.ultima_ejecucion,
+    )
 
 router = APIRouter(prefix="/api/sugerencias-manuales", tags=["sugerencias manuales"])
 settings = get_settings()
@@ -72,6 +83,28 @@ def crear_masiva(payload: SugerenciaManualMasiva, db: Session = Depends(get_db))
     db.add_all(nuevas)
     db.commit()
     return SugerenciaManualMasivaResultado(creadas=len(nuevas))
+
+
+@router.post("/recurrentes", response_model=RecurrenteOut, status_code=201)
+def crear_recurrente(payload: RecurrenteCreate, db: Session = Depends(get_db)):
+    """Crea una regla recurrente y la aplica de inmediato (primera instancia)."""
+    if payload.modo == "individual" and not (payload.producto and payload.sucursal_id):
+        raise HTTPException(status_code=400, detail="Falta producto o sucursal.")
+    rec = recurrentes_service.crear(db, payload)
+    return _recurrente_out(rec)
+
+
+@router.get("/recurrentes", response_model=list[RecurrenteOut])
+def listar_recurrentes(
+    incluir_inactivas: bool = Query(False), db: Session = Depends(get_db)
+):
+    return [_recurrente_out(r) for r in recurrentes_service.listar(db, incluir_inactivas)]
+
+
+@router.delete("/recurrentes/{id}", status_code=204)
+def eliminar_recurrente(id: str, db: Session = Depends(get_db)):
+    if not recurrentes_service.eliminar(db, id):
+        raise HTTPException(status_code=404, detail="Recurrencia no encontrada")
 
 
 @router.patch("/{id}", response_model=SugerenciaManualOut)

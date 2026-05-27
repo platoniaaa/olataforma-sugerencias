@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Boxes, Layers, Package, TriangleAlert } from "lucide-react";
+import { Boxes, Layers, Package, Repeat, TriangleAlert } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
@@ -64,6 +64,11 @@ export function ModalSugerenciaManual({
   const [conteo, setConteo] = useState<number | null>(null);
   const [contando, setContando] = useState(false);
 
+  // Recurrencia
+  const [recurrente, setRecurrente] = useState(false);
+  const [cadaDias, setCadaDias] = useState("7");
+  const [fechaFin, setFechaFin] = useState("");
+
   const nombresSucursales = useMemo(
     () => sucursales.map((s) => s.nombre ?? s.sucursal_id),
     [sucursales]
@@ -82,6 +87,9 @@ export function ModalSugerenciaManual({
       setGAbc([]);
       setSoloPedir(true);
       setConteo(null);
+      setRecurrente(false);
+      setCadaDias("7");
+      setFechaFin("");
     }
   }, [open, productoInicial, sucursalInicial]);
 
@@ -138,14 +146,47 @@ export function ModalSugerenciaManual({
       setError("Ingresa una cantidad de unidades (entero positivo).");
       return;
     }
+    const dias = parseInt(cadaDias, 10);
+    if (recurrente && (!dias || dias <= 0)) {
+      setError("Para repetir, indica cada cuántos días (entero positivo).");
+      return;
+    }
     setGuardando(true);
     try {
-      if (modo === "individual") {
-        if (!producto || !sucursal) {
-          setError("Completa producto y sucursal.");
-          setGuardando(false);
-          return;
-        }
+      if (modo === "individual" && (!producto || !sucursal)) {
+        setError("Completa producto y sucursal.");
+        setGuardando(false);
+        return;
+      }
+      if (modo !== "individual" && (!conteo || conteo === 0)) {
+        setError("Ningun producto cumple ese criterio. Ajusta el grupo.");
+        setGuardando(false);
+        return;
+      }
+
+      if (recurrente) {
+        // Regla recurrente (se aplica de inmediato y se repite cada N días).
+        await api.crearRecurrente(
+          modo === "individual"
+            ? {
+                modo: "individual",
+                producto,
+                sucursal_id: sucursal,
+                unidades: u,
+                motivo: motivo || undefined,
+                cada_dias: dias,
+                fecha_fin: fechaFin || undefined,
+              }
+            : {
+                modo: "grupo",
+                filtros: filtrosModo,
+                unidades: u,
+                motivo: motivo || undefined,
+                cada_dias: dias,
+                fecha_fin: fechaFin || undefined,
+              }
+        );
+      } else if (modo === "individual") {
         await api.crearSugerenciaManual({
           producto,
           sucursal_id: sucursal,
@@ -153,11 +194,6 @@ export function ModalSugerenciaManual({
           motivo: motivo || undefined,
         });
       } else {
-        if (!conteo || conteo === 0) {
-          setError("Ningun producto cumple ese criterio. Ajusta el grupo.");
-          setGuardando(false);
-          return;
-        }
         await api.crearSugerenciaMasiva(filtrosModo, u, motivo || undefined);
       }
       onGuardado();
@@ -369,6 +405,49 @@ export function ModalSugerenciaManual({
             onChange={(e) => setMotivo(e.target.value)}
             placeholder="Ej: promo, quiebre puntual, pedido especial de la jefa…"
           />
+        </div>
+
+        {/* Recurrencia */}
+        <div className="rounded-lg border border-slate-200 p-3">
+          <label className="flex cursor-pointer select-none items-center gap-2 text-[13px] font-medium text-slate-800">
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-brand"
+              checked={recurrente}
+              onChange={(e) => setRecurrente(e.target.checked)}
+            />
+            <Repeat size={15} className="text-brand" />
+            Repetir periódicamente
+          </label>
+          {recurrente && (
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="dias">Cada cuántos días</Label>
+                <Input
+                  id="dias"
+                  type="number"
+                  min={1}
+                  value={cadaDias}
+                  onChange={(e) => setCadaDias(e.target.value)}
+                  placeholder="7"
+                />
+              </div>
+              <div>
+                <Label htmlFor="fin">Hasta (opcional)</Label>
+                <Input
+                  id="fin"
+                  type="date"
+                  value={fechaFin}
+                  onChange={(e) => setFechaFin(e.target.value)}
+                />
+              </div>
+              <p className="col-span-2 text-[12px] text-slate-500">
+                Se aplica ahora y se vuelve a aplicar cada {parseInt(cadaDias, 10) || "—"} días
+                {fechaFin ? ` hasta el ${fechaFin}` : " hasta que la elimines"}. Cada repetición
+                reemplaza la anterior (no se acumulan).
+              </p>
+            </div>
+          )}
         </div>
 
         {error && (

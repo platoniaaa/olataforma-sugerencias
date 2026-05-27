@@ -139,6 +139,30 @@ export interface CarrosResponse {
   total_unidades: number;
 }
 
+export interface RecurrenteCreate {
+  modo: "individual" | "grupo";
+  producto?: string | null;
+  sucursal_id?: string | null;
+  filtros?: SugeridoFiltros | null;
+  unidades: number;
+  motivo?: string | null;
+  cada_dias: number;
+  fecha_fin?: string | null; // YYYY-MM-DD
+}
+
+export interface Recurrente {
+  id: string;
+  modo: string;
+  resumen: string;
+  unidades: number;
+  motivo: string | null;
+  cada_dias: number;
+  proxima_ejecucion: string;
+  fecha_fin: string | null;
+  activa: boolean;
+  ultima_ejecucion: string | null;
+}
+
 export interface PostVentaMeta {
   columnas: string[];
   filas: number;
