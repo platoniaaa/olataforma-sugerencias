@@ -12,8 +12,14 @@ from ..schemas import SugeridoFiltros
 # Columnas por las que se permite ordenar (whitelist para evitar inyeccion).
 SORTABLE = {c.name for c in Sugerido.__table__.columns}
 
+# Productos internos del taller (no se compran a proveedor): se ocultan siempre.
+PREFIJOS_EXCLUIDOS = ("D&P",)
+
 
 def _apply_filters(stmt, f: SugeridoFiltros):
+    # Excluir productos internos (D&P REPTO-TALLER, etc.) de todo el sugerido.
+    for pref in PREFIJOS_EXCLUIDOS:
+        stmt = stmt.where(~Sugerido.producto.ilike(f"{pref}%"))
     if f.q:
         like = f"%{f.q}%"
         stmt = stmt.where(or_(Sugerido.producto.ilike(like), Sugerido.descripcion.ilike(like)))

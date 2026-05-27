@@ -44,6 +44,21 @@ def test_endpoint_protegido_sin_token():
         assert c.get("/api/sucursales").status_code == 401
 
 
+def test_excluye_productos_dp(client, db_session):
+    from src.models import Sugerido
+
+    db_session.add(Sugerido(
+        tenant_id="curifor", producto="D&P REPTO-TALLER(R)", sucursal_id="LINDEROS",
+        nombre_sucursal="Linderos", pedir="Si", total_sugerido_suc=5,
+    ))
+    db_session.commit()
+    body = client.get("/api/sugerido").json()
+    productos = [i["producto"] for i in body["items"]]
+    assert "D&P REPTO-TALLER(R)" not in productos
+    assert "20 BXO5W30AA" in productos
+    assert body["total"] == 1
+
+
 def test_listar_sugerido(client):
     r = client.get("/api/sugerido")
     assert r.status_code == 200
