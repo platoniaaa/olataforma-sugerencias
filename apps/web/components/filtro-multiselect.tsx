@@ -185,6 +185,12 @@ export const FiltroMultiSelect = forwardRef<unknown, IFilterParams>(
       setSeleccion(new Set(valuesRef.current));
     };
 
+    // Cierra el popup del filtro (asi el usuario ve la tabla filtrada al apretar ACEPTAR).
+    const cerrarPopup = () => {
+      const a = api as unknown as { hidePopupMenu?: () => void };
+      a.hidePopupMenu?.();
+    };
+
     const aplicar = () => {
       const total = valuesRef.current.length;
       const allSelected =
@@ -199,6 +205,7 @@ export const FiltroMultiSelect = forwardRef<unknown, IFilterParams>(
         selRef.current = new Set(seleccion);
       }
       filterChangedCallback();
+      cerrarPopup();
     };
 
     const limpiar = () => {
@@ -208,6 +215,7 @@ export const FiltroMultiSelect = forwardRef<unknown, IFilterParams>(
       setBusqueda("");
       setListaPegada(null);
       filterChangedCallback();
+      cerrarPopup();
     };
 
     const titulo = colDef?.headerName ?? "Filtrar";
