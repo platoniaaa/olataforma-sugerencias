@@ -116,16 +116,21 @@ def test_ventas_12m(client):
     assert r.status_code == 200
     body = r.json()
     assert body["producto"] == "20 BXO5W30AA"
-    assert len(body["meses"]) == 3
-    assert body["meses"][0]["mes"] == "202503"  # orden ascendente
-    assert body["total"] == 35
+    # Dos series: general (todas las sucursales) y la sucursal especifica.
+    assert len(body["meses_general"]) == 3
+    assert len(body["meses_sucursal"]) == 3
+    assert body["meses_general"][0]["mes"] == "202503"
+    # En el seed solo hay datos para LINDEROS, asi que ambas series suman lo mismo.
+    assert body["total_general"] == 35
+    assert body["total_sucursal"] == 35
 
 
 def test_ventas_12m_sin_datos(client):
-    # Producto sin ventas: responde 200 con lista vacia (no 404).
     r = client.get("/api/sugerido/NOEXISTE/LINDEROS/ventas")
     assert r.status_code == 200
-    assert r.json()["meses"] == []
+    body = r.json()
+    assert body["meses_general"] == []
+    assert body["meses_sucursal"] == []
 
 
 def test_export_excel(client):

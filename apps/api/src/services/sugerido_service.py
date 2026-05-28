@@ -145,11 +145,11 @@ def detalle(db: Session, producto: str, sucursal_id: str) -> Sugerido | None:
 
 
 def ventas_12m(db: Session, producto: str, sucursal_id: str | None = None) -> dict:
-    """Histórico de venta de un producto (últimos 12 meses) agregado por mes.
+    """Histórico de venta de un producto (últimos 12 meses).
 
-    Si `sucursal_id` se entrega, filtra a esa sucursal; si no hay venta en esa
-    sucursal, cae al total del producto en todas las sucursales (útil cuando el
-    id de sucursal del sugerido no coincide con el de ventas).
+    Devuelve DOS series:
+    - `meses_general`: suma del producto en TODAS las sucursales (la venta total).
+    - `meses_sucursal`: solo la sucursal del sugerido (vacío si no se entrega).
     """
 
     def _consulta(suc: str | None) -> list[tuple[str, float]]:
@@ -162,15 +162,14 @@ def ventas_12m(db: Session, producto: str, sucursal_id: str | None = None) -> di
         stmt = stmt.group_by(VentaMensual.mes).order_by(VentaMensual.mes.asc())
         return [(m, float(c)) for m, c in db.execute(stmt).all()]
 
-    filas = _consulta(sucursal_id) if sucursal_id else _consulta(None)
-    if sucursal_id and not filas:
-        filas = _consulta(None)
+    general = _consulta(None)[-12:]
+    suc = _consulta(sucursal_id)[-12:] if sucursal_id else []
 
-    # Quedarse con los últimos 12 meses (orden ascendente).
-    filas = filas[-12:]
     return {
         "producto": producto,
         "sucursal_id": sucursal_id or "",
-        "meses": [{"mes": m, "cantidad": c} for m, c in filas],
-        "total": sum(c for _, c in filas),
+        "meses_general": [{"mes": m, "cantidad": c} for m, c in general],
+        "meses_sucursal": [{"mes": m, "cantidad": c} for m, c in suc],
+        "total_general": sum(c for _, c in general),
+        "total_sucursal": sum(c for _, c in suc),
     }

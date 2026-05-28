@@ -80,12 +80,15 @@ class VentaMes(BaseModel):
 
 
 class VentasResponse(BaseModel):
-    """Histórico de venta de un producto en una sucursal (últimos 12 meses)."""
+    """Histórico de venta de un producto (últimos 12 meses), dos series:
+    total del producto (todas las sucursales) y la sucursal específica."""
 
     producto: str
     sucursal_id: str
-    meses: list[VentaMes] = Field(default_factory=list)
-    total: float = 0
+    meses_general: list[VentaMes] = Field(default_factory=list)
+    meses_sucursal: list[VentaMes] = Field(default_factory=list)
+    total_general: float = 0
+    total_sucursal: float = 0
 
 
 class SugeridoFiltros(BaseModel):

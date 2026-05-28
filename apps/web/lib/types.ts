@@ -70,8 +70,10 @@ export interface VentaMes {
 export interface VentasResponse {
   producto: string;
   sucursal_id: string;
-  meses: VentaMes[];
-  total: number;
+  meses_general: VentaMes[];
+  meses_sucursal: VentaMes[];
+  total_general: number;
+  total_sucursal: number;
 }
 
 export interface SugeridoFiltros {

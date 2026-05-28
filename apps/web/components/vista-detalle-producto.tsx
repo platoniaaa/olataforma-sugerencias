@@ -204,7 +204,11 @@ export function VistaDetalleProducto({
       </Card>
 
       {/* Tendencia de venta (últimos 12 meses) */}
-      <GraficoVentas producto={d.producto} sucursalId={d.sucursal_id} />
+      <GraficoVentas
+        producto={d.producto}
+        sucursalId={d.sucursal_id}
+        sucursalNombre={d.nombre_sucursal}
+      />
 
       {reemplazos.length > 0 && (
         <Card>
