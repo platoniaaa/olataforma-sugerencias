@@ -12,8 +12,9 @@ from ..schemas import SugeridoFiltros
 # Columnas por las que se permite ordenar (whitelist para evitar inyeccion).
 SORTABLE = {c.name for c in Sugerido.__table__.columns}
 
-# Productos internos del taller (no se compran a proveedor): se ocultan siempre.
-PREFIJOS_EXCLUIDOS = ("D&P",)
+# Productos internos (taller, insumos, incentivos, deducciones) que no se compran a
+# proveedor: se ocultan siempre del sugerido. Si aparece uno nuevo, agregar su prefijo aquí.
+PREFIJOS_EXCLUIDOS = ("D&P", "MEC INSUMOS", "INCENTIVOS", "APLICA-DED")
 
 
 def _apply_filters(stmt, f: SugeridoFiltros):
