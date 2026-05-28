@@ -214,7 +214,8 @@ export const FiltroMultiSelect = forwardRef<unknown, IFilterParams>(
 
     return (
       <div
-        className="w-80 bg-white p-2 text-sm text-slate-800"
+        className="flex w-80 flex-col bg-white p-2 text-sm text-slate-800"
+        style={{ maxHeight: "min(70vh, 480px)" }}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <input
@@ -254,7 +255,7 @@ export const FiltroMultiSelect = forwardRef<unknown, IFilterParams>(
           (Seleccionar todo)
         </label>
 
-        <div className="max-h-64 overflow-y-auto py-1">
+        <div className="min-h-0 flex-1 overflow-y-auto py-1">
           {visibleCap.length === 0 && (
             <p className="px-2 py-4 text-center text-[12px] text-slate-400">
               Sin coincidencias.

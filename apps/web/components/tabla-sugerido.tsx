@@ -93,6 +93,13 @@ export function TablaSugerido({ rows, columnasVisibles, onRowClick }: Props) {
     e.api.sizeColumnsToFit();
   };
 
+  // El popup del menu/filtro se monta en body para poder voltearse hacia arriba
+  // cuando no hay espacio abajo (asi el boton ACEPTAR no queda cortado).
+  const popupParent = useMemo<HTMLElement | undefined>(
+    () => (typeof document !== "undefined" ? document.body : undefined),
+    []
+  );
+
   return (
     <div className="ag-theme-quartz" style={{ width: "100%", height: "calc(100vh - 290px)", minHeight: 380 }}>
       <AgGridReact<SugeridoRow>
@@ -100,6 +107,7 @@ export function TablaSugerido({ rows, columnasVisibles, onRowClick }: Props) {
         rowData={rows}
         columnDefs={columnDefs}
         defaultColDef={defaultColDef}
+        popupParent={popupParent}
         onGridReady={onGridReady}
         onRowClicked={(e: RowClickedEvent<SugeridoRow>) => e.data && onRowClick(e.data)}
         rowClass="cursor-pointer"
