@@ -47,3 +47,13 @@ body {
   flex-direction: row;
   justify-content: flex-end;
 }
+
+/* Cuando el popup del filtro se monta en document.body (popupParent), su z-index
+   por defecto queda DEBAJO del header sticky (z-30), lo que tapa la parte superior
+   (el buscador). Lo subimos por encima del header. */
+.ag-popup,
+.ag-popup-child,
+body > .ag-popup,
+body > .ag-popup-child {
+  z-index: 60 !important;
+}
