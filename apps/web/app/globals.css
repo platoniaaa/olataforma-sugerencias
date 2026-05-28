@@ -36,3 +36,14 @@ body {
   --ag-border-color: #e5e7eb;
   --ag-header-column-resize-handle-color: #cbd5e1;
 }
+
+/* En columnas numericas (right-aligned), AG Grid invierte el header y deja el icono
+   de filtro/menu a la izquierda. Forzamos que el icono quede SIEMPRE a la derecha,
+   manteniendo el texto del header alineado a la derecha igual que las celdas. */
+.ag-theme-quartz .ag-header-cell.ag-right-aligned-header .ag-cell-label-container {
+  flex-direction: row;
+}
+.ag-theme-quartz .ag-header-cell.ag-right-aligned-header .ag-header-cell-label {
+  flex-direction: row;
+  justify-content: flex-end;
+}
