@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useGridFilter } from "ag-grid-react";
 import type {
   GridApi,
@@ -44,12 +38,24 @@ function toStr(v: unknown): string {
 export function FiltroMultiSelect(props: CustomFilterProps) {
   const { model, onModelChange, getValue, api, colDef } = props;
 
+  // Valores únicos de la columna — se calculan SINCRÓNICAMENTE al montar el
+  // componente (lazy initializer de useState). Antes lo hacía en useEffect y, si
+  // el usuario pegaba muy rápido, allValues todavía estaba vacío.
+  const [allValues] = useState<string[]>(() => {
+    const vals = new Set<string>();
+    api.forEachNode((node: IRowNode) => {
+      vals.add(toStr(getValue(node)));
+    });
+    return Array.from(vals).sort((a, b) =>
+      a.localeCompare(b, "es", { numeric: true })
+    );
+  });
+
   // Estado UI local (lo que el usuario está editando, NO el modelo aplicado).
   const [seleccion, setSeleccion] = useState<Set<string>>(
-    () => new Set(model?.values ?? [])
+    () => new Set(model?.values ?? allValues)
   );
   const [busqueda, setBusqueda] = useState("");
-  const [allValues, setAllValues] = useState<string[]>([]);
   const [listaPegada, setListaPegada] = useState<string[] | null>(null);
   const [pegadoInfo, setPegadoInfo] = useState<{
     total: number;
@@ -57,7 +63,6 @@ export function FiltroMultiSelect(props: CustomFilterProps) {
     expandidos: number;
     sinMatch: string[];
   } | null>(null);
-  const inicializadoRef = useRef(false);
 
   // doesFilterPass lee `model` (lo gestiona AG Grid). useGridFilter registra
   // el callback; AG Grid lo re-evalúa cuando cambia `model`.
@@ -71,22 +76,6 @@ export function FiltroMultiSelect(props: CustomFilterProps) {
   );
 
   useGridFilter({ doesFilterPass });
-
-  // Calcular valores distintos al montar.
-  useEffect(() => {
-    if (inicializadoRef.current) return;
-    inicializadoRef.current = true;
-    const vals = new Set<string>();
-    api.forEachNode((node: IRowNode) => {
-      vals.add(toStr(getValue(node)));
-    });
-    const arr = Array.from(vals).sort((a, b) =>
-      a.localeCompare(b, "es", { numeric: true })
-    );
-    setAllValues(arr);
-    // Si no hay filtro aplicado, todos seleccionados por defecto.
-    if (!model) setSeleccion(new Set(arr));
-  }, [api, getValue, model]);
 
   // ----- Lista visible -----
   const visible = useMemo(() => {
