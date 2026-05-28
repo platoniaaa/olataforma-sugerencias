@@ -145,14 +145,6 @@ export function FiltroMultiSelect(props: CustomFilterProps) {
     if (valoresFrescos.length > allValues.length) {
       setAllValues(valoresFrescos);
     }
-    // Marcador de debug que el test puede leer.
-    if (typeof window !== "undefined") {
-      (window as unknown as { __filtroDebug?: object }).__filtroDebug = {
-        allValuesLength: allValues.length,
-        valoresFrescosLength: valoresFrescos.length,
-        primeros5: valoresFrescos.slice(0, 5),
-      };
-    }
 
     // Indice case-insensitive para buscar rapido
     const allLower = valoresFrescos.map((v) => v.toLowerCase());
@@ -188,9 +180,11 @@ export function FiltroMultiSelect(props: CustomFilterProps) {
 
     if (matched.size === 0) {
       // Nada calzo. Igualmente activamos el modo "lista pegada" con los literales
-      // para que el usuario vea que no hubo match.
+      // y los dejamos como seleccion: al aplicar la tabla quedara vacia (ningun
+      // valor real coincide con esos literales), asi el usuario ve que sus codigos
+      // no estan en la vista actual.
       setListaPegada(vals);
-      setSeleccion(new Set());
+      setSeleccion(new Set(vals));
       setPegadoInfo({ total: vals.length, exactos: 0, expandidos: 0, sinMatch: vals });
       setBusqueda("");
       return;

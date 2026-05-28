@@ -1,18 +1,17 @@
-/** Verifica que el filtro acepta codigos pegados truncados (sin el ultimo caracter). */
+/** Verifica el filtro pegando codigos TRUNCADOS de productos que SI estan en la vista.
+ *  Estrategia: lee un producto real de la tabla, le saca el ultimo caracter, y lo pega.
+ *  La expansion por prefijo deberia volverlo a encontrar.
+ */
 import { chromium } from "@playwright/test";
 
 const URL = process.env.VERCEL_URL ?? "https://olataforma-sugerencias-web.vercel.app";
 const EMAIL = process.env.LOGIN_EMAIL ?? "fmora@curifor.com";
 const PASS = process.env.LOGIN_PASSWORD ?? "123456";
 
-// Codigos truncados (como los muestra el BI con la columna estrecha)
-const PEGADO = "19 HL3Z8005\n25 MB3Z2001\n19 ER3Z6584";
-
 async function main() {
   const browser = await chromium.launch({ headless: true });
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
-  page.on("pageerror", (e) => console.log("[page error]", e.message));
 
   try {
     console.log("1. Login");
@@ -27,19 +26,32 @@ async function main() {
     await page.waitForSelector(".ag-row", { timeout: 90000 });
     await page.waitForTimeout(1500);
 
+    // Tomar 3 productos DISTINTOS reales de la tabla
+    const todos = await page.$$eval(
+      ".ag-row .ag-cell[col-id='producto']",
+      (cells) => cells.map((c) => c.textContent?.trim() ?? "")
+    );
+    const productos = [];
+    const seen = new Set();
+    for (const p of todos) {
+      if (p && !seen.has(p) && p.length > 2) {
+        seen.add(p); productos.push(p);
+      }
+      if (productos.length === 3) break;
+    }
+    console.log("   Productos reales en la vista:", productos);
+
+    // Truncar el ultimo caracter de cada uno (simulando que el BI los muestra cortados)
+    const truncados = productos.map((p) => p.slice(0, -1));
+    const PEGADO = truncados.join("\n");
+    console.log("   Truncados a pegar:", truncados);
+
     console.log("2. Abrir filtro de Producto");
     const headerProducto = page.locator(".ag-header-cell[col-id='producto']").first();
     await headerProducto.locator(".ag-header-icon").first().click();
     await page.waitForSelector('input[placeholder*="Buscar en Producto"]', { timeout: 10000 });
 
-    // Cuantos checkboxes hay en el popup ANTES de pegar (debe ser ~500 si allValues OK)
-    const checkboxesAntes = await page.$$eval(
-      "label .truncate",
-      (els) => els.length
-    );
-    console.log("   Checkboxes en popup ANTES de pegar:", checkboxesAntes);
-
-    console.log("3. Pegar codigos TRUNCADOS:", JSON.stringify(PEGADO));
+    console.log("3. Pegar codigos truncados");
     await page.evaluate(async (text) => {
       const input = document.querySelector('input[placeholder*="Buscar en Producto"]');
       input.focus();
@@ -50,20 +62,15 @@ async function main() {
 
     await page.waitForSelector("text=Lista pegada", { timeout: 5000 });
 
-    // Leer el marcador de debug
-    const debug = await page.evaluate(() => window.__filtroDebug);
-    console.log("   Debug:", JSON.stringify(debug));
-
-    // Leer el feedback de cuantos exactos / expandidos / sin match
-    const feedback = await page.locator("text=/pegado/").nth(1).textContent().catch(() => "");
+    // Leer el feedback
+    const feedback = await page.locator("p:has-text('pegado')").first().textContent().catch(() => "");
     console.log("   Feedback:", feedback);
 
-    // Leer los valores que quedaron en la lista pegada (los matches reales)
     const matchedValues = await page.$$eval(
-      ".ag-popup label .truncate, body label.flex .truncate",
+      ".ag-popup label .truncate, body label .truncate",
       (els) => els.map((e) => e.textContent?.trim() ?? "").filter(Boolean)
     );
-    console.log("   Valores matched:", matchedValues);
+    console.log("   Valores en la lista pegada:", matchedValues);
 
     console.log("4. ACEPTAR");
     await page.click('button:has-text("ACEPTAR")');
@@ -79,14 +86,16 @@ async function main() {
     const unicos = [...new Set(productosFiltrados)];
     console.log("5. Productos UNICOS visibles tras filtrar:", unicos);
 
-    // Esperamos que todos empiecen con uno de los 3 prefijos pegados
-    const prefijos = ["19 HL3Z8005", "25 MB3Z2001", "19 ER3Z6584"];
-    const indeseados = unicos.filter((p) => !prefijos.some((pr) => p.startsWith(pr)));
-    console.log("\n=== RESULTADO ===");
-    console.log("Unicos con prefijo esperado:", unicos.length - indeseados.length, "/", unicos.length);
-    console.log("Indeseados:", indeseados);
+    const setProductos = new Set(productos);
+    const indeseados = unicos.filter((p) => !setProductos.has(p));
+    const faltantes = productos.filter((p) => !unicos.includes(p));
 
-    if (!popupVisible && indeseados.length === 0 && unicos.length > 0) {
+    console.log("\n=== RESULTADO ===");
+    console.log("Indeseados:", indeseados);
+    console.log("Faltantes:", faltantes);
+    console.log("Popup cerrado:", !popupVisible);
+
+    if (indeseados.length === 0 && faltantes.length === 0 && !popupVisible) {
       console.log("\nFILTRO PREFIJO OK");
       process.exit(0);
     } else {
