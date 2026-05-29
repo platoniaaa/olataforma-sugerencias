@@ -68,9 +68,13 @@ export function FiltroMultiSelect(props: CustomFilterProps) {
 
   // doesFilterPass lee `model` (lo gestiona AG Grid). useGridFilter registra
   // el callback; AG Grid lo re-evalúa cuando cambia `model`.
+  // - model null  -> no hay filtro aplicado (pasan todas las filas).
+  // - model.values vacio  -> el usuario aplico un filtro vacio (tabla vacia).
+  // - model.values con items  -> solo las filas cuyo valor esta en la lista.
   const doesFilterPass = useCallback(
     (params: IDoesFilterPassParams) => {
-      if (!model || !model.values || model.values.length === 0) return true;
+      if (!model) return true;
+      if (!model.values || model.values.length === 0) return false;
       const v = toStr(getValue(params.node));
       return model.values.includes(v);
     },
@@ -234,14 +238,24 @@ export function FiltroMultiSelect(props: CustomFilterProps) {
 
   // ----- Aplicar / limpiar (cambian el modelo via onModelChange) -----
   const aplicar = () => {
+    // Cuando hay BUSQUEDA activa (no lista pegada), el usuario espera filtrar SOLO
+    // a los valores visibles marcados (comportamiento Excel/D365: si escribiste
+    // "70 2723982" y queda marcado, ACEPTAR filtra a ese aunque el resto del
+    // universo siga marcado por debajo).
+    const usandoBusqueda = !listaPegada && busqueda.trim() !== "";
+    const finalValues = usandoBusqueda
+      ? new Set(visibleCap.filter((v) => seleccion.has(v)))
+      : seleccion;
+
     const allSelected =
       allValues.length > 0 &&
-      seleccion.size >= allValues.length &&
-      allValues.every((v) => seleccion.has(v));
-    if (allSelected || seleccion.size === 0) {
+      finalValues.size >= allValues.length &&
+      allValues.every((v) => finalValues.has(v));
+
+    if (allSelected) {
       onModelChange(null); // sin filtro
     } else {
-      onModelChange({ values: Array.from(seleccion) });
+      onModelChange({ values: Array.from(finalValues) });
     }
     cerrarPopup();
   };
