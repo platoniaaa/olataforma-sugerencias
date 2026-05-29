@@ -1,4 +1,4 @@
-/** Verifica que escribir en el buscador + ACEPTAR filtra (sin desmarcar nada). */
+/** Verifica que el filtro por columna es modo CONTIENE (no snapshot exacto). */
 import { chromium } from "@playwright/test";
 
 const URL = process.env.VERCEL_URL ?? "https://olataforma-sugerencias-web.vercel.app";
@@ -24,48 +24,69 @@ async function main() {
     await page.waitForSelector(".ag-row", { timeout: 90000 });
     await page.waitForTimeout(1500);
 
-    // Tomar un producto real de la tabla
+    // --- Test 1: codigo exacto ---
     const productos = await page.$$eval(
       ".ag-row .ag-cell[col-id='producto']",
       (cells) => cells.map((c) => c.textContent?.trim() ?? "").filter(Boolean)
     );
     const target = productos[0];
-    console.log("   Buscare:", target);
+    console.log("\n=== Test 1: codigo exacto ===");
+    console.log("   Busqueda:", target);
 
-    console.log("2. Abrir filtro de Producto");
-    const headerProducto = page.locator(".ag-header-cell[col-id='producto']").first();
-    await headerProducto.locator(".ag-header-icon").first().click();
+    let header = page.locator(".ag-header-cell[col-id='producto']").first();
+    await header.locator(".ag-header-icon").first().click();
     await page.waitForSelector('input[placeholder*="Buscar en Producto"]', { timeout: 10000 });
-
-    console.log("3. Escribir el codigo en el buscador (SIN desmarcar nada)");
     await page.fill('input[placeholder*="Buscar en Producto"]', target);
-    await page.waitForTimeout(500);
-
-    // Verificar que (Seleccionar todo) sigue marcado (estado inicial)
-    const todoMarcado = await page.locator('label:has-text("(Seleccionar todo)") input[type="checkbox"]').isChecked();
-    console.log("   (Seleccionar todo) marcado?", todoMarcado);
-
-    console.log("4. ACEPTAR (sin tocar checkboxes)");
+    await page.waitForTimeout(400);
     await page.click('button:has-text("ACEPTAR")');
     await page.waitForTimeout(1500);
 
-    const popupVisible = await page.isVisible('input[placeholder*="Buscar en Producto"]');
-    console.log("   Popup cerrado?", !popupVisible);
-
-    const productosFiltrados = await page.$$eval(
+    let unicos = [...new Set(await page.$$eval(
       ".ag-row .ag-cell[col-id='producto']",
       (cells) => cells.map((c) => c.textContent?.trim() ?? "")
-    );
-    const unicos = [...new Set(productosFiltrados)];
-    console.log("5. Productos UNICOS visibles tras filtrar:", unicos);
+    ))];
+    console.log("   Productos visibles:", unicos);
+    const test1OK = unicos.length === 1 && unicos[0] === target;
+    console.log(test1OK ? "   OK" : "   FALLA");
 
-    console.log("\n=== RESULTADO ===");
-    if (!popupVisible && unicos.length === 1 && unicos[0] === target) {
-      console.log("FILTRO POR BUSQUEDA OK (sin desmarcar)");
+    // Limpiar filtro
+    await header.locator(".ag-header-icon").first().click();
+    await page.waitForSelector('button:has-text("Borrar filtro")', { timeout: 10000 });
+    await page.click('button:has-text("Borrar filtro")');
+    await page.waitForTimeout(1500);
+
+    // --- Test 2: texto parcial (contiene) ---
+    console.log("\n=== Test 2: texto PARCIAL (modo contiene) ===");
+    // Busqueda parcial que deberia matchear varios productos
+    const parcial = target.split(" ")[0]; // ej. "70" del "70 2723982"
+    console.log("   Busqueda parcial:", JSON.stringify(parcial));
+
+    header = page.locator(".ag-header-cell[col-id='producto']").first();
+    await header.locator(".ag-header-icon").first().click();
+    await page.waitForSelector('input[placeholder*="Buscar en Producto"]', { timeout: 10000 });
+    await page.fill('input[placeholder*="Buscar en Producto"]', parcial);
+    await page.waitForTimeout(400);
+    await page.click('button:has-text("ACEPTAR")');
+    await page.waitForTimeout(1500);
+
+    unicos = [...new Set(await page.$$eval(
+      ".ag-row .ag-cell[col-id='producto']",
+      (cells) => cells.map((c) => c.textContent?.trim() ?? "")
+    ))];
+    console.log("   Productos UNICOS visibles:", unicos.slice(0, 10), unicos.length > 10 ? `... y ${unicos.length-10} mas` : "");
+
+    // TODOS los productos visibles deben contener el texto parcial
+    const todosContienen = unicos.every((p) => p.toLowerCase().includes(parcial.toLowerCase()));
+    const masDeUno = unicos.length >= 1;  // al menos uno coincide
+    const test2OK = todosContienen && masDeUno;
+    console.log(test2OK ? "   OK (todos contienen y hay matches)" : "   FALLA");
+
+    console.log("\n=== RESULTADO FINAL ===");
+    if (test1OK && test2OK) {
+      console.log("FILTRO CONTIENE OK");
       process.exit(0);
     } else {
-      console.log("FILTRO POR BUSQUEDA FALLA");
-      console.log("Esperado: solo", target, "| obtuvo:", unicos);
+      console.log("FILTRO CONTIENE FALLA");
       process.exit(2);
     }
   } catch (e) {

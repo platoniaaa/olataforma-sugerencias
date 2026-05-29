@@ -17,7 +17,8 @@ import type {
  */
 
 interface FilterModel {
-  values: string[];
+  values?: string[];
+  contains?: string;
 }
 
 interface CustomFilterProps {
@@ -57,7 +58,8 @@ export function FiltroMultiSelect(props: CustomFilterProps) {
   const [seleccion, setSeleccion] = useState<Set<string>>(
     () => new Set(model?.values ?? allValues)
   );
-  const [busqueda, setBusqueda] = useState("");
+  // Si el modelo guardado es "contiene X", precargamos esa busqueda al abrir.
+  const [busqueda, setBusqueda] = useState<string>(model?.contains ?? "");
   const [listaPegada, setListaPegada] = useState<string[] | null>(null);
   const [pegadoInfo, setPegadoInfo] = useState<{
     total: number;
@@ -68,14 +70,21 @@ export function FiltroMultiSelect(props: CustomFilterProps) {
 
   // doesFilterPass lee `model` (lo gestiona AG Grid). useGridFilter registra
   // el callback; AG Grid lo re-evalúa cuando cambia `model`.
-  // - model null  -> no hay filtro aplicado (pasan todas las filas).
-  // - model.values vacio  -> el usuario aplico un filtro vacio (tabla vacia).
-  // - model.values con items  -> solo las filas cuyo valor esta en la lista.
+  // Tres modos:
+  // - model null            -> sin filtro (pasan todas las filas).
+  // - model.contains "X"    -> incluye "X" (case-insensitive). Funciona como el
+  //                            buscador grande de arriba: matchea cualquier valor
+  //                            que contenga ese texto, sin tope de 500.
+  // - model.values [...]    -> solo las filas cuyo valor esta en la lista exacta.
+  //                            Si la lista esta vacia, la tabla queda vacia.
   const doesFilterPass = useCallback(
     (params: IDoesFilterPassParams) => {
       if (!model) return true;
-      if (!model.values || model.values.length === 0) return false;
       const v = toStr(getValue(params.node));
+      if (model.contains !== undefined && model.contains !== "") {
+        return v.toLowerCase().includes(model.contains.toLowerCase());
+      }
+      if (!model.values || model.values.length === 0) return false;
       return model.values.includes(v);
     },
     [model, getValue]
@@ -238,11 +247,21 @@ export function FiltroMultiSelect(props: CustomFilterProps) {
 
   // ----- Aplicar / limpiar (cambian el modelo via onModelChange) -----
   const aplicar = () => {
-    // Cuando hay BUSQUEDA activa (no lista pegada), el usuario espera filtrar SOLO
-    // a los valores visibles marcados (comportamiento Excel/D365: si escribiste
-    // "70 2723982" y queda marcado, ACEPTAR filtra a ese aunque el resto del
-    // universo siga marcado por debajo).
-    const usandoBusqueda = !listaPegada && busqueda.trim() !== "";
+    const q = busqueda.trim();
+    const usandoBusqueda = !listaPegada && q !== "";
+    // Si todos los visibles siguen marcados, el usuario solo escribio un texto
+    // (no destildo nada manualmente) -> usamos el modo CONTIENE, que captura
+    // TODO lo que matchea sin tope de 500 ni snapshot fijo.
+    const todoVisibleMarcado =
+      visibleCap.length > 0 && visibleCap.every((v) => seleccion.has(v));
+
+    if (usandoBusqueda && todoVisibleMarcado) {
+      onModelChange({ contains: q });
+      cerrarPopup();
+      return;
+    }
+
+    // Si destildo algo o no hay busqueda, vamos al modo VALUES (lista explicita).
     const finalValues = usandoBusqueda
       ? new Set(visibleCap.filter((v) => seleccion.has(v)))
       : seleccion;
@@ -253,7 +272,7 @@ export function FiltroMultiSelect(props: CustomFilterProps) {
       allValues.every((v) => finalValues.has(v));
 
     if (allSelected) {
-      onModelChange(null); // sin filtro
+      onModelChange(null);
     } else {
       onModelChange({ values: Array.from(finalValues) });
     }
