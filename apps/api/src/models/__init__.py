@@ -7,6 +7,7 @@ from .dim_sucursal import DimSucursal
 from .usuario import Usuario
 from .venta_mensual import VentaMensual
 from .post_venta import PostVentaFila, PostVentaMeta
+from .post_venta_resumen import PostVentaResumen
 from .producto_catalogo import ProductoCatalogo
 from .stock_unificado import StockUnificado
 from .auditoria import AuditoriaLog
@@ -22,6 +23,7 @@ __all__ = [
     "VentaMensual",
     "PostVentaFila",
     "PostVentaMeta",
+    "PostVentaResumen",
     "ProductoCatalogo",
     "StockUnificado",
     "AuditoriaLog",

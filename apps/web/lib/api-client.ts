@@ -336,6 +336,19 @@ export const api = {
     );
   },
 
+  async ventasKpis(): Promise<import("./types").VentasKpis> {
+    return getJSON("/api/ventas/kpis");
+  },
+
+  async ventasMensual(meses = 12): Promise<import("./types").VentasMes[]> {
+    return getJSON(`/api/ventas/mensual?meses=${meses}`);
+  },
+
+  async ventasPorSucursal(periodo?: string): Promise<import("./types").VentasPorSucursal> {
+    const q = periodo ? `?periodo=${encodeURIComponent(periodo)}` : "";
+    return getJSON(`/api/ventas/por-sucursal${q}`);
+  },
+
   async ultimaSincronizacion(): Promise<{ creado_en: string | null; detalle: string | null }> {
     return getJSON("/api/ultima-sincronizacion");
   },

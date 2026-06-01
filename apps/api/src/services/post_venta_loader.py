@@ -14,8 +14,8 @@ from sqlalchemy import delete, insert
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
-from ..models import PostVentaFila, PostVentaMeta
-from .excel_loader import _rows_from_csv, _rows_from_xlsx
+from ..models import PostVentaFila, PostVentaMeta, PostVentaResumen
+from .excel_loader import _rows_from_csv, _rows_from_xlsx, _to_float
 
 settings = get_settings()
 
@@ -58,13 +58,20 @@ def cargar_post_venta(db: Session, filename: str, content: bytes) -> dict:
     ncols = len(headers)
     i_periodo = _idx_columna(headers, "periodo", "mes")
     i_sucursal = _idx_columna(headers, "sucursal", "local")
+    # Para resumen agregado por mes/sucursal: CLP (preferimos Total Neta > Neto > Total)
+    # y unidades (Cantidad). Si la columna no existe, queda None y el resumen vendra en 0.
+    i_clp = _idx_columna(headers, "total_neta", "neto", "total")
+    i_cant = _idx_columna(headers, "cantidad", "items")
 
     tenant = settings.default_tenant_id
     db.execute(delete(PostVentaFila).where(PostVentaFila.tenant_id == tenant))
+    db.execute(delete(PostVentaResumen).where(PostVentaResumen.tenant_id == tenant))
 
     registros: list[dict[str, Any]] = []
     periodos: set[str] = set()
     sucursales: set[str] = set()
+    # Acumulador para el resumen: (periodo, sucursal) -> [clp, unidades, n_lineas]
+    resumen: dict[tuple[str | None, str | None], list[float]] = {}
 
     for raw in data:
         # Normaliza a strings y alinea al número de columnas.
@@ -77,6 +84,17 @@ def cargar_post_venta(db: Session, filename: str, content: bytes) -> dict:
             periodos.add(periodo)
         if sucursal:
             sucursales.add(sucursal)
+
+        # Acumular para el resumen (solo si hay periodo: si no, no es analizable).
+        if periodo:
+            clp = _to_float(valores[i_clp]) if i_clp is not None else 0.0
+            cant = _to_float(valores[i_cant]) if i_cant is not None else 0.0
+            key = (periodo, sucursal)
+            slot = resumen.setdefault(key, [0.0, 0.0, 0.0])
+            slot[0] += clp or 0.0
+            slot[1] += cant or 0.0
+            slot[2] += 1
+
         registros.append(
             {
                 "tenant_id": tenant,
@@ -104,6 +122,25 @@ def cargar_post_venta(db: Session, filename: str, content: bytes) -> dict:
             }
         )
     )
+
+    # Insertar el resumen agregado para que /api/ventas responda rapido.
+    if resumen:
+        resumen_rows = [
+            {
+                "tenant_id": tenant,
+                "periodo": periodo,
+                "sucursal": sucursal,
+                "total_clp": clp,
+                "total_unidades": unidades,
+                "n_lineas": int(n),
+            }
+            for (periodo, sucursal), (clp, unidades, n) in resumen.items()
+        ]
+        for i in range(0, len(resumen_rows), 500):
+            lote = resumen_rows[i : i + 500]
+            if lote:
+                db.execute(insert(PostVentaResumen).values(lote))
+
     db.commit()
 
     return {

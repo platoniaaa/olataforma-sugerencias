@@ -22,6 +22,7 @@ from .routers import (
     productos,
     sugerencias_manuales,
     sugerido,
+    ventas,
 )
 from .services.auth import requiere_admin, requiere_auth
 
@@ -76,6 +77,7 @@ app.include_router(compras.router, dependencies=_protegido)
 app.include_router(post_venta.router, dependencies=_protegido)
 app.include_router(catalogo.router, dependencies=_protegido)
 app.include_router(auditoria.router, dependencies=_protegido)
+app.include_router(ventas.router, dependencies=_protegido)
 # Admin: requiere flag es_admin (no solo estar logueado).
 app.include_router(admin.router, dependencies=[Depends(requiere_admin)])
 

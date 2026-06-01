@@ -9,8 +9,8 @@ import {
   BookOpen,
   ClipboardList,
   Database,
-  Download,
   FileText,
+  LineChart,
   LogOut,
   ShoppingCart,
   X,
@@ -29,8 +29,8 @@ const NAV: NavItem[] = [
   { href: "/compras", label: "Compras", icon: ShoppingCart },
   { href: "/catalogo", label: "Catálogo", icon: BookOpen },
   { href: "/sugerencias-manuales", label: "Sugerencias", icon: ClipboardList },
+  { href: "/ventas", label: "Ventas", icon: LineChart },
   { href: "/auditoria", label: "Auditoría", icon: FileText },
-  { href: "/exportar", label: "Exportar", icon: Download },
   { href: "/cargar", label: "Cargar datos", icon: Database, soloAdmin: true },
 ];
 

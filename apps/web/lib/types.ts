@@ -285,3 +285,30 @@ export interface NotificacionesResponse {
   items: Notificacion[];
   no_leidas: number;
 }
+
+export interface VentasKpis {
+  periodo_actual: string | null;
+  periodo_anterior: string | null;
+  actual: { clp: number; unidades: number; n_lineas: number };
+  anterior: { clp: number; unidades: number; n_lineas: number };
+  var_clp_pct: number | null;
+  var_unidades_pct: number | null;
+}
+
+export interface VentasMes {
+  periodo: string;
+  clp: number;
+  unidades: number;
+}
+
+export interface VentasSucursalRow {
+  sucursal: string;
+  clp: number;
+  unidades: number;
+  n_lineas: number;
+}
+
+export interface VentasPorSucursal {
+  periodo: string | null;
+  items: VentasSucursalRow[];
+}
