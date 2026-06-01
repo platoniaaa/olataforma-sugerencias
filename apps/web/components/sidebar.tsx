@@ -25,7 +25,7 @@ type NavItem = {
 };
 
 const NAV: NavItem[] = [
-  { href: "/", label: "Dashboard", icon: BarChart3 },
+  { href: "/", label: "Sugerido", icon: BarChart3 },
   { href: "/compras", label: "Compras", icon: ShoppingCart },
   { href: "/catalogo", label: "Catálogo", icon: BookOpen },
   { href: "/sugerencias-manuales", label: "Sugerencias", icon: ClipboardList },

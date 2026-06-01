@@ -118,7 +118,7 @@ export default function DashboardPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="kicker mb-1">Dashboard</p>
+          <p className="kicker mb-1">Reposición</p>
           <h1 className="editorial-rule font-display text-[28px] font-medium leading-none tracking-tight text-ink-900">
             Sugerido de compras
           </h1>
