@@ -45,6 +45,17 @@ function colDef(def: DefColumna): ColDef {
     flex: def.key === "descripcion" ? 2 : undefined,
   };
 
+  // Para la columna "producto" agregamos un badge "Catálogo" cuando origen === "catalogo".
+  if (def.key === "producto") {
+    base.cellRenderer = (p: { value: unknown; data?: SugeridoRow }) => {
+      const v = p.value as string | null;
+      if (p.data?.origen === "catalogo") {
+        return `<span>${v ?? ""}</span> <span style="background:#f1f5f9;color:#64748b;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;margin-left:4px">CATÁLOGO</span>`;
+      }
+      return v ?? "";
+    };
+  }
+
   if (def.tipo === "abc") {
     base.width = 80;
     base.cellClass = "font-semibold";
@@ -109,8 +120,14 @@ export function TablaSugerido({ rows, columnasVisibles, onRowClick }: Props) {
         defaultColDef={defaultColDef}
         popupParent={popupParent}
         onGridReady={onGridReady}
-        onRowClicked={(e: RowClickedEvent<SugeridoRow>) => e.data && onRowClick(e.data)}
-        rowClass="cursor-pointer"
+        onRowClicked={(e: RowClickedEvent<SugeridoRow>) => {
+          // Los rows del catalogo no tienen sucursal -> no se puede ir al detalle.
+          if (!e.data || e.data.origen === "catalogo") return;
+          onRowClick(e.data);
+        }}
+        getRowClass={(p) =>
+          p.data?.origen === "catalogo" ? "bg-slate-50/60" : "cursor-pointer"
+        }
         pagination
         paginationPageSize={50}
         paginationPageSizeSelector={[50, 100, 200, 500]}

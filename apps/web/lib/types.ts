@@ -2,6 +2,7 @@
 
 export interface SugeridoRow {
   id: number;
+  origen?: "sugerido" | "catalogo";
   producto: string;
   descripcion: string | null;
   sucursal_id: string;
@@ -163,6 +164,52 @@ export interface Recurrente {
   fecha_fin: string | null;
   activa: boolean;
   ultima_ejecucion: string | null;
+}
+
+export interface CatalogoRow {
+  id: number;
+  producto: string;
+  glosa: string | null;
+  familia: string | null;
+  subfamilia: string | null;
+  procedencia: string | null;
+  tipo_repuesto: string | null;
+  categoria: string | null;
+  sub_categoria: string | null;
+  tipo_producto: string | null;
+  clasificacion_stock: string | null;
+  costo: number | null;
+  precio: number | null;
+  stock_total: number | null;
+  stock_minimo: number | null;
+  stock_maximo: number | null;
+  sub_modelo: string | null;
+  cilindrada: string | null;
+  combustible: string | null;
+  anio: string | null;
+  unidad: string | null;
+  reemplazo: string | null;
+}
+
+export interface CatalogoPage {
+  items: CatalogoRow[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface CatalogoFiltros {
+  q?: string;
+  familia?: string[];
+  procedencia?: string[];
+  categoria?: string[];
+  con_stock?: boolean;
+}
+
+export interface CatalogoOpciones {
+  familias: string[];
+  procedencias: string[];
+  categorias: string[];
 }
 
 export interface PostVentaMeta {

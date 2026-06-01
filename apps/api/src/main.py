@@ -13,6 +13,7 @@ from .db import create_all
 from .routers import (
     admin,
     auth,
+    catalogo,
     compras,
     cron,
     health,
@@ -65,6 +66,7 @@ app.include_router(productos.router, dependencies=_protegido)
 app.include_router(sugerencias_manuales.router, dependencies=_protegido)
 app.include_router(compras.router, dependencies=_protegido)
 app.include_router(post_venta.router, dependencies=_protegido)
+app.include_router(catalogo.router, dependencies=_protegido)
 app.include_router(admin.router, dependencies=_protegido)
 
 

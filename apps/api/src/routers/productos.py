@@ -4,7 +4,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import DimProducto, DimSucursal
+from ..models import DimProducto, DimSucursal, ProductoCatalogo
 from ..schemas import ProductoOut, ProductoPage, SucursalOut
 
 router = APIRouter(prefix="/api", tags=["catalogo"])
@@ -27,7 +27,67 @@ def listar_productos(
     items = db.scalars(
         base.order_by(DimProducto.producto).offset((page - 1) * limit).limit(limit)
     ).all()
-    return ProductoPage(items=list(items), total=total, page=page, limit=limit)
+    items_list = [
+        ProductoOut(
+            producto=p.producto,
+            descripcion=p.descripcion,
+            filtro1_final=p.filtro1_final,
+            unidad_medida=p.unidad_medida,
+            costo_unitario=p.costo_unitario,
+            proveedor=p.proveedor,
+            es_importado=p.es_importado,
+        )
+        for p in items
+    ]
+
+    # Si la busqueda devuelve poco del catalogo del BI, completamos con el
+    # catalogo maestro (productos que no estan en dim_producto). Asi el
+    # autocomplete del modal puede sugerir cualquier producto del listado maestro.
+    if q and len(items_list) < limit:
+        codigos = {p.producto for p in items}
+        falta = limit - len(items_list)
+        like = f"%{q}%"
+        cat_stmt = (
+            select(ProductoCatalogo)
+            .where(
+                or_(
+                    ProductoCatalogo.producto.ilike(like),
+                    ProductoCatalogo.glosa.ilike(like),
+                )
+            )
+            .where(~ProductoCatalogo.producto.in_(codigos))
+            .order_by(ProductoCatalogo.producto.asc())
+            .limit(falta)
+        )
+        for c in db.scalars(cat_stmt).all():
+            items_list.append(
+                ProductoOut(
+                    producto=c.producto,
+                    descripcion=c.glosa,
+                    filtro1_final=None,
+                    unidad_medida=c.unidad,
+                    costo_unitario=c.costo,
+                    proveedor=None,
+                    es_importado=None,
+                )
+            )
+        # Total aproximado: lo del BI + lo que matchea en catalogo (limitado)
+        total = total + db.scalar(
+            select(func.count())
+            .select_from(
+                select(ProductoCatalogo.id)
+                .where(
+                    or_(
+                        ProductoCatalogo.producto.ilike(like),
+                        ProductoCatalogo.glosa.ilike(like),
+                    )
+                )
+                .where(~ProductoCatalogo.producto.in_(codigos))
+                .subquery()
+            )
+        ) or 0
+
+    return ProductoPage(items=items_list, total=total, page=page, limit=limit)
 
 
 @router.get("/productos/{producto}", response_model=ProductoOut)

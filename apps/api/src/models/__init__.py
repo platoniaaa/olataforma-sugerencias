@@ -7,6 +7,7 @@ from .dim_sucursal import DimSucursal
 from .usuario import Usuario
 from .venta_mensual import VentaMensual
 from .post_venta import PostVentaFila, PostVentaMeta
+from .producto_catalogo import ProductoCatalogo
 
 __all__ = [
     "Sugerido",
@@ -18,4 +19,5 @@ __all__ = [
     "VentaMensual",
     "PostVentaFila",
     "PostVentaMeta",
+    "ProductoCatalogo",
 ]

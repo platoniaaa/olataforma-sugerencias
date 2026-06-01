@@ -6,7 +6,7 @@ Solo se filtra/agrega lo que ya esta cargado en la tabla.
 from sqlalchemy import distinct, func, or_, select
 from sqlalchemy.orm import Session
 
-from ..models import Sugerido, VentaMensual
+from ..models import ProductoCatalogo, Sugerido, VentaMensual
 from ..schemas import SugeridoFiltros
 
 # Columnas por las que se permite ordenar (whitelist para evitar inyeccion).
@@ -55,16 +55,95 @@ def _apply_sort(stmt, sort: str | None):
     return stmt.order_by(Sugerido.total_sugerido_suc.desc().nullslast())
 
 
+def _row_desde_catalogo(c: ProductoCatalogo) -> dict:
+    """Mapea una fila del catalogo maestro a la 'forma' de SugeridoRow,
+    con los campos del sugerido vacios (el frontend renderiza '—')."""
+    return {
+        # marcador
+        "id": -c.id,  # id negativo para no chocar con sugerido.id
+        "origen": "catalogo",
+        # campos basicos que sí tenemos
+        "producto": c.producto,
+        "descripcion": c.glosa,
+        "filtro1_final": None,  # el catalogo no tiene marca
+        "proveedor": None,
+        "costo_unitario": c.costo,
+        "tipo_origen": c.procedencia,
+        "unidad_medida": c.unidad,
+        # campos especificos del sugerido -> None
+        "sucursal_id": None,
+        "nombre_sucursal": None,
+        "clasificacion_abc": None,
+        "es_importado": None,
+        "lead_time_dias": None,
+        "lt_efectivo": None,
+        "lt_cd_a_sucursal_dias": None,
+        "lt_origen": None,
+        "abastece_cd": None,
+        "prioridad_cd": None,
+        "comprar_en_el_cd": None,
+        "tiene_stock_cd": None,
+        "demanda_mensual": None,
+        "demanda_diaria": None,
+        "desv_std_mensual": None,
+        "stock_seguridad": None,
+        "punto_de_pedido": None,
+        "pedir": None,
+        "reemplazos": c.reemplazo,
+        "sugerido_suc": None,
+        "stock_activo_suc": None,
+        "stock_en_transito_suc": None,
+        "stock_en_cd": None,
+        "sugerido_traslado": None,
+        "sugerido_compra_neto": None,
+        "total_sugerido_suc": None,
+        "total_valor_sugerido_clp": None,
+        "pedir_flag": None,
+    }
+
+
 def listar(
     db: Session, f: SugeridoFiltros, page: int = 1, limit: int = 50, sort: str | None = None
-) -> tuple[list[Sugerido], int]:
+) -> tuple[list[dict], int]:
     base = _apply_filters(select(Sugerido), f)
-
     total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
 
     stmt = _apply_sort(base, sort).offset((page - 1) * limit).limit(limit)
-    items = list(db.scalars(stmt).all())
-    return items, total
+    sugeridos = list(db.scalars(stmt).all())
+    # Mapeo a dict para uniformidad con catalogo
+    items: list[dict] = []
+    for s in sugeridos:
+        d = {c.name: getattr(s, c.name) for c in Sugerido.__table__.columns}
+        d["origen"] = "sugerido"
+        items.append(d)
+
+    # Si hay búsqueda, agregamos productos del catálogo maestro que no estén en
+    # el sugerido (con campos del sugerido vacíos). Se ignoran los filtros del
+    # sugerido (solo_pedir, abastece_cd, etc.) — un texto en el buscador siempre
+    # trae lo del catálogo para no esconderlo.
+    total_cat = 0
+    if f.q and f.q.strip():
+        productos_en_sugerido = set(
+            db.scalars(select(distinct(Sugerido.producto))).all()
+        )
+        like = f"%{f.q.strip()}%"
+        cat_stmt = (
+            select(ProductoCatalogo)
+            .where(
+                or_(
+                    ProductoCatalogo.producto.ilike(like),
+                    ProductoCatalogo.glosa.ilike(like),
+                )
+            )
+            .where(~ProductoCatalogo.producto.in_(productos_en_sugerido))
+            .order_by(ProductoCatalogo.producto.asc())
+            .limit(500)  # tope para no saturar respuesta
+        )
+        catalogo_items = list(db.scalars(cat_stmt).all())
+        total_cat = len(catalogo_items)
+        items.extend(_row_desde_catalogo(c) for c in catalogo_items)
+
+    return items, total + total_cat
 
 
 def kpis(db: Session, f: SugeridoFiltros) -> dict:

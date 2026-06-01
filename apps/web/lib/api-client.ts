@@ -4,6 +4,9 @@ import type {
   AgrupadoRow,
   CargaResultado,
   CarrosResponse,
+  CatalogoFiltros,
+  CatalogoOpciones,
+  CatalogoPage,
   DimensionAgrupado,
   Producto,
   Sucursal,
@@ -151,6 +154,26 @@ export const api = {
 
   async productos(q: string): Promise<{ items: Producto[] }> {
     return getJSON(`/api/productos?q=${encodeURIComponent(q)}&limit=20`);
+  },
+
+  async catalogo(
+    f: CatalogoFiltros,
+    opts: { page?: number; limit?: number; sort?: string } = {}
+  ): Promise<CatalogoPage> {
+    const p = new URLSearchParams();
+    if (f.q) p.set("q", f.q);
+    (f.familia ?? []).forEach((v) => p.append("familia", v));
+    (f.procedencia ?? []).forEach((v) => p.append("procedencia", v));
+    (f.categoria ?? []).forEach((v) => p.append("categoria", v));
+    if (f.con_stock) p.set("con_stock", "true");
+    p.set("page", String(opts.page ?? 1));
+    p.set("limit", String(opts.limit ?? 1000));
+    if (opts.sort) p.set("sort", opts.sort);
+    return getJSON(`/api/catalogo?${p.toString()}`);
+  },
+
+  async catalogoFiltros(): Promise<CatalogoOpciones> {
+    return getJSON("/api/catalogo/filtros");
   },
 
   async sugerenciasManuales(producto?: string, sucursalId?: string): Promise<SugerenciaManual[]> {

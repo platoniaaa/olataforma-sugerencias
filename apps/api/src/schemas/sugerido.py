@@ -3,11 +3,17 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class SugeridoRow(BaseModel):
-    """Una fila del sugerido (producto x sucursal). Refleja la tabla del BI."""
+    """Una fila del sugerido (producto x sucursal). Refleja la tabla del BI.
+
+    Cuando el usuario busca, puede aparecer también una fila desde el catálogo
+    maestro (productos que no están en el sugerido del BI). En ese caso
+    `origen="catalogo"` y la mayoría de los campos del sugerido vienen en None.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    origen: str = "sugerido"  # "sugerido" | "catalogo"
     producto: str
     descripcion: str | None = None
     sucursal_id: str
