@@ -187,10 +187,13 @@ export const api = {
     return getJSON(`/api/catalogo/${encodeURIComponent(producto)}/ventas`);
   },
 
-  async sugerenciasManuales(producto?: string, sucursalId?: string): Promise<SugerenciaManual[]> {
+  async sugerenciasManuales(
+    opts: { producto?: string; sucursalId?: string; soloUnicas?: boolean } = {}
+  ): Promise<SugerenciaManual[]> {
     const p = new URLSearchParams();
-    if (producto) p.set("producto", producto);
-    if (sucursalId) p.set("sucursal_id", sucursalId);
+    if (opts.producto) p.set("producto", opts.producto);
+    if (opts.sucursalId) p.set("sucursal_id", opts.sucursalId);
+    if (opts.soloUnicas) p.set("solo_unicas", "true");
     return getJSON(`/api/sugerencias-manuales?${p.toString()}`);
   },
 

@@ -51,7 +51,7 @@ export function VistaDetalleProducto({
     try {
       const [detalle, mans, sucs] = await Promise.all([
         api.detalle(producto, sucursalId) as Promise<SugeridoRow>,
-        api.sugerenciasManuales(producto, sucursalId),
+        api.sugerenciasManuales({ producto, sucursalId }),
         api.sucursales(),
       ]);
       setD(detalle);
