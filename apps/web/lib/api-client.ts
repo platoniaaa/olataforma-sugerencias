@@ -308,8 +308,8 @@ export const api = {
     f: PostVentaFiltros,
     formato: "csv" | "xlsx" = "csv"
   ): Promise<void> {
-    const url = formato === "csv" ? "/api/post-venta/export-csv" : "/api/post-venta/export-excel";
-    const res = await req(url, {
+    const endpoint = formato === "csv" ? "/api/post-venta/export-csv" : "/api/post-venta/export-excel";
+    const res = await req(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(f),
