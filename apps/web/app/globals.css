@@ -7,16 +7,28 @@
 @import "ag-grid-community/styles/ag-theme-quartz.css";
 
 :root {
-  --font-sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
-  --fondo: #f4f6fb;
+  --fondo: #fafaf7;
 }
 
 html,
 body {
   background-color: var(--fondo);
-  color: #111827;
+  color: #1c1917;
   -webkit-font-smoothing: antialiased;
+  font-feature-settings: "ss01", "cv11";
+}
+
+/* Background con grano sutil tipo "papel tecnico" — apenas perceptible pero
+   evita el blanco plano que se siente "AI generico". */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.5;
+  background-image: radial-gradient(rgba(28, 25, 23, 0.025) 1px, transparent 1px);
+  background-size: 24px 24px;
 }
 
 /* Numeros tabulares para que las columnas numericas calcen. */
@@ -25,16 +37,45 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Ajustes del tema de AG Grid al azul corporativo. */
+/* Numeros grandes (KPIs, totales) con la display serif. */
+.figure {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.02em;
+}
+
+/* Etiquetas tipo "kicker" en mayuscula con tracking, para encabezados de KPI. */
+.kicker {
+  font-family: var(--font-sans);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #78716c;
+}
+
+/* Linea decorativa para titulos editoriales. */
+.editorial-rule::after {
+  content: "";
+  display: block;
+  width: 2.5rem;
+  height: 2px;
+  background: #c2410c;
+  margin-top: 0.5rem;
+}
+
+/* Ajustes del tema de AG Grid al fondo crema. */
 .ag-theme-quartz {
-  --ag-header-background-color: #f8fafc;
-  --ag-header-foreground-color: #1e293b;
-  --ag-row-hover-color: #eff4ff;
-  --ag-selected-row-background-color: #dbe6fe;
+  --ag-header-background-color: #f6f5ee;
+  --ag-header-foreground-color: #1c1917;
+  --ag-background-color: #ffffff;
+  --ag-row-hover-color: #fff7ed;
+  --ag-selected-row-background-color: #ffedd5;
   --ag-font-family: var(--font-sans);
   --ag-font-size: 13px;
-  --ag-border-color: #e5e7eb;
-  --ag-header-column-resize-handle-color: #cbd5e1;
+  --ag-border-color: #ebe9dd;
+  --ag-header-column-resize-handle-color: #d6d3d1;
+  --ag-odd-row-background-color: #fdfdfb;
 }
 
 /* En columnas numericas (right-aligned), AG Grid invierte el header y deja el icono

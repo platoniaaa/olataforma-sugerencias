@@ -116,12 +116,13 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-slate-900">
+          <p className="kicker mb-1">Dashboard</p>
+          <h1 className="editorial-rule font-display text-[28px] font-medium leading-none tracking-tight text-ink-900">
             Sugerido de compras
           </h1>
-          <p className="text-[13px] text-slate-500">
+          <p className="mt-3 text-[13px] text-ink-500">
             {cargando ? "Cargando…" : `${formatoNumero(total)} filas`}
             {total > rows.length && ` (mostrando ${formatoNumero(rows.length)})`}
           </p>

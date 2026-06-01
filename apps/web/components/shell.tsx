@@ -12,7 +12,7 @@ const NAV: NavItem[] = [
   { href: "/", label: "Dashboard" },
   { href: "/compras", label: "Compras" },
   { href: "/catalogo", label: "Catálogo" },
-  { href: "/sugerencias-manuales", label: "Sugerencias manuales" },
+  { href: "/sugerencias-manuales", label: "Sugerencias" },
   { href: "/auditoria", label: "Auditoría" },
   { href: "/exportar", label: "Exportar" },
   { href: "/cargar", label: "Cargar datos", soloAdmin: true },
@@ -34,13 +34,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   // La pantalla de login se muestra sin header.
   if (esLogin) {
-    return <main className="mx-auto max-w-[1600px] px-4 py-5">{children}</main>;
+    return <main className="relative z-10 mx-auto max-w-[1600px] px-4 py-5">{children}</main>;
   }
 
   // Evita mostrar contenido protegido antes de verificar la sesion.
   if (!listo) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-sm text-slate-400">
+      <div className="flex min-h-screen items-center justify-center text-sm text-ink-400">
         Cargando…
       </div>
     );
@@ -53,37 +53,54 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-[1600px] items-center gap-3 px-4">
-          <Link href="/" className="flex items-center gap-2.5">
+      <header className="sticky top-0 z-30 border-b border-ink-200 bg-paper/85 backdrop-blur">
+        <div className="mx-auto flex h-16 max-w-[1600px] items-center gap-4 px-4">
+          <Link href="/" className="group flex items-center gap-3">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/curifor-logo.png" alt="Curifor" className="h-6 w-auto" />
-            <span className="hidden h-5 w-px bg-slate-200 sm:block" />
-            <span className="hidden text-[15px] font-semibold tracking-tight text-slate-900 sm:inline">
-              Sugerido de Compras
+            <img src="/curifor-logo.png" alt="Curifor" className="h-7 w-auto" />
+            <span className="hidden h-5 w-px bg-ink-300 sm:block" />
+            <span className="hidden flex-col sm:flex">
+              <span className="font-display text-[17px] font-medium leading-none tracking-tight text-ink-900">
+                Sugerido
+              </span>
+              <span className="mt-0.5 text-[10px] uppercase tracking-[0.14em] text-ink-500">
+                de compras
+              </span>
             </span>
           </Link>
-          <nav className="ml-auto flex items-center gap-1 text-sm">
-            {navVisible.map((n) => (
-              <Link
-                key={n.href}
-                href={n.href}
-                className={`rounded-md px-3 py-1.5 hover:bg-slate-100 hover:text-slate-900 ${
-                  pathname === n.href ? "text-slate-900 font-medium" : "text-slate-600"
-                }`}
-              >
-                {n.label}
-              </Link>
-            ))}
-            <div className="ml-2 flex items-center gap-2 border-l border-slate-200 pl-3">
+
+          <nav className="ml-auto flex items-center text-[13px]">
+            {navVisible.map((n) => {
+              const activo = pathname === n.href;
+              return (
+                <Link
+                  key={n.href}
+                  href={n.href}
+                  className={`group relative px-3 py-2 transition-colors ${
+                    activo ? "text-ink-900 font-medium" : "text-ink-600 hover:text-ink-900"
+                  }`}
+                >
+                  {n.label}
+                  <span
+                    className={`absolute left-3 right-3 -bottom-px h-px transition-all ${
+                      activo
+                        ? "bg-accent-700"
+                        : "bg-transparent group-hover:bg-ink-300"
+                    }`}
+                  />
+                </Link>
+              );
+            })}
+
+            <div className="ml-3 flex items-center gap-2 border-l border-ink-200 pl-3">
               <CampanitaNotificaciones />
-              <span className="hidden text-[13px] text-slate-500 md:inline">
+              <span className="hidden text-[13px] text-ink-600 md:inline">
                 {nombre ?? email}
               </span>
               <button
                 onClick={logout}
                 title="Cerrar sesión"
-                className="flex items-center gap-1 rounded-md px-2 py-1.5 text-[13px] text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                className="flex items-center gap-1 rounded-sm px-2 py-1.5 text-[13px] text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-900"
               >
                 <LogOut size={15} /> Salir
               </button>
@@ -91,7 +108,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </nav>
         </div>
       </header>
-      <main className="mx-auto max-w-[1600px] px-4 py-5">{children}</main>
+      <main className="relative z-10 mx-auto max-w-[1600px] px-4 py-6">{children}</main>
     </>
   );
 }

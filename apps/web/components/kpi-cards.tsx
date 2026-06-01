@@ -1,7 +1,6 @@
 "use client";
 
 import { Boxes, DollarSign, Package, Truck } from "lucide-react";
-import { Card } from "@/components/ui/card";
 import { formatoCLPCorto, formatoNumero } from "@/lib/formato";
 import type { SugeridoKpis } from "@/lib/types";
 
@@ -14,53 +13,69 @@ function KpiCard({
   icon,
   label,
   valor,
-  tono,
+  index,
+  acento,
 }: {
   icon: React.ReactNode;
   label: string;
   valor: string;
-  tono: string;
+  index: string;
+  acento?: boolean;
 }) {
   return (
-    <Card className="flex items-center gap-3 px-4 py-3.5">
-      <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${tono}`}>
+    <div className="group relative overflow-hidden border border-ink-200 bg-white p-5 transition-colors hover:border-ink-300">
+      {/* indice arriba-izq tipo "01." */}
+      <span className="absolute left-5 top-4 font-mono text-[10px] text-ink-400">
+        {index}
+      </span>
+      {/* icono arriba-derecha, decorativo */}
+      <span className="absolute right-4 top-4 text-ink-300 transition-colors group-hover:text-ink-500">
         {icon}
-      </div>
-      <div className="min-w-0">
-        <p className="truncate text-[12px] font-medium uppercase tracking-wide text-slate-500">
-          {label}
-        </p>
-        <p className="tabular text-xl font-semibold text-slate-900">{valor}</p>
-      </div>
-    </Card>
+      </span>
+      <p className="kicker mt-6">{label}</p>
+      <p
+        className={`figure mt-2 text-[34px] leading-none ${
+          acento ? "text-accent-700" : "text-ink-900"
+        }`}
+      >
+        {valor}
+      </p>
+      {/* linea inferior tipo "subrayado tecnico" */}
+      <span
+        className={`absolute bottom-0 left-0 h-px transition-all ${
+          acento ? "w-12 bg-accent-700" : "w-8 bg-ink-300 group-hover:w-16"
+        }`}
+      />
+    </div>
   );
 }
 
 export function KpiCards({ kpis, cargando }: Props) {
-  const v = (s: string) => (cargando || !kpis ? "…" : s);
+  const v = (s: string) => (cargando || !kpis ? "—" : s);
   return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-px bg-ink-200 lg:grid-cols-4">
       <KpiCard
-        icon={<Boxes size={20} className="text-brand" />}
-        tono="bg-brand-50"
+        index="01"
+        icon={<Boxes size={16} />}
         label="Total Sugerido"
         valor={v(formatoNumero(kpis?.total_sugerido))}
       />
       <KpiCard
-        icon={<DollarSign size={20} className="text-emerald-600" />}
-        tono="bg-emerald-50"
+        index="02"
+        icon={<DollarSign size={16} />}
         label="Valor Total"
         valor={v(formatoCLPCorto(kpis?.valor_total_clp))}
+        acento
       />
       <KpiCard
-        icon={<Package size={20} className="text-violet-600" />}
-        tono="bg-violet-50"
+        index="03"
+        icon={<Package size={16} />}
         label="Productos a Comprar"
         valor={v(formatoNumero(kpis?.n_productos))}
       />
       <KpiCard
-        icon={<Truck size={20} className="text-amber-600" />}
-        tono="bg-amber-50"
+        index="04"
+        icon={<Truck size={16} />}
         label="Proveedores a Contactar"
         valor={v(formatoNumero(kpis?.n_proveedores))}
       />

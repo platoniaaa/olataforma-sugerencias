@@ -8,7 +8,7 @@ export const Input = React.forwardRef<
   <input
     ref={ref}
     className={cn(
-      "h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-900 placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
+      "h-9 w-full rounded-sm border border-ink-200 bg-white px-3 text-[13.5px] text-ink-900 placeholder:text-ink-400 transition-colors focus-visible:border-accent-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-700/30",
       className
     )}
     {...props}
@@ -23,7 +23,7 @@ export const Textarea = React.forwardRef<
   <textarea
     ref={ref}
     className={cn(
-      "w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
+      "w-full rounded-sm border border-ink-200 bg-white px-3 py-2 text-[13.5px] text-ink-900 placeholder:text-ink-400 transition-colors focus-visible:border-accent-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-700/30",
       className
     )}
     {...props}
@@ -37,7 +37,7 @@ export function Label({
 }: React.LabelHTMLAttributes<HTMLLabelElement>) {
   return (
     <label
-      className={cn("mb-1 block text-[13px] font-medium text-slate-700", className)}
+      className={cn("mb-1 block text-[12.5px] font-medium text-ink-700", className)}
       {...props}
     />
   );
