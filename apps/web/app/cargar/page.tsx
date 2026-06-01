@@ -115,13 +115,34 @@ export default function CargarPage() {
 
       {/* Nota para la version en la nube: como actualizar los datos */}
       {!apiEsLocal && (
-        <Card className="border-brand/30 bg-brand-50">
-          <CardContent className="text-[13px] text-slate-700">
-            <p className="font-semibold text-slate-900">¿Cómo se actualizan los datos?</p>
-            <p className="mt-1">
-              Esta es la versión en la nube. Los datos los actualiza el administrador desde su
-              PC: abre Power BI Desktop y ejecuta el script <b>push_to_cloud.ps1</b>. Eso trae el
-              sugerido con todas sus medidas y lo publica para todo el equipo.
+        <Card className="border-brand-200 bg-brand-50/60">
+          <CardContent className="text-[13px] text-ink-700">
+            <p className="font-display text-[15px] font-medium text-ink-900">
+              Sincronización automática diaria
+            </p>
+            <p className="mt-2">
+              Una tarea programada de Windows ejecuta el script{" "}
+              <code className="rounded-sm bg-white px-1 py-px font-mono text-[12px] text-accent-700">
+                push_to_cloud.ps1
+              </code>{" "}
+              en el PC del administrador <b>todos los días a las 10:00 AM</b>. Lee Power BI
+              Desktop, calcula las medidas y publica el sugerido en la nube para todo el equipo.
+            </p>
+            <p className="mt-3">
+              <span className="kicker">Requisito</span>
+              <br />
+              Power BI Desktop debe estar abierto con el modelo del sugerido a esa hora.
+            </p>
+            <p className="mt-3">
+              <span className="kicker">Sincronización manual</span>
+              <br />
+              Doble click en el acceso directo{" "}
+              <b>&ldquo;Sincronizar Sugerido&rdquo;</b> del escritorio del admin para una
+              actualización inmediata.
+            </p>
+            <p className="mt-3 text-[11.5px] text-ink-500">
+              Logs de cada ejecución en{" "}
+              <code className="font-mono">logs/sincronizar_diario.log</code> del PC del admin.
             </p>
           </CardContent>
         </Card>
