@@ -44,7 +44,10 @@ def listar(
     db: Session = Depends(get_db),
 ):
     items, total = sugerido_service.listar(db, f, page=page, limit=limit, sort=sort)
-    return SugeridoPage(items=items, total=total, page=page, limit=limit)
+    # items son dicts (mix de sugerido + catalogo). Validamos explicitamente
+    # para que Pydantic no intente getattr en dicts.
+    rows = [SugeridoRow.model_validate(i) for i in items]
+    return SugeridoPage(items=rows, total=total, page=page, limit=limit)
 
 
 @router.get("/kpis", response_model=SugeridoKpis)
