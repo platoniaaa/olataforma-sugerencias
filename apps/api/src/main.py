@@ -31,11 +31,18 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Crea las tablas si no existen (Fase 0; en Fase 1+ se usa Alembic).
-    # En Vercel (serverless) las tablas ya existen -> se evita el costo en cada arranque.
+    # En Vercel (serverless) o si el create_all falla por timeout en Render free,
+    # NO debe romper el arranque: las tablas existentes siguen funcionando y las
+    # nuevas se pueden crear despues con un script local apuntando a la DB.
     import os
+    import traceback
 
     if not os.environ.get("VERCEL"):
-        create_all()
+        try:
+            create_all()
+        except Exception as e:
+            print(f"[lifespan] create_all fallo (continuando): {e}")
+            traceback.print_exc()
     yield
 
 
