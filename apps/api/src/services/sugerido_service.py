@@ -22,7 +22,8 @@ def _apply_filters(stmt, f: SugeridoFiltros):
     # Excluir productos internos (D&P REPTO-TALLER, etc.) de todo el sugerido.
     for pref in PREFIJOS_EXCLUIDOS:
         stmt = stmt.where(~Sugerido.producto.ilike(f"{pref}%"))
-    if f.q:
+    busqueda = bool(f.q and f.q.strip())
+    if busqueda:
         like = f"%{f.q}%"
         stmt = stmt.where(or_(Sugerido.producto.ilike(like), Sugerido.descripcion.ilike(like)))
     if f.sucursales:
@@ -35,11 +36,11 @@ def _apply_filters(stmt, f: SugeridoFiltros):
         stmt = stmt.where(Sugerido.tipo_origen.in_(f.tipo_origen))
     if f.proveedor:
         stmt = stmt.where(Sugerido.proveedor.ilike(f"%{f.proveedor}%"))
-    if f.solo_pedir:
-        # "pedir = Si" tolerante a may/min.
+    # Cuando el usuario escribe un codigo o nombre, queremos que vea TODAS las
+    # coincidencias aunque su sugerido del BI sea pedir=No. Si no, "no aparece".
+    if f.solo_pedir and not busqueda:
         stmt = stmt.where(func.lower(Sugerido.pedir) == "si")
-    if f.solo_abastece_cd:
-        # "Abastece CD = Si" tolerante a may/min y acento.
+    if f.solo_abastece_cd and not busqueda:
         stmt = stmt.where(func.lower(Sugerido.abastece_cd).in_(("si", "sí")))
     return stmt
 
