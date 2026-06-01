@@ -63,8 +63,21 @@ def create_all() -> None:
     """Crea las tablas si no existen (Fase 0; en Fase 1+ se usa Alembic)."""
     # Importa los modelos para registrarlos en el metadata antes de create_all.
     from . import models  # noqa: F401
+    from sqlalchemy import text
 
     Base.metadata.create_all(bind=engine)
+    # Mini-migracion in-line: agregar columnas nuevas a tablas ya creadas.
+    # Mientras no haya Alembic, usamos ADD COLUMN IF NOT EXISTS (Postgres y SQLite>=3.35).
+    migraciones = [
+        "ALTER TABLE sugerencia_recurrente ADD COLUMN IF NOT EXISTS dias_inventario INTEGER",
+    ]
+    with engine.begin() as conn:
+        for sql in migraciones:
+            try:
+                conn.execute(text(sql))
+            except Exception:
+                # En SQLite viejo no existe IF NOT EXISTS; lo ignoramos silenciosamente.
+                pass
 
 
 def get_db() -> Generator[Session, None, None]:

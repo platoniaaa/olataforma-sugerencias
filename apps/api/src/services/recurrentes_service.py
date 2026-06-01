@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from ..config import get_settings
 from ..models import SugerenciaManual, SugerenciaRecurrente
 from ..schemas import SugeridoFiltros
-from .sugerido_service import pares_filtrados
+from .sugerido_service import pares_filtrados, unidades_desde_dias, unidades_por_par
 
 settings = get_settings()
 
@@ -28,26 +28,50 @@ def _archivar_instancias(db: Session, rec_id: str) -> None:
 
 
 def _crear_instancias(db: Session, rec: SugerenciaRecurrente) -> int:
-    """Archiva la instancia anterior de esta regla y crea la nueva. Devuelve cuántas creó."""
+    """Archiva la instancia anterior de esta regla y crea la nueva. Devuelve cuántas creó.
+
+    Si la regla esta en modo 'dias de inventario', recalcula unidades en cada ejecucion
+    usando la demanda diaria actualizada del BI. Pares sin demanda se omiten.
+    """
     _archivar_instancias(db, rec.id)
     tenant = rec.tenant_id
     nuevas: list[SugerenciaManual] = []
     if rec.modo == "individual":
-        nuevas.append(
-            SugerenciaManual(
-                producto=rec.producto, sucursal_id=rec.sucursal_id, unidades=rec.unidades,
-                motivo=rec.motivo, creado_por="recurrente", tenant_id=tenant, recurrente_id=rec.id,
-            )
-        )
-    else:  # grupo
-        f = SugeridoFiltros(**json.loads(rec.filtros or "{}"))
-        for prod, suc in pares_filtrados(db, f):
+        if rec.dias_inventario:
+            u = unidades_desde_dias(db, rec.producto, rec.sucursal_id, rec.dias_inventario)
+        else:
+            u = rec.unidades
+        if u and u > 0:
             nuevas.append(
                 SugerenciaManual(
-                    producto=prod, sucursal_id=suc, unidades=rec.unidades, motivo=rec.motivo,
-                    creado_por="recurrente", tenant_id=tenant, recurrente_id=rec.id,
+                    producto=rec.producto, sucursal_id=rec.sucursal_id, unidades=u,
+                    motivo=rec.motivo, creado_por="recurrente", tenant_id=tenant,
+                    recurrente_id=rec.id,
                 )
             )
+    else:  # grupo
+        f = SugeridoFiltros(**json.loads(rec.filtros or "{}"))
+        pares = pares_filtrados(db, f)
+        if rec.dias_inventario:
+            mapa = unidades_por_par(db, pares, rec.dias_inventario)
+            for par in pares:
+                u = mapa.get(par)
+                if not u:
+                    continue
+                nuevas.append(
+                    SugerenciaManual(
+                        producto=par[0], sucursal_id=par[1], unidades=u, motivo=rec.motivo,
+                        creado_por="recurrente", tenant_id=tenant, recurrente_id=rec.id,
+                    )
+                )
+        else:
+            for prod, suc in pares:
+                nuevas.append(
+                    SugerenciaManual(
+                        producto=prod, sucursal_id=suc, unidades=rec.unidades, motivo=rec.motivo,
+                        creado_por="recurrente", tenant_id=tenant, recurrente_id=rec.id,
+                    )
+                )
     db.add_all(nuevas)
     return len(nuevas)
 
@@ -67,13 +91,17 @@ def crear(db: Session, payload) -> SugerenciaRecurrente:
     filtros_json = None
     if payload.modo == "grupo":
         filtros_json = json.dumps((payload.filtros or SugeridoFiltros()).model_dump())
+    # Si la regla es por dias de inventario, no requiere un valor de unidades; lo dejamos en 0
+    # como placeholder (la columna es NOT NULL) y la regla se recalcula en cada ejecucion.
+    unidades_inicial = payload.unidades or 0
     rec = SugerenciaRecurrente(
         tenant_id=settings.default_tenant_id,
         modo=payload.modo,
         producto=payload.producto,
         sucursal_id=payload.sucursal_id,
         filtros=filtros_json,
-        unidades=payload.unidades,
+        unidades=unidades_inicial,
+        dias_inventario=payload.dias_inventario,
         motivo=payload.motivo,
         cada_dias=payload.cada_dias,
         fecha_fin=payload.fecha_fin,

@@ -3,6 +3,8 @@
 NOTA Fase 0: aca NO se calcula el sugerido. Los valores ya vienen del Power BI.
 Solo se filtra/agrega lo que ya esta cargado en la tabla.
 """
+import math
+
 from sqlalchemy import distinct, func, or_, select
 from sqlalchemy.orm import Session
 
@@ -230,6 +232,50 @@ def pares_filtrados(db: Session, f: SugeridoFiltros) -> list[tuple[str, str]]:
     """
     stmt = _apply_filters(select(Sugerido.producto, Sugerido.sucursal_id), f)
     return [(p, s) for p, s in db.execute(stmt).all()]
+
+
+def unidades_desde_dias(
+    db: Session, producto: str, sucursal_id: str, dias: int
+) -> int | None:
+    """Convierte 'dias de inventario' a unidades: ceil(dias * demanda_diaria).
+
+    Devuelve None si el producto+sucursal no esta en el sugerido o no tiene
+    demanda diaria > 0 (en ese caso el caller decide: omitir o avisar).
+    """
+    if dias <= 0:
+        return None
+    row = db.execute(
+        select(Sugerido.demanda_diaria)
+        .where(Sugerido.producto == producto, Sugerido.sucursal_id == sucursal_id)
+    ).first()
+    if not row or row[0] is None or row[0] <= 0:
+        return None
+    return max(1, math.ceil(float(row[0]) * dias))
+
+
+def unidades_por_par(
+    db: Session, pares: list[tuple[str, str]], dias: int
+) -> dict[tuple[str, str], int]:
+    """Calcula unidades para muchos pares de una sola query.
+
+    Solo devuelve pares con demanda_diaria > 0; los demas quedan fuera del dict
+    (el caller los reporta como omitidos).
+    """
+    if not pares or dias <= 0:
+        return {}
+    productos = {p for p, _ in pares}
+    sucursales = {s for _, s in pares}
+    rows = db.execute(
+        select(Sugerido.producto, Sugerido.sucursal_id, Sugerido.demanda_diaria)
+        .where(Sugerido.producto.in_(productos), Sugerido.sucursal_id.in_(sucursales))
+    ).all()
+    mapa: dict[tuple[str, str], float] = {(p, s): d for p, s, d in rows if d}
+    out: dict[tuple[str, str], int] = {}
+    for par in pares:
+        d = mapa.get(par)
+        if d and d > 0:
+            out[par] = max(1, math.ceil(float(d) * dias))
+    return out
 
 
 def detalle(db: Session, producto: str, sucursal_id: str) -> Sugerido | None:

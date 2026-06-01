@@ -12,6 +12,7 @@ import { formatoNumero } from "@/lib/formato";
 import type { Producto, Sucursal, SugeridoFiltros } from "@/lib/types";
 
 type Modo = "individual" | "grupo" | "todos";
+type TipoCantidad = "dias" | "unidades";
 
 interface Props {
   open: boolean;
@@ -44,7 +45,8 @@ export function ModalSugerenciaManual({
   const [modo, setModo] = useState<Modo>("individual");
 
   // Comunes
-  const [unidades, setUnidades] = useState("");
+  const [tipoCantidad, setTipoCantidad] = useState<TipoCantidad>("dias");
+  const [cantidad, setCantidad] = useState("");
   const [motivo, setMotivo] = useState("");
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +79,8 @@ export function ModalSugerenciaManual({
   useEffect(() => {
     if (open) {
       setModo("individual");
-      setUnidades("");
+      setTipoCantidad("dias");
+      setCantidad("");
       setMotivo("");
       setError(null);
       setProducto(productoInicial ?? "");
@@ -141,11 +144,17 @@ export function ModalSugerenciaManual({
 
   const guardar = async () => {
     setError(null);
-    const u = parseInt(unidades, 10);
-    if (!u || u <= 0) {
-      setError("Ingresa una cantidad de unidades (entero positivo).");
+    const n = parseInt(cantidad, 10);
+    if (!n || n <= 0) {
+      setError(
+        tipoCantidad === "dias"
+          ? "Ingresa los días de inventario (entero positivo)."
+          : "Ingresa una cantidad de unidades (entero positivo)."
+      );
       return;
     }
+    const cantidadPayload =
+      tipoCantidad === "dias" ? { dias_inventario: n } : { unidades: n };
     const dias = parseInt(cadaDias, 10);
     if (recurrente && (!dias || dias <= 0)) {
       setError("Para repetir, indica cada cuántos días (entero positivo).");
@@ -172,7 +181,7 @@ export function ModalSugerenciaManual({
                 modo: "individual",
                 producto,
                 sucursal_id: sucursal,
-                unidades: u,
+                ...cantidadPayload,
                 motivo: motivo || undefined,
                 cada_dias: dias,
                 fecha_fin: fechaFin || undefined,
@@ -180,7 +189,7 @@ export function ModalSugerenciaManual({
             : {
                 modo: "grupo",
                 filtros: filtrosModo,
-                unidades: u,
+                ...cantidadPayload,
                 motivo: motivo || undefined,
                 cada_dias: dias,
                 fecha_fin: fechaFin || undefined,
@@ -190,11 +199,20 @@ export function ModalSugerenciaManual({
         await api.crearSugerenciaManual({
           producto,
           sucursal_id: sucursal,
-          unidades: u,
+          ...cantidadPayload,
           motivo: motivo || undefined,
         });
       } else {
-        await api.crearSugerenciaMasiva(filtrosModo, u, motivo || undefined);
+        const r = await api.crearSugerenciaMasiva(
+          filtrosModo, cantidadPayload, motivo || undefined
+        );
+        if (r.omitidas > 0) {
+          // Avisa pero igual cerramos: las creadas ya se aplicaron.
+          alert(
+            `Se aplicaron ${r.creadas} sugerencias. ` +
+              `${r.omitidas} producto/sucursal sin demanda diaria se omitieron.`
+          );
+        }
       }
       onGuardado();
       onClose();
@@ -382,19 +400,59 @@ export function ModalSugerenciaManual({
           </div>
         )}
 
-        {/* Unidades + motivo (comunes) */}
+        {/* Cantidad (dias o unidades) + motivo (comunes) */}
         <div>
-          <Label htmlFor="uni">
-            {modo === "individual" ? "Unidades adicionales" : "Unidades para cada producto"}
-          </Label>
+          <div className="mb-1.5 flex items-center justify-between">
+            <Label htmlFor="uni" className="!mb-0">
+              {tipoCantidad === "dias"
+                ? modo === "individual"
+                  ? "Días de inventario adicional"
+                  : "Días de inventario adicional para cada producto"
+                : modo === "individual"
+                  ? "Unidades adicionales"
+                  : "Unidades para cada producto"}
+            </Label>
+            <div className="inline-flex rounded-md border border-slate-200 bg-white p-0.5 text-[11px] font-medium">
+              <button
+                type="button"
+                onClick={() => setTipoCantidad("dias")}
+                className={cn(
+                  "rounded px-2 py-0.5 transition-colors",
+                  tipoCantidad === "dias"
+                    ? "bg-brand text-white"
+                    : "text-slate-500 hover:text-slate-800"
+                )}
+              >
+                Días
+              </button>
+              <button
+                type="button"
+                onClick={() => setTipoCantidad("unidades")}
+                className={cn(
+                  "rounded px-2 py-0.5 transition-colors",
+                  tipoCantidad === "unidades"
+                    ? "bg-brand text-white"
+                    : "text-slate-500 hover:text-slate-800"
+                )}
+              >
+                Unidades
+              </button>
+            </div>
+          </div>
           <Input
             id="uni"
             type="number"
             min={1}
-            value={unidades}
-            onChange={(e) => setUnidades(e.target.value)}
+            value={cantidad}
+            onChange={(e) => setCantidad(e.target.value)}
             placeholder="0"
           />
+          {tipoCantidad === "dias" && (
+            <p className="mt-1 text-[11px] text-slate-500">
+              Se convierte a unidades por cada producto/sucursal segun su demanda
+              diaria (redondeo hacia arriba). Los productos sin demanda registrada se omiten.
+            </p>
+          )}
         </div>
         <div>
           <Label htmlFor="mot">Motivo (opcional)</Label>

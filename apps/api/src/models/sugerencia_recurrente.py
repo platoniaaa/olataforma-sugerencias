@@ -33,6 +33,9 @@ class SugerenciaRecurrente(Base):
     filtros: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON (modo grupo)
 
     unidades: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Si es por dias de inventario, lo guardamos para recalcular en cada ejecucion
+    # (la demanda diaria del BI puede cambiar entre disparos).
+    dias_inventario: Mapped[int | None] = mapped_column(Integer, nullable=True)
     motivo: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     cada_dias: Mapped[int] = mapped_column(Integer, nullable=False)

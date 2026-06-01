@@ -191,7 +191,8 @@ export const api = {
   async crearSugerenciaManual(payload: {
     producto: string;
     sucursal_id: string;
-    unidades: number;
+    unidades?: number;
+    dias_inventario?: number;
     motivo?: string;
   }): Promise<SugerenciaManual> {
     const res = await req("/api/sugerencias-manuales", {
@@ -208,13 +209,13 @@ export const api = {
 
   async crearSugerenciaMasiva(
     filtros: SugeridoFiltros,
-    unidades: number,
+    cantidad: { unidades?: number; dias_inventario?: number },
     motivo?: string
-  ): Promise<{ creadas: number }> {
+  ): Promise<{ creadas: number; omitidas: number }> {
     const res = await req("/api/sugerencias-manuales/masiva", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ filtros, unidades, motivo }),
+      body: JSON.stringify({ filtros, ...cantidad, motivo }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));

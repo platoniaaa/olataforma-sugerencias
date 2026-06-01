@@ -147,7 +147,8 @@ export interface RecurrenteCreate {
   producto?: string | null;
   sucursal_id?: string | null;
   filtros?: SugeridoFiltros | null;
-  unidades: number;
+  unidades?: number | null;
+  dias_inventario?: number | null;
   motivo?: string | null;
   cada_dias: number;
   fecha_fin?: string | null; // YYYY-MM-DD
@@ -158,6 +159,7 @@ export interface Recurrente {
   modo: string;
   resumen: string;
   unidades: number;
+  dias_inventario: number | null;
   motivo: string | null;
   cada_dias: number;
   proxima_ejecucion: string;

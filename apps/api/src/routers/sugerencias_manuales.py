@@ -21,7 +21,8 @@ from ..services import recurrentes_service, sugerido_service
 def _recurrente_out(rec) -> RecurrenteOut:
     return RecurrenteOut(
         id=rec.id, modo=rec.modo, resumen=recurrentes_service.resumen(rec),
-        unidades=rec.unidades, motivo=rec.motivo, cada_dias=rec.cada_dias,
+        unidades=rec.unidades, dias_inventario=rec.dias_inventario,
+        motivo=rec.motivo, cada_dias=rec.cada_dias,
         proxima_ejecucion=rec.proxima_ejecucion, fecha_fin=rec.fecha_fin,
         activa=rec.activa, ultima_ejecucion=rec.ultima_ejecucion,
     )
@@ -50,10 +51,23 @@ def listar(
 
 @router.post("", response_model=SugerenciaManualOut, status_code=201)
 def crear(payload: SugerenciaManualCreate, db: Session = Depends(get_db)):
+    if payload.dias_inventario:
+        unidades = sugerido_service.unidades_desde_dias(
+            db, payload.producto, payload.sucursal_id, payload.dias_inventario
+        )
+        if unidades is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Sin demanda diaria para este producto/sucursal. Usa modo 'unidades'.",
+            )
+    elif payload.unidades:
+        unidades = payload.unidades
+    else:
+        raise HTTPException(status_code=400, detail="Falta unidades o dias_inventario.")
     s = SugerenciaManual(
         producto=payload.producto,
         sucursal_id=payload.sucursal_id,
-        unidades=payload.unidades,
+        unidades=unidades,
         motivo=payload.motivo,
         creado_por=settings.admin_email,
         tenant_id=settings.default_tenant_id,
@@ -66,23 +80,42 @@ def crear(payload: SugerenciaManualCreate, db: Session = Depends(get_db)):
 
 @router.post("/masiva", response_model=SugerenciaManualMasivaResultado, status_code=201)
 def crear_masiva(payload: SugerenciaManualMasiva, db: Session = Depends(get_db)):
-    """Crea una sugerencia manual (misma cantidad) para cada producto x sucursal
-    que cumple los filtros. Sirve para los modos 'por grupo' y 'todos'."""
+    """Crea una sugerencia manual para cada producto x sucursal que cumple los filtros.
+
+    Modo 'dias_inventario': calcula unidades por par segun demanda_diaria del BI; los
+    pares sin demanda quedan omitidos. Modo 'unidades': mismo numero para todos.
+    """
     pares = sugerido_service.pares_filtrados(db, payload.filtros)
-    nuevas = [
-        SugerenciaManual(
-            producto=producto,
-            sucursal_id=sucursal_id,
-            unidades=payload.unidades,
-            motivo=payload.motivo,
-            creado_por=settings.admin_email,
-            tenant_id=settings.default_tenant_id,
-        )
-        for producto, sucursal_id in pares
-    ]
+    omitidas = 0
+    nuevas: list[SugerenciaManual] = []
+    if payload.dias_inventario:
+        mapa = sugerido_service.unidades_por_par(db, pares, payload.dias_inventario)
+        for par in pares:
+            u = mapa.get(par)
+            if u is None:
+                omitidas += 1
+                continue
+            nuevas.append(
+                SugerenciaManual(
+                    producto=par[0], sucursal_id=par[1], unidades=u,
+                    motivo=payload.motivo, creado_por=settings.admin_email,
+                    tenant_id=settings.default_tenant_id,
+                )
+            )
+    elif payload.unidades:
+        nuevas = [
+            SugerenciaManual(
+                producto=p, sucursal_id=s, unidades=payload.unidades,
+                motivo=payload.motivo, creado_por=settings.admin_email,
+                tenant_id=settings.default_tenant_id,
+            )
+            for p, s in pares
+        ]
+    else:
+        raise HTTPException(status_code=400, detail="Falta unidades o dias_inventario.")
     db.add_all(nuevas)
     db.commit()
-    return SugerenciaManualMasivaResultado(creadas=len(nuevas))
+    return SugerenciaManualMasivaResultado(creadas=len(nuevas), omitidas=omitidas)
 
 
 @router.post("/recurrentes", response_model=RecurrenteOut, status_code=201)
@@ -90,6 +123,8 @@ def crear_recurrente(payload: RecurrenteCreate, db: Session = Depends(get_db)):
     """Crea una regla recurrente y la aplica de inmediato (primera instancia)."""
     if payload.modo == "individual" and not (payload.producto and payload.sucursal_id):
         raise HTTPException(status_code=400, detail="Falta producto o sucursal.")
+    if not payload.unidades and not payload.dias_inventario:
+        raise HTTPException(status_code=400, detail="Falta unidades o dias_inventario.")
     rec = recurrentes_service.crear(db, payload)
     return _recurrente_out(rec)
 

@@ -10,7 +10,8 @@ from .sugerido import SugeridoFiltros
 class SugerenciaManualCreate(BaseModel):
     producto: str
     sucursal_id: str
-    unidades: int = Field(gt=0, description="Unidades adicionales (entero positivo)")
+    unidades: int | None = Field(default=None, gt=0, description="Unidades adicionales (si modo='unidades')")
+    dias_inventario: int | None = Field(default=None, gt=0, description="Dias de inventario adicional (si modo='dias')")
     motivo: str | None = None
 
 
@@ -18,12 +19,14 @@ class SugerenciaManualMasiva(BaseModel):
     """Crea la misma cantidad para todos los productos que cumplen los filtros."""
 
     filtros: SugeridoFiltros = Field(default_factory=SugeridoFiltros)
-    unidades: int = Field(gt=0, description="Unidades adicionales para cada producto")
+    unidades: int | None = Field(default=None, gt=0)
+    dias_inventario: int | None = Field(default=None, gt=0)
     motivo: str | None = None
 
 
 class SugerenciaManualMasivaResultado(BaseModel):
     creadas: int
+    omitidas: int = 0  # pares sin demanda diaria cuando se pidio por dias
 
 
 class SugerenciaManualUpdate(BaseModel):
@@ -53,7 +56,8 @@ class RecurrenteCreate(BaseModel):
     producto: str | None = None
     sucursal_id: str | None = None
     filtros: SugeridoFiltros | None = None  # modo grupo
-    unidades: int = Field(gt=0)
+    unidades: int | None = Field(default=None, gt=0)
+    dias_inventario: int | None = Field(default=None, gt=0)
     motivo: str | None = None
     cada_dias: int = Field(gt=0, le=365, description="Repetir cada N días")
     fecha_fin: date | None = None
@@ -64,6 +68,7 @@ class RecurrenteOut(BaseModel):
     modo: str
     resumen: str
     unidades: int
+    dias_inventario: int | None = None
     motivo: str | None = None
     cada_dias: int
     proxima_ejecucion: date
