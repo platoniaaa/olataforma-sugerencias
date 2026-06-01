@@ -16,7 +16,8 @@ class SugeridoRow(BaseModel):
     origen: str = "sugerido"  # "sugerido" | "catalogo"
     producto: str
     descripcion: str | None = None
-    sucursal_id: str
+    # sucursal_id queda opcional porque las filas de catalogo no tienen sucursal.
+    sucursal_id: str | None = None
     nombre_sucursal: str | None = None
     clasificacion_abc: str | None = None
     proveedor: str | None = None
