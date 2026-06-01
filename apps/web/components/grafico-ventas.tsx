@@ -33,7 +33,8 @@ export function GraficoVentas({
   sucursalNombre,
 }: {
   producto: string;
-  sucursalId: string;
+  /** Si se omite, muestra solo la serie total (vista catalogo sin sucursal). */
+  sucursalId?: string;
   sucursalNombre?: string | null;
 }) {
   const [data, setData] = useState<VentasResponse | null>(null);
@@ -41,8 +42,10 @@ export function GraficoVentas({
 
   useEffect(() => {
     let activo = true;
-    api
-      .ventas(producto, sucursalId)
+    const promesa = sucursalId
+      ? api.ventas(producto, sucursalId)
+      : api.catalogoVentas(producto);
+    promesa
       .then((r) => activo && setData(r))
       .catch(() => activo && setError(true));
     return () => {
@@ -74,7 +77,8 @@ export function GraficoVentas({
   const promSucursal =
     filas.length > 0 ? (data?.total_sucursal ?? 0) / filas.length : 0;
 
-  const tituloSuc = sucursalNombre ?? sucursalId;
+  const tituloSuc = sucursalNombre ?? sucursalId ?? "";
+  const mostrarSucursal = Boolean(sucursalId);
 
   return (
     <Card>
@@ -88,19 +92,25 @@ export function GraficoVentas({
                 Total
               </span>{" "}
               <b className="tabular text-slate-800">{formatoNumero(data.total_general)}</b> u
-              {" · "}
-              <span className="inline-flex items-center gap-1">
-                <span className="inline-block h-2 w-2 rounded-sm" style={{ background: "#1e40af" }} />
-                {tituloSuc}
-              </span>{" "}
-              <b className="tabular text-slate-800">{formatoNumero(data.total_sucursal)}</b> u
+              {mostrarSucursal && (
+                <>
+                  {" · "}
+                  <span className="inline-flex items-center gap-1">
+                    <span className="inline-block h-2 w-2 rounded-sm" style={{ background: "#1e40af" }} />
+                    {tituloSuc}
+                  </span>{" "}
+                  <b className="tabular text-slate-800">{formatoNumero(data.total_sucursal)}</b> u
+                </>
+              )}
             </span>
           )}
         </div>
         {data && (
           <p className="text-[11px] text-slate-400">
-            Promedio mensual — total: {formatoNumero(promGeneral, 1)} u · esta sucursal:{" "}
-            {formatoNumero(promSucursal, 1)} u
+            Promedio mensual — total: {formatoNumero(promGeneral, 1)} u
+            {mostrarSucursal && (
+              <> · esta sucursal: {formatoNumero(promSucursal, 1)} u</>
+            )}
           </p>
         )}
       </CardHeader>
@@ -140,13 +150,15 @@ export function GraficoVentas({
                 radius={[3, 3, 0, 0]}
                 isAnimationActive={false}
               />
-              <Bar
-                dataKey="sucursal"
-                name={tituloSuc}
-                fill="#1e40af"
-                radius={[3, 3, 0, 0]}
-                isAnimationActive={false}
-              />
+              {mostrarSucursal && (
+                <Bar
+                  dataKey="sucursal"
+                  name={tituloSuc}
+                  fill="#1e40af"
+                  radius={[3, 3, 0, 0]}
+                  isAnimationActive={false}
+                />
+              )}
             </BarChart>
           </ResponsiveContainer>
         )}

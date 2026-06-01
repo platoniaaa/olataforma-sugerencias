@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { formatoCLP, formatoNumero } from "@/lib/formato";
+import { GraficoVentas } from "@/components/grafico-ventas";
 import type { CatalogoDetalle } from "@/lib/types";
 
 export default function DetalleCatalogoPage({ params }: { params: { producto: string } }) {
@@ -57,6 +58,8 @@ export default function DetalleCatalogoPage({ params }: { params: { producto: st
         <Card titulo="Precio" valor={d.precio != null ? formatoCLP(d.precio) : "—"} />
         <Card titulo="Unidad" valor={d.unidad ?? "—"} />
       </div>
+
+      <GraficoVentas producto={d.producto} />
 
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-4 py-3">

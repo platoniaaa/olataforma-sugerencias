@@ -3,8 +3,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..schemas import CatalogoDetalle, CatalogoFiltros, CatalogoPage, CatalogoRow
-from ..services import catalogo_service
+from ..schemas import (
+    CatalogoDetalle,
+    CatalogoFiltros,
+    CatalogoPage,
+    CatalogoRow,
+    VentasResponse,
+)
+from ..services import catalogo_service, sugerido_service
 
 router = APIRouter(prefix="/api/catalogo", tags=["catalogo"])
 
@@ -44,6 +50,14 @@ def listar(
 def filtros_disponibles(db: Session = Depends(get_db)) -> dict:
     """Devuelve listas únicas de familia/procedencia/categoría para los dropdowns."""
     return catalogo_service.opciones_filtros(db)
+
+
+# Ojo: este endpoint debe declararse ANTES del catch-all {producto:path} de abajo,
+# si no FastAPI lo enruta como producto="<producto>/ventas".
+@router.get("/{producto:path}/ventas", response_model=VentasResponse)
+def ventas(producto: str, db: Session = Depends(get_db)):
+    """Histórico de venta del producto en TODAS las sucursales (12 meses)."""
+    return VentasResponse(**sugerido_service.ventas_12m(db, producto))
 
 
 @router.get("/{producto:path}", response_model=CatalogoDetalle)

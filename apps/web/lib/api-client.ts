@@ -181,6 +181,10 @@ export const api = {
     return getJSON(`/api/catalogo/${encodeURIComponent(producto)}`);
   },
 
+  async catalogoVentas(producto: string): Promise<VentasResponse> {
+    return getJSON(`/api/catalogo/${encodeURIComponent(producto)}/ventas`);
+  },
+
   async sugerenciasManuales(producto?: string, sucursalId?: string): Promise<SugerenciaManual[]> {
     const p = new URLSearchParams();
     if (producto) p.set("producto", producto);

@@ -15,6 +15,19 @@ interface Props {
   onRowClick: (row: SugeridoRow) => void;
 }
 
+function ProductoCelda(p: { value: unknown; data?: SugeridoRow }) {
+  const v = (p.value as string | null) ?? "";
+  if (p.data?.origen !== "catalogo") return <>{v}</>;
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span>{v}</span>
+      <span className="rounded bg-slate-100 px-1.5 py-px text-[10px] font-semibold text-slate-500">
+        CATÁLOGO
+      </span>
+    </span>
+  );
+}
+
 function formateador(def: DefColumna) {
   return (p: { value: unknown }) => {
     const v = p.value as number | string | null;
@@ -47,14 +60,9 @@ function colDef(def: DefColumna): ColDef {
   };
 
   // Para la columna "producto" agregamos un badge "Catálogo" cuando origen === "catalogo".
+  // AG Grid >= 32 escapa strings desde cellRenderer; hay que devolver JSX para HTML real.
   if (def.key === "producto") {
-    base.cellRenderer = (p: { value: unknown; data?: SugeridoRow }) => {
-      const v = p.value as string | null;
-      if (p.data?.origen === "catalogo") {
-        return `<span>${v ?? ""}</span> <span style="background:#f1f5f9;color:#64748b;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;margin-left:4px">CATÁLOGO</span>`;
-      }
-      return v ?? "";
-    };
+    base.cellRenderer = ProductoCelda;
   }
 
   if (def.tipo === "abc") {
