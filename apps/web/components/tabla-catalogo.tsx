@@ -43,10 +43,11 @@ function colDef(def: DefColCat): ColDef {
     flex: def.key === "glosa" ? 2 : undefined,
   };
   if (numerica) {
-    base.type = "rightAligned";
-    base.cellClass = "tabular";
+    // Solo la celda a la derecha; el header queda alineado a la izquierda como las
+    // demas columnas (asi se ve consistente).
+    base.cellClass = "tabular text-right";
     base.valueFormatter = formateador(def);
-    if (def.key === "stock_total") base.cellClass = "tabular font-semibold";
+    if (def.key === "stock_total") base.cellClass = "tabular text-right font-semibold";
   }
   return base;
 }
