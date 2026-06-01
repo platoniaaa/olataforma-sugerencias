@@ -11,7 +11,9 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from ..models import Sugerido
+# Nota: los rows vienen como dicts desde sugerido_service.listar (mezcla
+# sugerido + catalogo + manuales). Antes eran ORM y este modulo hacia getattr,
+# pero ahora son dicts.
 
 # Etiquetas legibles para las cabeceras del Excel.
 LABELS: dict[str, str] = {
@@ -56,7 +58,7 @@ HEADER_FILL = PatternFill("solid", fgColor="1E40AF")
 HEADER_FONT = Font(color="FFFFFF", bold=True)
 
 
-def generar_excel(rows: list[Sugerido], columnas: list[str] | None) -> bytes:
+def generar_excel(rows: list[dict], columnas: list[str] | None) -> bytes:
     cols = [c for c in (columnas or []) if c in LABELS] or DEFAULT_COLUMNS
 
     wb = Workbook()
@@ -70,10 +72,16 @@ def generar_excel(rows: list[Sugerido], columnas: list[str] | None) -> bytes:
         cell.font = HEADER_FONT
         cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    # Datos.
+    # Datos. rows son dicts (sugerido + catalogo + manuales mezclados).
+    # Fallback a getattr por si alguien pasa ORM, pero el caller actual usa dicts.
+    def _valor(row, col):
+        if isinstance(row, dict):
+            return row.get(col)
+        return getattr(row, col, None)
+
     for i, row in enumerate(rows, start=2):
         for j, col in enumerate(cols, start=1):
-            value = getattr(row, col, None)
+            value = _valor(row, col)
             cell = ws.cell(row=i, column=j, value=value)
             if col in CLP_COLUMNS and isinstance(value, (int, float)):
                 cell.number_format = '"$"#,##0'
