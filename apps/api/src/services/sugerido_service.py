@@ -27,7 +27,21 @@ def _apply_filters(stmt, f: SugeridoFiltros):
     busqueda = bool(f.q and f.q.strip())
     if busqueda:
         like = f"%{f.q}%"
-        stmt = stmt.where(or_(Sugerido.producto.ilike(like), Sugerido.descripcion.ilike(like)))
+        # Busqueda global: matchea cualquier columna de texto del sugerido.
+        # El usuario puede tipear codigo, descripcion, sucursal, marca, proveedor,
+        # ABC, tipo_origen, abastece_cd, etc. y la fila aparece si contiene el texto.
+        stmt = stmt.where(
+            or_(
+                Sugerido.producto.ilike(like),
+                Sugerido.descripcion.ilike(like),
+                Sugerido.nombre_sucursal.ilike(like),
+                Sugerido.proveedor.ilike(like),
+                Sugerido.filtro1_final.ilike(like),
+                Sugerido.tipo_origen.ilike(like),
+                Sugerido.clasificacion_abc.ilike(like),
+                Sugerido.abastece_cd.ilike(like),
+            )
+        )
     if f.sucursales:
         stmt = stmt.where(Sugerido.nombre_sucursal.in_(f.sucursales))
     if f.abc:

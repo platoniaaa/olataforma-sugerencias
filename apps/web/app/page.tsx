@@ -164,12 +164,7 @@ export default function DashboardPage() {
         )}
       </div>
 
-      <FiltrosSugerido
-        filtros={filtros}
-        onChange={setFiltros}
-        sucursales={nombresSucursales}
-        marcas={marcas}
-      />
+      <FiltrosSugerido filtros={filtros} onChange={setFiltros} />
 
       {error && (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800">
