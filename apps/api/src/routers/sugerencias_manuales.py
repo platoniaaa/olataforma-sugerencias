@@ -15,7 +15,8 @@ from ..schemas import (
     SugerenciaManualOut,
     SugerenciaManualUpdate,
 )
-from ..services import recurrentes_service, sugerido_service
+from ..services import auditoria_service, recurrentes_service, sugerido_service
+from ..services.auth import requiere_auth
 
 
 def _recurrente_out(rec) -> RecurrenteOut:
@@ -50,7 +51,11 @@ def listar(
 
 
 @router.post("", response_model=SugerenciaManualOut, status_code=201)
-def crear(payload: SugerenciaManualCreate, db: Session = Depends(get_db)):
+def crear(
+    payload: SugerenciaManualCreate,
+    db: Session = Depends(get_db),
+    email: str = Depends(requiere_auth),
+):
     if payload.dias_inventario:
         unidades = sugerido_service.unidades_desde_dias(
             db, payload.producto, payload.sucursal_id, payload.dias_inventario
@@ -69,17 +74,34 @@ def crear(payload: SugerenciaManualCreate, db: Session = Depends(get_db)):
         sucursal_id=payload.sucursal_id,
         unidades=unidades,
         motivo=payload.motivo,
-        creado_por=settings.admin_email,
+        creado_por=email,
         tenant_id=settings.default_tenant_id,
     )
     db.add(s)
+    db.flush()
+    auditoria_service.registrar(
+        db, accion="creada", entidad="sugerencia_manual", entidad_id=s.id,
+        usuario_email=email, producto=s.producto, sucursal_id=s.sucursal_id,
+        unidades=unidades, dias_inventario=payload.dias_inventario, motivo=payload.motivo,
+    )
+    auditoria_service.notificar(
+        db, tipo="sugerencia_creada",
+        titulo=f"{email.split('@')[0]} sugirio {s.producto}",
+        mensaje=f"+{unidades} u en {s.sucursal_id}"
+        + (f". Motivo: {s.motivo}" if s.motivo else ""),
+        creado_por_email=email, producto=s.producto, sucursal_id=s.sucursal_id,
+    )
     db.commit()
     db.refresh(s)
     return s
 
 
 @router.post("/masiva", response_model=SugerenciaManualMasivaResultado, status_code=201)
-def crear_masiva(payload: SugerenciaManualMasiva, db: Session = Depends(get_db)):
+def crear_masiva(
+    payload: SugerenciaManualMasiva,
+    db: Session = Depends(get_db),
+    email: str = Depends(requiere_auth),
+):
     """Crea una sugerencia manual para cada producto x sucursal que cumple los filtros.
 
     Modo 'dias_inventario': calcula unidades por par segun demanda_diaria del BI; los
@@ -98,7 +120,7 @@ def crear_masiva(payload: SugerenciaManualMasiva, db: Session = Depends(get_db))
             nuevas.append(
                 SugerenciaManual(
                     producto=par[0], sucursal_id=par[1], unidades=u,
-                    motivo=payload.motivo, creado_por=settings.admin_email,
+                    motivo=payload.motivo, creado_por=email,
                     tenant_id=settings.default_tenant_id,
                 )
             )
@@ -106,7 +128,7 @@ def crear_masiva(payload: SugerenciaManualMasiva, db: Session = Depends(get_db))
         nuevas = [
             SugerenciaManual(
                 producto=p, sucursal_id=s, unidades=payload.unidades,
-                motivo=payload.motivo, creado_por=settings.admin_email,
+                motivo=payload.motivo, creado_por=email,
                 tenant_id=settings.default_tenant_id,
             )
             for p, s in pares
@@ -114,18 +136,41 @@ def crear_masiva(payload: SugerenciaManualMasiva, db: Session = Depends(get_db))
     else:
         raise HTTPException(status_code=400, detail="Falta unidades o dias_inventario.")
     db.add_all(nuevas)
+    db.flush()
+    cantidad_str = (
+        f"{payload.dias_inventario} dias" if payload.dias_inventario
+        else f"{payload.unidades} u"
+    )
+    auditoria_service.registrar(
+        db, accion="masiva_creada", entidad="sugerencia_manual",
+        usuario_email=email, unidades=payload.unidades,
+        dias_inventario=payload.dias_inventario, motivo=payload.motivo,
+        detalle=f"Masiva: {len(nuevas)} pares, {omitidas} omitidos, +{cantidad_str}",
+    )
+    auditoria_service.notificar(
+        db, tipo="masiva_creada",
+        titulo=f"{email.split('@')[0]} cargo {len(nuevas)} sugerencias",
+        mensaje=f"+{cantidad_str} por producto"
+        + (f". Motivo: {payload.motivo}" if payload.motivo else "")
+        + (f". {omitidas} omitidos sin demanda." if omitidas else ""),
+        creado_por_email=email,
+    )
     db.commit()
     return SugerenciaManualMasivaResultado(creadas=len(nuevas), omitidas=omitidas)
 
 
 @router.post("/recurrentes", response_model=RecurrenteOut, status_code=201)
-def crear_recurrente(payload: RecurrenteCreate, db: Session = Depends(get_db)):
+def crear_recurrente(
+    payload: RecurrenteCreate,
+    db: Session = Depends(get_db),
+    email: str = Depends(requiere_auth),
+):
     """Crea una regla recurrente y la aplica de inmediato (primera instancia)."""
     if payload.modo == "individual" and not (payload.producto and payload.sucursal_id):
         raise HTTPException(status_code=400, detail="Falta producto o sucursal.")
     if not payload.unidades and not payload.dias_inventario:
         raise HTTPException(status_code=400, detail="Falta unidades o dias_inventario.")
-    rec = recurrentes_service.crear(db, payload)
+    rec = recurrentes_service.crear(db, payload, usuario_email=email)
     return _recurrente_out(rec)
 
 
@@ -137,28 +182,75 @@ def listar_recurrentes(
 
 
 @router.delete("/recurrentes/{id}", status_code=204)
-def eliminar_recurrente(id: str, db: Session = Depends(get_db)):
-    if not recurrentes_service.eliminar(db, id):
+def eliminar_recurrente(
+    id: str,
+    db: Session = Depends(get_db),
+    email: str = Depends(requiere_auth),
+):
+    rec = recurrentes_service.eliminar(db, id, usuario_email=email)
+    if not rec:
         raise HTTPException(status_code=404, detail="Recurrencia no encontrada")
 
 
 @router.patch("/{id}", response_model=SugerenciaManualOut)
-def actualizar(id: str, payload: SugerenciaManualUpdate, db: Session = Depends(get_db)):
+def actualizar(
+    id: str,
+    payload: SugerenciaManualUpdate,
+    db: Session = Depends(get_db),
+    email: str = Depends(requiere_auth),
+):
     s = db.get(SugerenciaManual, id)
     if not s:
         raise HTTPException(status_code=404, detail="Sugerencia no encontrada")
     data = payload.model_dump(exclude_unset=True)
+    unidades_antes = s.unidades
+    cambios = []
     for k, v in data.items():
+        antes = getattr(s, k)
+        if antes != v:
+            cambios.append(f"{k}: {antes} -> {v}")
         setattr(s, k, v)
+    if cambios:
+        auditoria_service.registrar(
+            db, accion="modificada", entidad="sugerencia_manual", entidad_id=s.id,
+            usuario_email=email, producto=s.producto, sucursal_id=s.sucursal_id,
+            unidades=s.unidades, motivo=s.motivo, detalle="; ".join(cambios),
+        )
+        if "unidades" in data and unidades_antes != s.unidades:
+            auditoria_service.notificar(
+                db, tipo="sugerencia_modificada",
+                titulo=f"{email.split('@')[0]} ajusto {s.producto}",
+                mensaje=f"{s.sucursal_id}: {unidades_antes} -> {s.unidades} u",
+                creado_por_email=email, producto=s.producto, sucursal_id=s.sucursal_id,
+            )
     db.commit()
     db.refresh(s)
     return s
 
 
 @router.delete("/{id}", status_code=204)
-def eliminar(id: str, db: Session = Depends(get_db)):
+def eliminar(
+    id: str,
+    db: Session = Depends(get_db),
+    email: str = Depends(requiere_auth),
+):
     s = db.get(SugerenciaManual, id)
     if not s:
         raise HTTPException(status_code=404, detail="Sugerencia no encontrada")
+    snap = {
+        "id": s.id, "producto": s.producto, "sucursal_id": s.sucursal_id,
+        "unidades": s.unidades, "motivo": s.motivo,
+    }
     db.delete(s)
+    auditoria_service.registrar(
+        db, accion="eliminada", entidad="sugerencia_manual", entidad_id=snap["id"],
+        usuario_email=email, producto=snap["producto"], sucursal_id=snap["sucursal_id"],
+        unidades=snap["unidades"], motivo=snap["motivo"],
+    )
+    auditoria_service.notificar(
+        db, tipo="sugerencia_eliminada",
+        titulo=f"{email.split('@')[0]} elimino sugerencia de {snap['producto']}",
+        mensaje=f"{snap['sucursal_id']}: -{snap['unidades']} u",
+        creado_por_email=email, producto=snap["producto"], sucursal_id=snap["sucursal_id"],
+    )
     db.commit()

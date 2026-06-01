@@ -12,6 +12,7 @@ from .config import get_settings
 from .db import create_all
 from .routers import (
     admin,
+    auditoria,
     auth,
     catalogo,
     compras,
@@ -67,6 +68,7 @@ app.include_router(sugerencias_manuales.router, dependencies=_protegido)
 app.include_router(compras.router, dependencies=_protegido)
 app.include_router(post_venta.router, dependencies=_protegido)
 app.include_router(catalogo.router, dependencies=_protegido)
+app.include_router(auditoria.router, dependencies=_protegido)
 app.include_router(admin.router, dependencies=_protegido)
 
 

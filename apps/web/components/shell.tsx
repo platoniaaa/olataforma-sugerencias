@@ -5,12 +5,14 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
 import { estaAutenticado, getEmail, getNombre, logout } from "@/lib/auth";
+import { CampanitaNotificaciones } from "@/components/campanita-notificaciones";
 
 const NAV = [
   { href: "/", label: "Dashboard" },
   { href: "/compras", label: "Compras" },
   { href: "/catalogo", label: "Catálogo" },
   { href: "/recurrentes", label: "Recurrentes" },
+  { href: "/auditoria", label: "Auditoría" },
   { href: "/exportar", label: "Exportar" },
   { href: "/cargar", label: "Cargar datos" },
 ];
@@ -71,6 +73,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               </Link>
             ))}
             <div className="ml-2 flex items-center gap-2 border-l border-slate-200 pl-3">
+              <CampanitaNotificaciones />
               <span className="hidden text-[13px] text-slate-500 md:inline">
                 {nombre ?? email}
               </span>

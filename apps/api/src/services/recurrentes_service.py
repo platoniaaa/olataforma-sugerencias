@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from ..config import get_settings
 from ..models import SugerenciaManual, SugerenciaRecurrente
 from ..schemas import SugeridoFiltros
+from . import auditoria_service
 from .sugerido_service import pares_filtrados, unidades_desde_dias, unidades_por_par
 
 settings = get_settings()
@@ -86,7 +87,7 @@ def _avanzar(rec: SugerenciaRecurrente, hoy: date) -> None:
         rec.activa = False
 
 
-def crear(db: Session, payload) -> SugerenciaRecurrente:
+def crear(db: Session, payload, usuario_email: str | None = None) -> SugerenciaRecurrente:
     hoy = date.today()
     filtros_json = None
     if payload.modo == "grupo":
@@ -106,13 +107,38 @@ def crear(db: Session, payload) -> SugerenciaRecurrente:
         cada_dias=payload.cada_dias,
         fecha_fin=payload.fecha_fin,
         proxima_ejecucion=hoy,
-        creado_por=settings.admin_email,
+        creado_por=usuario_email or settings.admin_email,
     )
     db.add(rec)
     db.flush()
     # Aplica de inmediato (primera instancia) y agenda la próxima.
-    _crear_instancias(db, rec)
+    n_creadas = _crear_instancias(db, rec)
     _avanzar(rec, hoy)
+    cantidad_str = (
+        f"{payload.dias_inventario} dias" if payload.dias_inventario
+        else f"{payload.unidades} u"
+    )
+    auditoria_service.registrar(
+        db, accion="recurrente_creada", entidad="sugerencia_recurrente", entidad_id=rec.id,
+        usuario_email=usuario_email, producto=rec.producto, sucursal_id=rec.sucursal_id,
+        unidades=payload.unidades, dias_inventario=payload.dias_inventario,
+        motivo=rec.motivo,
+        detalle=f"Recurrente {rec.modo}, +{cantidad_str} cada {rec.cada_dias} dias, "
+        f"{n_creadas} instancia(s) creada(s)",
+    )
+    if usuario_email:
+        nombre = usuario_email.split("@")[0]
+        titulo = (
+            f"{nombre} creo recurrencia para {rec.producto}"
+            if rec.modo == "individual" else
+            f"{nombre} creo recurrencia ({n_creadas} productos)"
+        )
+        auditoria_service.notificar(
+            db, tipo="recurrente_creada", titulo=titulo,
+            mensaje=f"+{cantidad_str} cada {rec.cada_dias} dias",
+            creado_por_email=usuario_email,
+            producto=rec.producto, sucursal_id=rec.sucursal_id,
+        )
     db.commit()
     db.refresh(rec)
     return rec
@@ -128,12 +154,23 @@ def listar(db: Session, incluir_inactivas: bool = False) -> list[SugerenciaRecur
     return list(db.scalars(stmt).all())
 
 
-def eliminar(db: Session, rec_id: str) -> bool:
+def eliminar(db: Session, rec_id: str, usuario_email: str | None = None) -> bool:
     rec = db.get(SugerenciaRecurrente, rec_id)
     if not rec:
         return False
+    snap = {
+        "producto": rec.producto, "sucursal_id": rec.sucursal_id,
+        "unidades": rec.unidades, "dias_inventario": rec.dias_inventario,
+        "motivo": rec.motivo, "modo": rec.modo, "cada_dias": rec.cada_dias,
+    }
     _archivar_instancias(db, rec_id)  # quita su aporte vigente de la compra
     db.delete(rec)
+    auditoria_service.registrar(
+        db, accion="recurrente_eliminada", entidad="sugerencia_recurrente", entidad_id=rec_id,
+        usuario_email=usuario_email, producto=snap["producto"], sucursal_id=snap["sucursal_id"],
+        unidades=snap["unidades"], dias_inventario=snap["dias_inventario"], motivo=snap["motivo"],
+        detalle=f"Recurrente {snap['modo']} cada {snap['cada_dias']} dias",
+    )
     db.commit()
     return True
 
@@ -155,9 +192,17 @@ def procesar(db: Session, hoy: date | None = None) -> dict:
         if rec.fecha_fin and hoy > rec.fecha_fin:
             rec.activa = False
             continue
-        creadas += _crear_instancias(db, rec)
+        n = _crear_instancias(db, rec)
+        creadas += n
         _avanzar(rec, hoy)
         procesadas += 1
+        auditoria_service.registrar(
+            db, accion="recurrente_aplicada", entidad="sugerencia_recurrente",
+            entidad_id=rec.id, usuario_email="cron",
+            producto=rec.producto, sucursal_id=rec.sucursal_id,
+            unidades=rec.unidades, dias_inventario=rec.dias_inventario,
+            detalle=f"Ejecucion automatica: {n} instancia(s) creada(s)",
+        )
     db.commit()
     return {"recurrencias_procesadas": procesadas, "sugerencias_creadas": creadas}
 

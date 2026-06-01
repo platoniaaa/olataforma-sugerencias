@@ -9,6 +9,8 @@ from .venta_mensual import VentaMensual
 from .post_venta import PostVentaFila, PostVentaMeta
 from .producto_catalogo import ProductoCatalogo
 from .stock_unificado import StockUnificado
+from .auditoria import AuditoriaLog
+from .notificacion import Notificacion
 
 __all__ = [
     "Sugerido",
@@ -22,4 +24,6 @@ __all__ = [
     "PostVentaMeta",
     "ProductoCatalogo",
     "StockUnificado",
+    "AuditoriaLog",
+    "Notificacion",
 ]

@@ -246,3 +246,42 @@ export interface CargaResultado {
   columnas_detectadas: string[];
   advertencias: string[];
 }
+
+export interface AuditoriaLog {
+  id: string;
+  accion: string;
+  entidad: string;
+  entidad_id: string | null;
+  usuario_email: string | null;
+  producto: string | null;
+  sucursal_id: string | null;
+  unidades: number | null;
+  dias_inventario: number | null;
+  motivo: string | null;
+  detalle: string | null;
+  creado_en: string;
+}
+
+export interface AuditoriaPage {
+  items: AuditoriaLog[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface Notificacion {
+  id: string;
+  tipo: string;
+  titulo: string;
+  mensaje: string | null;
+  creado_por_email: string | null;
+  producto: string | null;
+  sucursal_id: string | null;
+  creado_en: string;
+  leida: boolean;
+}
+
+export interface NotificacionesResponse {
+  items: Notificacion[];
+  no_leidas: number;
+}

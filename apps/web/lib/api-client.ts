@@ -2,6 +2,7 @@
 import { clearSession, getToken, setSession } from "./auth";
 import type {
   AgrupadoRow,
+  AuditoriaPage,
   CargaResultado,
   CarrosResponse,
   CatalogoDetalle,
@@ -9,6 +10,7 @@ import type {
   CatalogoOpciones,
   CatalogoPage,
   DimensionAgrupado,
+  NotificacionesResponse,
   Producto,
   Sucursal,
   SugerenciaManual,
@@ -319,6 +321,26 @@ export const api = {
     a.download = nombre;
     a.click();
     URL.revokeObjectURL(url);
+  },
+
+  async auditoria(limit = 100, offset = 0): Promise<AuditoriaPage> {
+    return getJSON(`/api/auditoria?limit=${limit}&offset=${offset}`);
+  },
+
+  async notificaciones(soloNoLeidas = false, limit = 20): Promise<NotificacionesResponse> {
+    return getJSON(
+      `/api/notificaciones?solo_no_leidas=${soloNoLeidas}&limit=${limit}`
+    );
+  },
+
+  async marcarLeidas(ids?: string[]): Promise<{ actualizadas: number }> {
+    const res = await req("/api/notificaciones/marcar-leidas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: ids ?? null }),
+    });
+    if (!res.ok) throw new Error("No se pudo marcar como leida");
+    return res.json();
   },
 
   async cargarSugerido(file: File): Promise<CargaResultado> {

@@ -33,6 +33,13 @@ from .compras import (
     ExportCarrosRequest,
 )
 from .post_venta import PostVentaMetaOut, PostVentaFiltros
+from .auditoria import (
+    AuditoriaLogOut,
+    AuditoriaPage,
+    NotificacionOut,
+    NotificacionesResponse,
+    MarcarLeidasRequest,
+)
 
 __all__ = [
     "SugeridoRow",
@@ -64,4 +71,9 @@ __all__ = [
     "ExportCarrosRequest",
     "PostVentaMetaOut",
     "PostVentaFiltros",
+    "AuditoriaLogOut",
+    "AuditoriaPage",
+    "NotificacionOut",
+    "NotificacionesResponse",
+    "MarcarLeidasRequest",
 ]
