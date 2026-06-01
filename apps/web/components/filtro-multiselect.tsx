@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useGridFilter } from "ag-grid-react";
 import type {
   GridApi,
@@ -54,10 +54,43 @@ export function FiltroMultiSelect(props: CustomFilterProps) {
 
   const [allValues, setAllValues] = useState<string[]>(() => calcularDistintos());
 
+  // Mantener allValues sincronizado: AG Grid construye el filter component
+  // una vez por columna y lo cachea. Si rowData cambia despues (carga
+  // asincrona, re-fetch), tenemos que recalcular o quedamos con los valores
+  // del primer render (en algunas vistas iniciales podia haber 0-1 filas).
+  useEffect(() => {
+    const refrescar = () => {
+      const nuevos = calcularDistintos();
+      setAllValues((prev) => {
+        if (prev.length === nuevos.length && prev.every((v, i) => v === nuevos[i])) {
+          return prev; // sin cambios -> no re-render
+        }
+        return nuevos;
+      });
+    };
+    refrescar();
+    api.addEventListener("modelUpdated", refrescar);
+    return () => {
+      api.removeEventListener("modelUpdated", refrescar);
+    };
+  }, [api, calcularDistintos]);
+
   // Estado UI local (lo que el usuario está editando, NO el modelo aplicado).
   const [seleccion, setSeleccion] = useState<Set<string>>(
     () => new Set(model?.values ?? allValues)
   );
+
+  // Si todavia no hay filtro aplicado (model null) y allValues crecio, ampliar
+  // la seleccion para que el "(Seleccionar todo)" siga marcando todos los nuevos.
+  useEffect(() => {
+    if (model) return; // filtro activo -> respetamos el model del usuario
+    setSeleccion((prev) => {
+      if (prev.size === allValues.length && allValues.every((v) => prev.has(v))) {
+        return prev;
+      }
+      return new Set(allValues);
+    });
+  }, [allValues, model]);
   // Si el modelo guardado es "contiene X", precargamos esa busqueda al abrir.
   const [busqueda, setBusqueda] = useState<string>(model?.contains ?? "");
   const [listaPegada, setListaPegada] = useState<string[] | null>(null);
