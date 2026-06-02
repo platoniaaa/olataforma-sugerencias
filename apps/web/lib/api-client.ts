@@ -300,6 +300,8 @@ export const api = {
     const p = new URLSearchParams();
     if (f.periodo_desde) p.set("periodo_desde", f.periodo_desde);
     if (f.periodo_hasta) p.set("periodo_hasta", f.periodo_hasta);
+    if (f.fecha_desde) p.set("fecha_desde", f.fecha_desde);
+    if (f.fecha_hasta) p.set("fecha_hasta", f.fecha_hasta);
     if (f.sucursal) p.set("sucursal", f.sucursal);
     const r = await getJSON<{ filas: number }>(`/api/post-venta/contar?${p.toString()}`);
     return r.filas;
@@ -363,6 +365,8 @@ export const api = {
     const p = new URLSearchParams();
     if (f.periodo_desde) p.set("periodo_desde", f.periodo_desde);
     if (f.periodo_hasta) p.set("periodo_hasta", f.periodo_hasta);
+    if (f.fecha_desde) p.set("fecha_desde", f.fecha_desde);
+    if (f.fecha_hasta) p.set("fecha_hasta", f.fecha_hasta);
     if (f.sucursal) p.set("sucursal", f.sucursal);
     if (f.q) p.set("q", f.q);
     p.set("page", String(opts.page ?? 1));

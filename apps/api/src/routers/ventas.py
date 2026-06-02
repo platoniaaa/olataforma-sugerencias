@@ -46,16 +46,22 @@ def por_sucursal(
 def lineas(
     periodo_desde: str | None = Query(None),
     periodo_hasta: str | None = Query(None),
+    fecha_desde: str | None = Query(None, description="YYYY-MM-DD"),
+    fecha_hasta: str | None = Query(None, description="YYYY-MM-DD"),
     sucursal: str | None = Query(None),
     q: str | None = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(200, ge=1, le=2000),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Lineas detalladas de Post Venta (estilo ERP) con filtros + paginacion."""
+    """Lineas detalladas de Post Venta (estilo ERP) con filtros + paginacion.
+
+    Si vienen fecha_desde/hasta, gana sobre periodo_desde/hasta y filtra por dia exacto.
+    """
     items, total, columnas = ventas_post_service.listar_lineas(
         db,
         periodo_desde=periodo_desde, periodo_hasta=periodo_hasta,
+        fecha_desde=fecha_desde, fecha_hasta=fecha_hasta,
         sucursal=sucursal, q=q, page=page, limit=limit,
     )
     return {

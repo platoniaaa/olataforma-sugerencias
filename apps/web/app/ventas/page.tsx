@@ -54,6 +54,22 @@ const EXCEL_MAX = 1_048_575;
 const LIMIT_GRILLA = 2000;
 const STORAGE_COLS = "ventas_cols_visibles";
 
+// Helpers para convertir periodo YYYYMM <-> fecha YYYY-MM-DD.
+const DIAS_MES = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+function primerDiaDelPeriodo(periodo: string): string {
+  if (!periodo || periodo.length !== 6) return "";
+  return `${periodo.slice(0, 4)}-${periodo.slice(4, 6)}-01`;
+}
+function ultimoDiaDelPeriodo(periodo: string): string {
+  if (!periodo || periodo.length !== 6) return "";
+  const a = parseInt(periodo.slice(0, 4), 10);
+  const m = parseInt(periodo.slice(4, 6), 10);
+  if (Number.isNaN(a) || Number.isNaN(m) || m < 1 || m > 12) return "";
+  let dias = DIAS_MES[m - 1];
+  if (m === 2 && ((a % 4 === 0 && a % 100 !== 0) || a % 400 === 0)) dias = 29;
+  return `${periodo.slice(0, 4)}-${periodo.slice(4, 6)}-${String(dias).padStart(2, "0")}`;
+}
+
 const COLS_DEFAULT = [
   "Periodo",
   "Fecha",
@@ -152,11 +168,12 @@ function SeccionDetalle({ meta }: { meta: PostVentaMeta | null }) {
   const [conteo, setConteo] = useState<number | null>(null);
   const [descargando, setDescargando] = useState<null | "csv" | "xlsx">(null);
 
-  // Inicializar filtros desde meta (rango completo).
+  // Inicializar filtros desde meta: primer y ultimo dia del mes mas reciente.
   useEffect(() => {
     if (!meta || meta.periodos.length === 0) return;
-    setDesde(meta.periodos[meta.periodos.length - 1]); // por defecto mes mas reciente
-    setHasta(meta.periodos[meta.periodos.length - 1]);
+    const ult = meta.periodos[meta.periodos.length - 1];
+    setDesde(primerDiaDelPeriodo(ult));
+    setHasta(ultimoDiaDelPeriodo(ult));
   }, [meta]);
 
   // Restaurar columnas visibles desde localStorage.
@@ -183,8 +200,8 @@ function SeccionDetalle({ meta }: { meta: PostVentaMeta | null }) {
 
   const filtros = useMemo(
     () => ({
-      periodo_desde: desde || undefined,
-      periodo_hasta: hasta || undefined,
+      fecha_desde: desde || undefined,
+      fecha_hasta: hasta || undefined,
       sucursal: sucursal || undefined,
       q: busqueda || undefined,
     }),
@@ -216,8 +233,8 @@ function SeccionDetalle({ meta }: { meta: PostVentaMeta | null }) {
     if (!meta) return;
     api
       .postVentaContar({
-        periodo_desde: desde || null,
-        periodo_hasta: hasta || null,
+        fecha_desde: desde || null,
+        fecha_hasta: hasta || null,
         sucursal: sucursal || null,
       })
       .then(setConteo)
@@ -229,8 +246,8 @@ function SeccionDetalle({ meta }: { meta: PostVentaMeta | null }) {
     try {
       await api.exportPostVenta(
         {
-          periodo_desde: desde || null,
-          periodo_hasta: hasta || null,
+          fecha_desde: desde || null,
+          fecha_hasta: hasta || null,
           sucursal: sucursal || null,
         },
         formato
@@ -308,17 +325,19 @@ function SeccionDetalle({ meta }: { meta: PostVentaMeta | null }) {
             onChange={setBusqueda}
             placeholder="Producto, descripción, cliente…"
           />
-          <FieldSelect
+          <FieldDate
             label="Desde"
             value={desde}
             onChange={setDesde}
-            options={meta.periodos.map((p) => ({ value: p, label: etiquetaPeriodo(p) }))}
+            min={primerDiaDelPeriodo(meta.periodos[0] ?? "")}
+            max={ultimoDiaDelPeriodo(meta.periodos[meta.periodos.length - 1] ?? "")}
           />
-          <FieldSelect
+          <FieldDate
             label="Hasta"
             value={hasta}
             onChange={setHasta}
-            options={meta.periodos.map((p) => ({ value: p, label: etiquetaPeriodo(p) }))}
+            min={primerDiaDelPeriodo(meta.periodos[0] ?? "")}
+            max={ultimoDiaDelPeriodo(meta.periodos[meta.periodos.length - 1] ?? "")}
           />
           <FieldSelect
             label="Sucursal"
@@ -582,6 +601,34 @@ function FieldSelect({
           </option>
         ))}
       </select>
+    </label>
+  );
+}
+
+function FieldDate({
+  label,
+  value,
+  onChange,
+  min,
+  max,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  min?: string;
+  max?: string;
+}) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="kicker">{label}</span>
+      <input
+        type="date"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        min={min || undefined}
+        max={max || undefined}
+        className="rounded-sm border border-ink-200 bg-white px-3 py-2 text-[13px] text-ink-900 focus:border-accent-700 focus:outline-none focus:ring-2 focus:ring-accent-700/30"
+      />
     </label>
   );
 }

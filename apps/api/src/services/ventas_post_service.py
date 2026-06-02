@@ -103,6 +103,8 @@ def listar_lineas(
     *,
     periodo_desde: str | None = None,
     periodo_hasta: str | None = None,
+    fecha_desde: str | None = None,  # YYYY-MM-DD
+    fecha_hasta: str | None = None,  # YYYY-MM-DD
     sucursal: str | None = None,
     q: str | None = None,
     page: int = 1,
@@ -110,45 +112,77 @@ def listar_lineas(
 ) -> tuple[list[dict], int, list[str]]:
     """Devuelve lineas detalladas de Post Venta como dicts {columna: valor}.
 
-    Parsea el JSON posicional usando el orden guardado en PostVentaMeta.columnas.
-    Si q tiene valor, filtra por LIKE en el JSON crudo (rapido, no muy preciso pero
-    sirve para buscar texto: producto, descripcion, cliente, etc.).
+    Si fecha_desde/hasta vienen, derivan el periodo automaticamente para acotar
+    SQL y luego se filtra por dia exacto en Python (la fecha vive como string
+    'MM/DD/YYYY' dentro del JSON posicional, no es columna SQL).
     """
+    from .post_venta_service import _resolver_filtros, _idx_fecha, _pasa_filtro_dia
+
     meta = db.get(PostVentaMeta, _tenant())
     if not meta:
         return [], 0, []
     columnas = json.loads(meta.columnas)
+    i_fecha = _idx_fecha(columnas)
+    pd_eff, ph_eff, fd, fh = _resolver_filtros(
+        periodo_desde, periodo_hasta, fecha_desde, fecha_hasta
+    )
 
     base = select(PostVentaFila).where(PostVentaFila.tenant_id == _tenant())
-    if periodo_desde:
-        base = base.where(PostVentaFila.periodo >= periodo_desde)
-    if periodo_hasta:
-        base = base.where(PostVentaFila.periodo <= periodo_hasta)
+    if pd_eff:
+        base = base.where(PostVentaFila.periodo >= pd_eff)
+    if ph_eff:
+        base = base.where(PostVentaFila.periodo <= ph_eff)
     if sucursal:
         base = base.where(PostVentaFila.sucursal == sucursal)
     if q and q.strip():
         like = f"%{q.strip()}%"
         base = base.where(PostVentaFila.datos.ilike(like))
 
-    total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
-    stmt = (
-        base.order_by(desc(PostVentaFila.periodo), desc(PostVentaFila.id))
-        .offset((page - 1) * limit)
-        .limit(limit)
-    )
-    filas = list(db.scalars(stmt).all())
+    aplica_filtro_dia = fd is not None or fh is not None
 
+    if not aplica_filtro_dia:
+        # Sin filtro por dia: contamos en SQL y paginamos directo.
+        total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
+        stmt = (
+            base.order_by(desc(PostVentaFila.periodo), desc(PostVentaFila.id))
+            .offset((page - 1) * limit)
+            .limit(limit)
+        )
+        filas = list(db.scalars(stmt).all())
+        items: list[dict] = []
+        for f in filas:
+            try:
+                valores = json.loads(f.datos)
+            except Exception:
+                valores = []
+            d: dict = {"_id": f.id}
+            for i, col in enumerate(columnas):
+                d[col] = valores[i] if i < len(valores) else None
+            items.append(d)
+        return items, total, columnas
+
+    # Con filtro por dia: iteramos en orden, filtramos en Python, paginamos.
+    stmt_orden = base.order_by(desc(PostVentaFila.periodo), desc(PostVentaFila.id))
+    total = 0
     items: list[dict] = []
-    for f in filas:
+    skip = (page - 1) * limit
+    for fila in db.scalars(stmt_orden).yield_per(2000):
         try:
-            valores = json.loads(f.datos)
+            valores = json.loads(fila.datos)
         except Exception:
-            valores = []
-        d: dict = {"_id": f.id}
+            continue
+        if not _pasa_filtro_dia(valores, i_fecha, fd, fh):
+            continue
+        total += 1
+        if total <= skip:
+            continue
+        if len(items) >= limit:
+            # Seguir contando para total, pero no agregar mas filas.
+            continue
+        d: dict = {"_id": fila.id}
         for i, col in enumerate(columnas):
             d[col] = valores[i] if i < len(valores) else None
         items.append(d)
-
     return items, total, columnas
 
 

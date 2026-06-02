@@ -237,6 +237,8 @@ export interface PostVentaMeta {
 export interface PostVentaFiltros {
   periodo_desde?: string | null;
   periodo_hasta?: string | null;
+  fecha_desde?: string | null;  // YYYY-MM-DD
+  fecha_hasta?: string | null;  // YYYY-MM-DD
   sucursal?: string | null;
 }
 
@@ -330,6 +332,8 @@ export interface VentasLineasPage {
 export interface VentasLineasFiltros {
   periodo_desde?: string;
   periodo_hasta?: string;
+  fecha_desde?: string;  // YYYY-MM-DD
+  fecha_hasta?: string;  // YYYY-MM-DD
   sucursal?: string;
   q?: string;
 }
