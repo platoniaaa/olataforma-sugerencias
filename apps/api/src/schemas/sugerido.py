@@ -108,7 +108,6 @@ class SugeridoFiltros(BaseModel):
     tipo_origen: list[str] = Field(default_factory=list)
     proveedor: str | None = None
     solo_pedir: bool = True
-    solo_abastece_cd: bool = False  # solo productos con "Abastece CD" = Si
     solo_nacionales: bool = False  # excluye los importados (es_importado=True)
 
 

@@ -65,7 +65,6 @@ function filtrosToParams(f: SugeridoFiltros): URLSearchParams {
   (f.tipo_origen ?? []).forEach((s) => p.append("tipo_origen", s));
   if (f.proveedor) p.set("proveedor", f.proveedor);
   p.set("solo_pedir", String(f.solo_pedir ?? true));
-  if (f.solo_abastece_cd) p.set("solo_abastece_cd", "true");
   if (f.solo_nacionales) p.set("solo_nacionales", "true");
   return p;
 }

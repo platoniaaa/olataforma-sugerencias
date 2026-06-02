@@ -85,7 +85,6 @@ export interface SugeridoFiltros {
   tipo_origen?: string[];
   proveedor?: string;
   solo_pedir?: boolean;
-  solo_abastece_cd?: boolean;
   solo_nacionales?: boolean;
 }
 

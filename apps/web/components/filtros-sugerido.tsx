@@ -13,7 +13,6 @@ export function FiltrosSugerido({ filtros, onChange }: Props) {
   const hayCambios =
     Boolean(filtros.q) ||
     filtros.solo_pedir === false ||
-    filtros.solo_abastece_cd === true ||
     filtros.solo_nacionales === true;
 
   return (
@@ -48,12 +47,6 @@ export function FiltrosSugerido({ filtros, onChange }: Props) {
         onChange={(v) => set({ solo_pedir: v })}
       />
       <Toggle
-        label="Solo abastece CD"
-        active={filtros.solo_abastece_cd ?? false}
-        onChange={(v) => set({ solo_abastece_cd: v })}
-        title="Muestra solo los productos con Abastece CD = Sí"
-      />
-      <Toggle
         label="Solo nacionales"
         active={filtros.solo_nacionales ?? false}
         onChange={(v) => set({ solo_nacionales: v })}
@@ -66,7 +59,6 @@ export function FiltrosSugerido({ filtros, onChange }: Props) {
             onChange({
               q: "",
               solo_pedir: true,
-              solo_abastece_cd: false,
               solo_nacionales: false,
             })
           }

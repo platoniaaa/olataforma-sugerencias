@@ -56,8 +56,6 @@ def _apply_filters(stmt, f: SugeridoFiltros):
     # coincidencias aunque su sugerido del BI sea pedir=No. Si no, "no aparece".
     if f.solo_pedir and not busqueda:
         stmt = stmt.where(func.lower(Sugerido.pedir) == "si")
-    if f.solo_abastece_cd and not busqueda:
-        stmt = stmt.where(func.lower(Sugerido.abastece_cd).in_(("si", "sí")))
     if f.solo_nacionales and not busqueda:
         # Excluye importados. es_importado=False o NULL se considera nacional.
         stmt = stmt.where(or_(Sugerido.es_importado.is_(False), Sugerido.es_importado.is_(None)))
