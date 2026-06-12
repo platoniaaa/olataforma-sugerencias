@@ -1,9 +1,10 @@
 "use client";
 
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AgGridReact } from "ag-grid-react";
 import type {
+  CellContextMenuEvent,
   ColDef,
   ColumnState,
   FirstDataRenderedEvent,
@@ -11,6 +12,7 @@ import type {
   IRowNode,
   RowClickedEvent,
 } from "ag-grid-community";
+import { Check, Copy } from "lucide-react";
 import { COLUMNAS, type DefColumna } from "@/lib/columnas";
 import { formatoCLP, formatoNumero } from "@/lib/formato";
 import { STORAGE_KEYS, guardar, leer } from "@/lib/persistencia-dashboard";
@@ -128,6 +130,14 @@ export const TablaSugerido = forwardRef<TablaSugeridoHandle, Props>(function Tab
   const aplicandoRef = useRef(false);
   const vistaRef = useRef<Vista>(vista);
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Context menu custom (AG Grid Community no incluye context menu nativo).
+  // Posicion absoluta en pixeles del viewport. valor = lo que ve el usuario
+  // (post valueFormatter), no el numerico crudo: al pegar en una nota queda
+  // legible; para pegar en Excel hay que limpiar puntos a mano.
+  const [menu, setMenu] = useState<{ x: number; y: number; valor: string } | null>(null);
+  const [toast, setToast] = useState<{ x: number; y: number } | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useImperativeHandle(
     ref,
@@ -273,6 +283,84 @@ export const TablaSugerido = forwardRef<TablaSugeridoHandle, Props>(function Tab
     }
   };
 
+  // --- Context menu (copiar celda) ---
+
+  const onCellContextMenu = (e: CellContextMenuEvent<SugeridoRow>) => {
+    // Sin valor: no abrir menu (evitamos celdas vacias).
+    if (e.value === null || e.value === undefined || e.value === "") return;
+    // Prevenir el menu nativo del navegador.
+    const mouse = e.event as MouseEvent | undefined;
+    mouse?.preventDefault?.();
+    // Calcular el texto que el usuario ve (aplicando valueFormatter si hay).
+    let valor = "";
+    try {
+      const fmt = e.colDef?.valueFormatter;
+      if (typeof fmt === "function") {
+        const out = fmt({
+          value: e.value,
+          data: e.data,
+          node: e.node,
+          colDef: e.colDef,
+          column: e.column,
+          api: e.api,
+          context: e.context,
+        } as Parameters<typeof fmt>[0]);
+        valor = out == null ? "" : String(out);
+      } else {
+        valor = String(e.value);
+      }
+    } catch {
+      valor = String(e.value);
+    }
+    if (!valor || valor === "—") return;
+    const x = mouse?.clientX ?? 0;
+    const y = mouse?.clientY ?? 0;
+    setMenu({ x, y, valor });
+  };
+
+  const copiarValor = async () => {
+    if (!menu) return;
+    const { x, y, valor } = menu;
+    setMenu(null);
+    try {
+      await navigator.clipboard.writeText(valor);
+    } catch {
+      // Fallback: textarea + execCommand (navegadores viejos).
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = valor;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      } catch {
+        return; // sin copy posible: no mostramos toast
+      }
+    }
+    setToast({ x, y });
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 1200);
+  };
+
+  // ESC y click fuera: cerrar menu.
+  useEffect(() => {
+    if (!menu) return;
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") setMenu(null);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [menu]);
+
+  // Limpiar timer del toast al desmontar.
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
   // El popup del menu/filtro se monta en body para poder voltearse hacia arriba
   // cuando no hay espacio abajo (asi el boton ACEPTAR no queda cortado).
   const popupParent = useMemo<HTMLElement | undefined>(
@@ -296,6 +384,7 @@ export const TablaSugerido = forwardRef<TablaSugeridoHandle, Props>(function Tab
         onColumnMoved={onColumnMoved}
         onColumnResized={onColumnResized}
         onPaginationChanged={onPaginationChanged}
+        onCellContextMenu={onCellContextMenu}
         onRowClicked={(e: RowClickedEvent<SugeridoRow>) => {
           if (!e.data) return;
           if (e.data.origen === "catalogo" || e.data.origen === "manual") {
@@ -322,6 +411,53 @@ export const TablaSugerido = forwardRef<TablaSugeridoHandle, Props>(function Tab
           noRowsToShow: "Sin datos",
         }}
       />
+
+      {/* Context menu custom (AG Grid Community no incluye uno nativo) */}
+      {menu && (
+        <>
+          <div
+            className="fixed inset-0 z-[100]"
+            onClick={() => setMenu(null)}
+            onContextMenu={(ev) => {
+              ev.preventDefault();
+              setMenu(null);
+            }}
+          />
+          <div
+            className="fixed z-[101] min-w-[160px] overflow-hidden rounded-sm border border-ink-200 bg-white shadow-lift"
+            style={{ left: menu.x, top: menu.y }}
+          >
+            <button
+              type="button"
+              onClick={copiarValor}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-ink-800 hover:bg-paper-100"
+            >
+              <Copy size={14} className="text-ink-500" /> Copiar
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Toast "Copiado" sobre la celda copiada */}
+      {toast && (
+        <div
+          className="pointer-events-none fixed z-[102] -translate-x-1/2 -translate-y-full rounded-sm bg-ink-900 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-paper shadow-lift"
+          style={{ left: toast.x, top: toast.y - 8, animation: "fadeOut 1.2s ease-out forwards" }}
+        >
+          <span className="inline-flex items-center gap-1">
+            <Check size={12} className="text-accent-500" /> Copiado
+          </span>
+        </div>
+      )}
+
+      <style jsx>{`
+        @keyframes fadeOut {
+          0% { opacity: 0; transform: translate(-50%, -100%) translateY(4px); }
+          15% { opacity: 1; transform: translate(-50%, -100%) translateY(0); }
+          70% { opacity: 1; }
+          100% { opacity: 0; transform: translate(-50%, -100%) translateY(-6px); }
+        }
+      `}</style>
     </div>
   );
 });
