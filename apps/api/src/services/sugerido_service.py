@@ -103,6 +103,7 @@ def _row_desde_catalogo(c: ProductoCatalogo) -> dict:
         # campos basicos que sí tenemos
         "producto": c.producto,
         "descripcion": c.glosa,
+        "empresa": None,
         "filtro1_final": None,  # el catalogo no tiene marca
         "proveedor": None,
         "costo_unitario": c.costo,
@@ -173,6 +174,7 @@ def _fila_sintetica_manual(
         "descripcion": cat.glosa if cat else None,
         "sucursal_id": sucursal_id,
         "nombre_sucursal": sucursal_id,
+        "empresa": None,
         "clasificacion_abc": None,
         "proveedor": None,
         "filtro1_final": None,

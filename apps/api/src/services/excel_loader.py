@@ -46,6 +46,7 @@ HEADER_ALIASES: dict[str, str] = {
     "sucursal": "sucursal_id",
     "id_sucursal": "sucursal_id",
     "nombre_sucursal": "nombre_sucursal",
+    "empresa": "empresa",
     "clasificacion_abc": "clasificacion_abc",
     "abc": "clasificacion_abc",
     "proveedor": "proveedor",

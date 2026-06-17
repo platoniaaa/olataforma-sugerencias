@@ -18,6 +18,7 @@ from openpyxl.utils import get_column_letter
 # Etiquetas legibles para las cabeceras del Excel.
 LABELS: dict[str, str] = {
     "producto": "Producto",
+    "empresa": "Empresa",
     "descripcion": "Descripcion",
     "clasificacion_abc": "ABC",
     "nombre_sucursal": "Sucursal",

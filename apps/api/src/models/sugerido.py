@@ -16,6 +16,9 @@ class Sugerido(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tenant_id: Mapped[str] = mapped_column(String, nullable=False, default="curifor", index=True)
 
+    # Empresa del grupo (Curifor / Frontera). Viene del BI desde 2026-06.
+    empresa: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+
     # --- Identificacion producto x sucursal ---
     producto: Mapped[str] = mapped_column(String, nullable=False, index=True)
     descripcion: Mapped[str | None] = mapped_column(String, nullable=True)

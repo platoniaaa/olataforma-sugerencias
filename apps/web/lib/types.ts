@@ -7,6 +7,7 @@ export interface SugeridoRow {
   descripcion: string | null;
   sucursal_id: string;
   nombre_sucursal: string | null;
+  empresa: string | null;
   clasificacion_abc: string | null;
   proveedor: string | null;
   filtro1_final: string | null;

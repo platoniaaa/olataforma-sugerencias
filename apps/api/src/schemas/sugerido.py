@@ -19,6 +19,7 @@ class SugeridoRow(BaseModel):
     # sucursal_id queda opcional porque las filas de catalogo no tienen sucursal.
     sucursal_id: str | None = None
     nombre_sucursal: str | None = None
+    empresa: str | None = None
     clasificacion_abc: str | None = None
     proveedor: str | None = None
     filtro1_final: str | None = None

@@ -18,6 +18,7 @@ export const COLUMNAS: DefColumna[] = [
   { key: "nombre_sucursal", label: "Sucursal", tipo: "texto", visiblePorDefecto: true },
   { key: "total_sugerido_suc", label: "Total Sugerido", tipo: "numero", visiblePorDefecto: true, pin: "right" },
   // Ocultas por defecto:
+  { key: "empresa", label: "Empresa", tipo: "texto", visiblePorDefecto: false },
   { key: "proveedor", label: "Proveedor", tipo: "texto", visiblePorDefecto: false },
   { key: "filtro1_final", label: "Marca", tipo: "texto", visiblePorDefecto: false },
   { key: "tipo_origen", label: "Tipo Origen", tipo: "texto", visiblePorDefecto: false },
