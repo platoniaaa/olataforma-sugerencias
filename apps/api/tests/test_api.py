@@ -425,3 +425,24 @@ def test_listar_por_ids_suma_manuales_y_enriquece_catalogo(db_session):
     assert item["pedir"] == "Si"
     # Enriquecido desde el catalogo.
     assert item["reemplazos"] == "20 BXO5W30BB"
+
+
+def test_excel_labels_cubren_columnas_del_frontend():
+    """Toda columna del frontend (apps/web/lib/columnas.ts) debe tener etiqueta
+    en excel_export.LABELS. Si no, el export descarta esa columna silenciosamente.
+    Este test es un fusible para que no vuelva a pasar."""
+    import re
+    from pathlib import Path
+
+    from src.services.excel_export import LABELS
+
+    columnas_ts = Path(__file__).resolve().parents[2] / "web" / "lib" / "columnas.ts"
+    if not columnas_ts.exists():
+        # Si los tests se corren sin el repo del frontend al lado, no fallar.
+        return
+    keys_web = set(re.findall(r'key:\s*"(\w+)"', columnas_ts.read_text(encoding="utf-8")))
+    faltan = sorted(keys_web - set(LABELS))
+    assert not faltan, (
+        f"Columnas del frontend sin etiqueta en LABELS del Excel: {faltan}. "
+        f"Agregalas a apps/api/src/services/excel_export.py."
+    )

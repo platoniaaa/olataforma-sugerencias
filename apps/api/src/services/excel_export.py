@@ -16,6 +16,10 @@ from openpyxl.utils import get_column_letter
 # pero ahora son dicts.
 
 # Etiquetas legibles para las cabeceras del Excel.
+# IMPORTANTE: este dict es tambien el whitelist de columnas exportables. Si una
+# columna que el frontend tiene visible (ver apps/web/lib/columnas.ts) no esta
+# aca, el export la descarta SILENCIOSAMENTE. Al agregar una columna nueva al
+# frontend hay que agregarla aca tambien.
 LABELS: dict[str, str] = {
     "producto": "Producto",
     "empresa": "Empresa",
@@ -46,6 +50,7 @@ LABELS: dict[str, str] = {
     "sugerido_compra_neto": "Sugerido Compra Neto",
     "total_sugerido_suc": "Total Sugerido",
     "total_valor_sugerido_clp": "Valor Total CLP",
+    "reemplazos": "Reemplazos",
 }
 
 # Columnas por defecto si el cliente no especifica.
