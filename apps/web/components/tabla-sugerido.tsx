@@ -104,11 +104,14 @@ function colDef(def: DefColumna): ColDef {
       return map[String(p.value)] ?? null;
     };
   } else if (numerica) {
-    base.type = "rightAligned";
-    base.cellClass = "tabular";
+    // Solo alineamos la CELDA a la derecha (numeros), no el header. El built-in
+    // type='rightAligned' tambien aplica ag-right-aligned-header, que invierte
+    // el orden del header a [icono-filtro][texto] y deja el icono inconsistente
+    // entre columnas de texto y numericas.
+    base.cellClass = "tabular ag-right-aligned-cell";
     base.valueFormatter = formateador(def);
     if (def.key === "total_sugerido_suc") {
-      base.cellClass = "tabular font-semibold";
+      base.cellClass = "tabular ag-right-aligned-cell font-semibold";
       base.width = 130;
     }
   }
