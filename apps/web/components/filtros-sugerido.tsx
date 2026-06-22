@@ -6,14 +6,28 @@ import type { SugeridoFiltros } from "@/lib/types";
 interface Props {
   filtros: SugeridoFiltros;
   onChange: (f: SugeridoFiltros) => void;
+  /** Si hay al menos un filtro activo en las columnas del grid. Cuando llega
+   *  true, el boton "Limpiar todo" aparece aunque los filtros server-side
+   *  esten en default. */
+  hayFiltrosColumna?: boolean;
+  /** Callback que el padre usa para limpiar TODO de una sola accion: filtros
+   *  server-side + filtros de columna del grid. Si no se pasa, el boton solo
+   *  resetea los server-side (comportamiento legacy). */
+  onLimpiarTodo?: () => void;
 }
 
-export function FiltrosSugerido({ filtros, onChange }: Props) {
+export function FiltrosSugerido({
+  filtros,
+  onChange,
+  hayFiltrosColumna,
+  onLimpiarTodo,
+}: Props) {
   const set = (parcial: Partial<SugeridoFiltros>) => onChange({ ...filtros, ...parcial });
-  const hayCambios =
+  const hayCambiosServer =
     Boolean(filtros.q) ||
     filtros.solo_pedir === false ||
     filtros.solo_nacionales === true;
+  const hayCambios = hayCambiosServer || Boolean(hayFiltrosColumna);
 
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-sm border border-ink-200 bg-white p-3 shadow-card">
@@ -55,21 +69,26 @@ export function FiltrosSugerido({ filtros, onChange }: Props) {
 
       {hayCambios && (
         <button
-          onClick={() =>
+          onClick={() => {
             // Reset completo: incluye vista (preserva el comportamiento de "Limpiar")
             // y no sobreescribe campos que el dashboard puede haber seteado por otro
             // lado (sucursales, abc, etc.) — los borramos también porque "Limpiar"
-            // es eso, volver al estado inicial.
+            // es eso, volver al estado inicial. Si el padre nos pasa onLimpiarTodo,
+            // se la dejamos para que tambien borre los filtros de columna del grid.
+            if (onLimpiarTodo) {
+              onLimpiarTodo();
+              return;
+            }
             onChange({
               q: "",
               solo_pedir: true,
               solo_nacionales: false,
               vista: "todas",
-            })
-          }
+            });
+          }}
           className="flex items-center gap-1 rounded-sm px-2 py-1.5 text-[12px] text-ink-500 hover:bg-ink-100 hover:text-ink-800"
         >
-          <X size={13} /> Limpiar
+          <X size={13} /> Limpiar filtros
         </button>
       )}
     </div>

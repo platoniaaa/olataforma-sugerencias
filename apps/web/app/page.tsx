@@ -81,6 +81,24 @@ export default function DashboardPage() {
   const tablaRef = useRef<TablaSugeridoHandle>(null);
   const [exportando, setExportando] = useState(false);
   const [mostrarGraficos, setMostrarGraficos] = useState(false);
+  // El grid notifica si hay filtros de columna activos; usamos esto para que
+  // el boton "Limpiar filtros" aparezca tambien cuando los server-side estan
+  // en default pero hay filtros aplicados sobre alguna columna de la tabla.
+  const [hayFiltrosColumna, setHayFiltrosColumna] = useState(false);
+
+  const limpiarFiltrosTodo = useCallback(() => {
+    // Filtros server-side -> default.
+    setFiltros((f) => ({
+      q: "",
+      solo_pedir: true,
+      solo_nacionales: false,
+      // Mantener la vista que el usuario tiene seleccionada: limpiar filtros
+      // no implica cambiar de pestania.
+      vista: f.vista ?? "todas",
+    }));
+    // Filtros de columna del grid.
+    tablaRef.current?.limpiarFiltrosColumnas();
+  }, [setFiltros]);
 
   // Restaurar columnas desde localStorage.
   useEffect(() => {
@@ -239,7 +257,12 @@ export default function DashboardPage() {
         )}
       </div>
 
-      <FiltrosSugerido filtros={filtros} onChange={setFiltros} />
+      <FiltrosSugerido
+        filtros={filtros}
+        onChange={setFiltros}
+        hayFiltrosColumna={hayFiltrosColumna}
+        onLimpiarTodo={limpiarFiltrosTodo}
+      />
 
       {error && (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800">
@@ -253,6 +276,7 @@ export default function DashboardPage() {
         columnasVisibles={colsVisibles}
         vista={filtros.vista ?? "todas"}
         onKpisVisiblesChange={(k) => setKpis(k)}
+        onFiltrosColumnaChange={setHayFiltrosColumna}
         onRowClick={(r) =>
           router.push(
             `/producto/${encodeURIComponent(r.producto)}?sucursal=${encodeURIComponent(

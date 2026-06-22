@@ -36,11 +36,15 @@ interface Props {
    * filas realmente visibles, no sobre el universo server-side.
    */
   onKpisVisiblesChange?: (kpis: SugeridoKpis, totalVisibles: number) => void;
+  /** Se notifica al padre si hay al menos un filtro de columna activo en el grid. */
+  onFiltrosColumnaChange?: (hayFiltros: boolean) => void;
 }
 
 export interface TablaSugeridoHandle {
   /** IDs de las filas visibles tras filtros y orden del AG Grid. Solo del BI (id > 0). */
   obtenerIdsVisibles(): number[];
+  /** Borra el filterModel del grid y persiste el cambio. */
+  limpiarFiltrosColumnas(): void;
 }
 
 function ProductoCelda(p: { value: unknown; data?: SugeridoRow }) {
@@ -122,7 +126,7 @@ type FilterModelByVista = Record<string, Record<string, unknown>>;
 type FilterModel = Record<string, unknown>;
 
 export const TablaSugerido = forwardRef<TablaSugeridoHandle, Props>(function TablaSugerido(
-  { rows, columnasVisibles, vista, onRowClick, onKpisVisiblesChange },
+  { rows, columnasVisibles, vista, onRowClick, onKpisVisiblesChange, onFiltrosColumnaChange },
   ref
 ) {
   const gridRef = useRef<AgGridReact<SugeridoRow>>(null);
@@ -146,6 +150,12 @@ export const TablaSugerido = forwardRef<TablaSugeridoHandle, Props>(function Tab
   useEffect(() => {
     onKpisRef.current = onKpisVisiblesChange;
   }, [onKpisVisiblesChange]);
+
+  // Ref equivalente para la callback de "hay filtros de columna".
+  const onFiltrosColRef = useRef(onFiltrosColumnaChange);
+  useEffect(() => {
+    onFiltrosColRef.current = onFiltrosColumnaChange;
+  }, [onFiltrosColumnaChange]);
 
   // Ref a las filas para que el handler imperativo (obtenerIdsVisibles) y los
   // KPIs vean siempre el array actualizado sin recrearse en cada render.
@@ -182,6 +192,9 @@ export const TablaSugerido = forwardRef<TablaSugeridoHandle, Props>(function Tab
     // total cargado en el state.
     const filterModel = api.getFilterModel() ?? {};
     const hayFiltros = Object.keys(filterModel).length > 0;
+    // Notificar al padre para que muestre el boton "Limpiar todo" si hay
+    // filtros de columna, aunque los filtros server-side esten en default.
+    onFiltrosColRef.current?.(hayFiltros);
 
     let totalSugerido = 0;
     let valorTotal = 0;
@@ -249,6 +262,13 @@ export const TablaSugerido = forwardRef<TablaSugeridoHandle, Props>(function Tab
           if (typeof id === "number" && id > 0) ids.push(id);
         });
         return ids;
+      },
+      limpiarFiltrosColumnas: () => {
+        const api = gridRef.current?.api;
+        if (!api) return;
+        // setFilterModel(null) borra todos los filtros del grid. onFilterChanged
+        // se dispara como consecuencia y persiste {} en localStorage.
+        api.setFilterModel(null);
       },
     }),
     []
