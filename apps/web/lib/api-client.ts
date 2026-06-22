@@ -221,7 +221,7 @@ export const api = {
     filtros: SugeridoFiltros,
     cantidad: { unidades?: number; dias_inventario?: number },
     motivo?: string
-  ): Promise<{ creadas: number; omitidas: number }> {
+  ): Promise<{ creadas: number; omitidas: number; lote_id: string | null }> {
     const res = await req("/api/sugerencias-manuales/masiva", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -264,6 +264,17 @@ export const api = {
   async eliminarSugerenciaManual(id: string): Promise<void> {
     const res = await req(`/api/sugerencias-manuales/${id}`, { method: "DELETE" });
     if (!res.ok && res.status !== 204) throw new Error("No se pudo eliminar");
+  },
+
+  async eliminarLoteSugerencias(loteId: string): Promise<{ eliminadas: number }> {
+    const res = await req(`/api/sugerencias-manuales/lote/${encodeURIComponent(loteId)}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail ?? "No se pudo eliminar la carga masiva");
+    }
+    return res.json();
   },
 
   async exportExcel(

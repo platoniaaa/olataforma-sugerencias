@@ -72,6 +72,8 @@ def create_all() -> None:
         "ALTER TABLE sugerencia_recurrente ADD COLUMN IF NOT EXISTS dias_inventario INTEGER",
         "ALTER TABLE usuario ADD COLUMN IF NOT EXISTS es_admin BOOLEAN NOT NULL DEFAULT FALSE",
         "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS empresa VARCHAR",
+        "ALTER TABLE sugerencia_manual ADD COLUMN IF NOT EXISTS lote_id VARCHAR",
+        "CREATE INDEX IF NOT EXISTS ix_sugmanual_lote ON sugerencia_manual (lote_id)",
     ]
     with engine.begin() as conn:
         for sql in migraciones:

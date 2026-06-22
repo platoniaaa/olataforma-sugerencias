@@ -118,6 +118,8 @@ export interface SugerenciaManual {
   creado_en: string;
   aprobado: boolean;
   usado_en_compra: boolean;
+  /** UUID compartido por las filas de una misma carga masiva. */
+  lote_id?: string | null;
 }
 
 export interface LineaCarro {

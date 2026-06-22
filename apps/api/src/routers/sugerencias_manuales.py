@@ -112,10 +112,16 @@ def crear_masiva(
 
     Modo 'dias_inventario': calcula unidades por par segun demanda_diaria del BI; los
     pares sin demanda quedan omitidos. Modo 'unidades': mismo numero para todos.
+
+    Todas las filas creadas en esta llamada comparten un mismo `lote_id` (UUID4)
+    para poder borrarlas juntas despues con DELETE /lote/{lote_id}.
     """
+    import uuid as _uuid_mod
+
     pares = sugerido_service.pares_filtrados(db, payload.filtros)
     omitidas = 0
     nuevas: list[SugerenciaManual] = []
+    lote_id = str(_uuid_mod.uuid4())
     if payload.dias_inventario:
         mapa = sugerido_service.unidades_por_par(db, pares, payload.dias_inventario)
         for par in pares:
@@ -128,6 +134,7 @@ def crear_masiva(
                     producto=par[0], sucursal_id=par[1], unidades=u,
                     motivo=payload.motivo, creado_por=email,
                     tenant_id=settings.default_tenant_id,
+                    lote_id=lote_id,
                 )
             )
     elif payload.unidades:
@@ -136,6 +143,7 @@ def crear_masiva(
                 producto=p, sucursal_id=s, unidades=payload.unidades,
                 motivo=payload.motivo, creado_por=email,
                 tenant_id=settings.default_tenant_id,
+                lote_id=lote_id,
             )
             for p, s in pares
         ]
@@ -149,9 +157,10 @@ def crear_masiva(
     )
     auditoria_service.registrar(
         db, accion="masiva_creada", entidad="sugerencia_manual",
+        entidad_id=lote_id,
         usuario_email=email, unidades=payload.unidades,
         dias_inventario=payload.dias_inventario, motivo=payload.motivo,
-        detalle=f"Masiva: {len(nuevas)} pares, {omitidas} omitidos, +{cantidad_str}",
+        detalle=f"Masiva: {len(nuevas)} pares, {omitidas} omitidos, +{cantidad_str} (lote {lote_id[:8]})",
     )
     auditoria_service.notificar(
         db, tipo="masiva_creada",
@@ -162,7 +171,11 @@ def crear_masiva(
         creado_por_email=email,
     )
     db.commit()
-    return SugerenciaManualMasivaResultado(creadas=len(nuevas), omitidas=omitidas)
+    # Si no se creo ninguna (todas omitidas), no devolver lote_id que apunta a nada.
+    lote_id_resp = lote_id if nuevas else None
+    return SugerenciaManualMasivaResultado(
+        creadas=len(nuevas), omitidas=omitidas, lote_id=lote_id_resp
+    )
 
 
 @router.post("/recurrentes", response_model=RecurrenteOut, status_code=201)
@@ -196,6 +209,49 @@ def eliminar_recurrente(
     rec = recurrentes_service.eliminar(db, id, usuario_email=email)
     if not rec:
         raise HTTPException(status_code=404, detail="Recurrencia no encontrada")
+
+
+@router.delete("/lote/{lote_id}")
+def eliminar_lote(
+    lote_id: str,
+    db: Session = Depends(get_db),
+    email: str = Depends(requiere_auth),
+):
+    """Elimina todas las sugerencias creadas en una misma carga masiva.
+
+    Solo borra filas con `recurrente_id` NULL (no toca instancias de reglas
+    recurrentes). Si el lote no existe o esta vacio, devuelve 404.
+    """
+    # Tomamos info representativa (motivo, unidades, etc.) antes de borrar para
+    # el log y la notificacion.
+    filas = list(
+        db.scalars(
+            select(SugerenciaManual).where(
+                SugerenciaManual.lote_id == lote_id,
+                SugerenciaManual.recurrente_id.is_(None),
+            )
+        ).all()
+    )
+    if not filas:
+        raise HTTPException(status_code=404, detail="Lote no encontrado")
+    motivo = filas[0].motivo
+    n = len(filas)
+    for f in filas:
+        db.delete(f)
+    auditoria_service.registrar(
+        db, accion="lote_eliminado", entidad="sugerencia_manual",
+        entidad_id=lote_id, usuario_email=email, motivo=motivo,
+        detalle=f"Carga masiva eliminada: {n} sugerencias (lote {lote_id[:8]})",
+    )
+    auditoria_service.notificar(
+        db, tipo="lote_eliminado",
+        titulo=f"{email.split('@')[0]} elimino una carga masiva",
+        mensaje=f"{n} sugerencias eliminadas"
+        + (f". Motivo original: {motivo}" if motivo else ""),
+        creado_por_email=email,
+    )
+    db.commit()
+    return {"eliminadas": n}
 
 
 @router.patch("/{id}", response_model=SugerenciaManualOut)

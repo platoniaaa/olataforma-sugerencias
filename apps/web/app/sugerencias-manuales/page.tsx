@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Boxes, Repeat, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Boxes, ChevronDown, ChevronRight, Layers, Repeat, Trash2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api-client";
@@ -37,6 +37,17 @@ export default function SugerenciasManualesPage() {
   const eliminarUnica = async (id: string) => {
     if (!confirm("¿Eliminar esta sugerencia? Se quita de la compra.")) return;
     await api.eliminarSugerenciaManual(id);
+    cargar();
+  };
+
+  const eliminarLote = async (loteId: string, n: number) => {
+    if (
+      !confirm(
+        `¿Eliminar las ${formatoNumero(n)} sugerencias de esta carga masiva? Esta acción no se puede deshacer.`
+      )
+    )
+      return;
+    await api.eliminarLoteSugerencias(loteId);
     cargar();
   };
 
@@ -109,6 +120,7 @@ export default function SugerenciasManualesPage() {
         <SeccionUnicas
           items={unicas}
           onEliminar={eliminarUnica}
+          onEliminarLote={eliminarLote}
         />
       )}
 
@@ -125,10 +137,36 @@ export default function SugerenciasManualesPage() {
 function SeccionUnicas({
   items,
   onEliminar,
+  onEliminarLote,
 }: {
   items: SugerenciaManual[] | null;
   onEliminar: (id: string) => void;
+  onEliminarLote: (loteId: string, n: number) => void;
 }) {
+  // Separamos en lotes (cargas masivas) e individuales para mostrarlos
+  // como cards distintas: el lote se colapsa para no inundar la pantalla
+  // con miles de filas.
+  const { lotes, individuales } = useMemo(() => {
+    const lotesMap = new Map<string, SugerenciaManual[]>();
+    const ind: SugerenciaManual[] = [];
+    for (const s of items ?? []) {
+      if (s.lote_id) {
+        const arr = lotesMap.get(s.lote_id) ?? [];
+        arr.push(s);
+        lotesMap.set(s.lote_id, arr);
+      } else {
+        ind.push(s);
+      }
+    }
+    // Lote más reciente primero (creado_en del primer item).
+    const lotesOrdenados = Array.from(lotesMap.entries()).sort((a, b) => {
+      const ta = new Date(a[1][0]?.creado_en ?? 0).getTime();
+      const tb = new Date(b[1][0]?.creado_en ?? 0).getTime();
+      return tb - ta;
+    });
+    return { lotes: lotesOrdenados, individuales: ind };
+  }, [items]);
+
   if (items === null) return <p className="text-slate-500">Cargando…</p>;
   if (items.length === 0)
     return (
@@ -141,7 +179,16 @@ function SeccionUnicas({
     );
   return (
     <div className="space-y-2">
-      {items.map((s) => (
+      {lotes.map(([loteId, filas]) => (
+        <LoteCard
+          key={loteId}
+          loteId={loteId}
+          filas={filas}
+          onEliminarLote={onEliminarLote}
+          onEliminarUna={onEliminar}
+        />
+      ))}
+      {individuales.map((s) => (
         <Card key={s.id}>
           <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3">
             <div className="min-w-0">
@@ -170,6 +217,101 @@ function SeccionUnicas({
         </Card>
       ))}
     </div>
+  );
+}
+
+const EXPANDIDO_MAX = 100;
+
+function LoteCard({
+  loteId,
+  filas,
+  onEliminarLote,
+  onEliminarUna,
+}: {
+  loteId: string;
+  filas: SugerenciaManual[];
+  onEliminarLote: (loteId: string, n: number) => void;
+  onEliminarUna: (id: string) => void;
+}) {
+  const [expandido, setExpandido] = useState(false);
+  const primera = filas[0];
+  const totalUnidades = filas.reduce((acc, f) => acc + (f.unidades ?? 0), 0);
+  const filasVisibles = expandido ? filas.slice(0, EXPANDIDO_MAX) : [];
+  const ocultas = expandido ? filas.length - filasVisibles.length : 0;
+
+  return (
+    <Card>
+      <CardContent className="py-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <button
+            onClick={() => setExpandido((v) => !v)}
+            className="flex min-w-0 flex-1 items-start gap-2 text-left"
+          >
+            <span className="mt-0.5 text-slate-400">
+              {expandido ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            </span>
+            <span className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <Layers size={14} className="text-brand" />
+                <span className="font-semibold text-slate-900">Carga masiva</span>
+                <Badge className="bg-brand-50 text-brand">
+                  {formatoNumero(filas.length)} productos
+                </Badge>
+                <Badge className="bg-emerald-50 text-emerald-700">
+                  +{formatoNumero(totalUnidades)} u en total
+                </Badge>
+              </div>
+              <p className="mt-1 text-[12px] text-slate-500">
+                {primera?.creado_por && <>{primera.creado_por} · </>}
+                {primera?.creado_en && formatoFechaHora(primera.creado_en)}
+                {primera?.motivo && <> · {primera.motivo}</>}
+              </p>
+            </span>
+          </button>
+          <button
+            onClick={() => onEliminarLote(loteId, filas.length)}
+            className="flex items-center gap-1 rounded-md border border-red-200 bg-white px-3 py-1.5 text-[12px] font-medium text-red-600 hover:bg-red-50"
+          >
+            <Trash2 size={14} /> Eliminar las {formatoNumero(filas.length)}
+          </button>
+        </div>
+
+        {expandido && (
+          <div className="mt-3 divide-y divide-slate-100 rounded-md border border-slate-200">
+            {filasVisibles.map((s) => (
+              <div
+                key={s.id}
+                className="flex items-center justify-between gap-2 px-3 py-2 text-[12.5px]"
+              >
+                <div className="min-w-0 flex-1">
+                  <span className="font-medium text-slate-900">{s.producto}</span>
+                  <span className="text-slate-400"> · </span>
+                  <span className="text-slate-600">{s.sucursal_id}</span>
+                  <span className="text-slate-400"> · </span>
+                  <span className="font-mono text-emerald-700">
+                    +{formatoNumero(s.unidades)} u
+                  </span>
+                </div>
+                <button
+                  onClick={() => onEliminarUna(s.id)}
+                  className="rounded p-1 text-slate-300 hover:bg-red-50 hover:text-red-600"
+                  aria-label="Eliminar solo esta fila"
+                  title="Eliminar solo esta fila"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+            {ocultas > 0 && (
+              <p className="px-3 py-2 text-center text-[11px] text-slate-500">
+                Y {formatoNumero(ocultas)} más. Usa “Eliminar las {formatoNumero(filas.length)}”
+                para borrarlas todas juntas.
+              </p>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

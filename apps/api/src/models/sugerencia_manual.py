@@ -37,3 +37,6 @@ class SugerenciaManual(Base):
     archivada: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     # Si vino de una regla recurrente, su id (para reemplazar/archivar la instancia anterior).
     recurrente_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    # Si vino de una carga masiva (por grupo / a todos), todas las filas del mismo lote
+    # comparten este UUID. Permite borrar el lote completo en un solo SQL.
+    lote_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)

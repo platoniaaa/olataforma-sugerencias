@@ -27,6 +27,9 @@ class SugerenciaManualMasiva(BaseModel):
 class SugerenciaManualMasivaResultado(BaseModel):
     creadas: int
     omitidas: int = 0  # pares sin demanda diaria cuando se pidio por dias
+    # Lote (UUID) que agrupa las filas creadas en esta llamada — sirve para
+    # borrarlas juntas via DELETE /lote/{lote_id}. None si no se creo ninguna.
+    lote_id: str | None = None
 
 
 class SugerenciaManualUpdate(BaseModel):
@@ -49,6 +52,7 @@ class SugerenciaManualOut(BaseModel):
     aprobado: bool
     usado_en_compra: bool
     archivada: bool = False
+    lote_id: str | None = None  # UUID compartido por las filas de una misma carga masiva
 
 
 class RecurrenteCreate(BaseModel):
