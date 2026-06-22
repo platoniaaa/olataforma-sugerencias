@@ -426,7 +426,14 @@ export const TablaSugerido = forwardRef<TablaSugeridoHandle, Props>(function Tab
   );
 
   return (
-    <div className="ag-theme-quartz" style={{ width: "100%", height: "calc(100vh - 290px)", minHeight: 380 }}>
+    <div
+      className="ag-theme-quartz"
+      style={{ width: "100%", height: "calc(100vh - 290px)", minHeight: 380 }}
+      // Bloquea el menu nativo del navegador dentro del grid: el preventDefault
+      // de AG Grid no siempre alcanza (sobre celdas con cellRenderer custom,
+      // padding o cuando el target real es un span hijo). Esto lo cubre todo.
+      onContextMenu={(e) => e.preventDefault()}
+    >
       <AgGridReact<SugeridoRow>
         ref={gridRef}
         rowData={rows}
