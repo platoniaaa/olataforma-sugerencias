@@ -72,7 +72,11 @@ export function MultiSelect({
               >
                 <span
                   className={cn(
-                    "flex h-4 w-4 items-center justify-center rounded border",
+                    // shrink-0 + size: el checkbox debe mantener su tamano exacto
+                    // sin importar el largo de la etiqueta adyacente (que tiene
+                    // truncate). Sin shrink-0 el flex achicaba el span cuando
+                    // el label era largo y se veian tamanos distintos.
+                    "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
                     sel ? "border-brand bg-brand text-white" : "border-slate-300"
                   )}
                 >

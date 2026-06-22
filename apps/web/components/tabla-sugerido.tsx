@@ -82,14 +82,15 @@ function formateador(def: DefColumna) {
 
 function colDef(def: DefColumna): ColDef {
   const numerica = def.tipo !== "texto" && def.tipo !== "abc";
+  // Todas las columnas comparten ancho por defecto (flex viene del defaultColDef
+  // del grid). Solo seteamos minWidth para que columnas con valores largos no
+  // se hagan ilegibles al achicar mucho. El usuario puede redimensionar a gusto
+  // (resizable: true en defaultColDef).
   const base: ColDef = {
     field: def.key as string,
     headerName: def.label,
     pinned: def.pin,
-    sortable: true,
-    resizable: true,
-    minWidth: def.tipo === "texto" ? 140 : 110,
-    flex: def.key === "descripcion" ? 2 : undefined,
+    minWidth: def.tipo === "texto" ? 120 : 100,
   };
 
   if (def.key === "producto") {
@@ -97,7 +98,6 @@ function colDef(def: DefColumna): ColDef {
   }
 
   if (def.tipo === "abc") {
-    base.width = 80;
     base.cellClass = "font-semibold";
     base.cellStyle = (p) => {
       const map: Record<string, { color: string }> = {
@@ -116,7 +116,6 @@ function colDef(def: DefColumna): ColDef {
     base.valueFormatter = formateador(def);
     if (def.key === "total_sugerido_suc") {
       base.cellClass = "tabular ag-right-aligned-cell font-semibold";
-      base.width = 130;
     }
   }
   return base;
@@ -285,6 +284,10 @@ export const TablaSugerido = forwardRef<TablaSugeridoHandle, Props>(function Tab
       suppressHeaderMenuButton: false,
       filter: FiltroMultiSelect,
       menuTabs: ["filterMenuTab"],
+      // Todas las columnas se reparten el espacio disponible en partes iguales.
+      // El usuario puede arrastrar el borde para redimensionar (resizable=true);
+      // su cambio se persiste por columnState en localStorage.
+      flex: 1,
     }),
     []
   );
@@ -312,13 +315,23 @@ export const TablaSugerido = forwardRef<TablaSugeridoHandle, Props>(function Tab
     try {
       const cols = leer<ColumnState[] | null>(STORAGE_KEYS.gridCols, null);
       if (cols && Array.isArray(cols) && cols.length > 0) {
-        e.api.applyColumnState({ state: cols, applyOrder: true });
+        // Descartamos width/flex del state restaurado para que las columnas
+        // arranquen uniformes (flex=1 del defaultColDef). Preservamos orden,
+        // sort, pinned y visibilidad. Si el usuario redimensiona despues, ese
+        // nuevo width queda persistido en el proximo onColumnResized.
+        const limpio = cols.map((c) => ({
+          ...c,
+          width: undefined,
+          flex: null,
+        }));
+        e.api.applyColumnState({ state: limpio, applyOrder: true });
       }
     } catch {
       /* state incompatible (cambio columnas visibles, etc.): ignoramos */
     }
     aplicandoRef.current = false;
-    e.api.sizeColumnsToFit();
+    // Las columnas usan flex=1 en defaultColDef, asi que el grid las distribuye
+    // automaticamente. No llamamos sizeColumnsToFit (chocaria con el flex).
   };
 
   const onFirstDataRendered = (e: FirstDataRenderedEvent) => {
