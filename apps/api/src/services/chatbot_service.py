@@ -8,35 +8,33 @@ que no existen. Cada tool delega en services ya probados (`sugerido_service`,
 from __future__ import annotations
 
 import json
+import logging
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
-from ..models import ProductoCatalogo, Sugerido, SugerenciaManual
-from . import sugerido_service
+from ..models import (
+    ProductoCatalogo,
+    Sugerido,
+    SugerenciaManual,
+    SugerenciaRecurrente,
+)
+from ..schemas import SugeridoFiltros
+from . import stock_service, sugerido_service
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# System prompt: contexto fijo del modelo + reglas de respuesta.
+# System prompt: instrucciones de respuesta + contexto completo del modelo.
 # ---------------------------------------------------------------------------
-SYSTEM_PROMPT = """Sos el asistente del sugerido de compras de Curifor (repuestos automotrices, Chile).
-
-OBJETIVO: ayudar al equipo de compras a entender el sugerido del Power BI y los
-datos asociados (catalogo, stock, ventas, sugerencias manuales).
-
-COMO RESPONDER:
-- En espanol de Chile, directo y breve.
-- Cuando el usuario pregunta por un producto o sugerido, usa las herramientas
-  para traer datos reales antes de responder. NO inventes valores.
-- Si te falta un dato, pedi clarificacion (codigo de producto, sucursal, etc.).
-- Para explicar "por que tal sugerido", muestra el calculo con los numeros
-  reales que devolvieron las tools.
-
-REGLAS DE NEGOCIO IMPORTANTES (del modelo Power BI):
+# Resumen corto de respaldo: solo se usa si no se encuentra el documento del
+# modelo en el deploy. Mantiene al chatbot util aunque pierda el contexto largo.
+_RESUMEN_FALLBACK = """REGLAS DE NEGOCIO IMPORTANTES (del modelo Power BI):
 - Formula principal: Sugerido Suc = DD * (CO + LT) + SS - SA - ST
   donde DD=Demanda Diaria, CO=Ciclo de Orden (5 dias habiles),
   LT=Lead Time efectivo, SS=Stock Seguridad, SA=Stock Activo, ST=Stock en Transito.
@@ -45,8 +43,55 @@ REGLAS DE NEGOCIO IMPORTANTES (del modelo Power BI):
 - Demanda diaria se calcula con 22 dias habiles/mes (NO dias corridos).
 - Clases ABC: A, B y C calculan sugerido. C usa ventana de 6 meses.
 - "Pedir = Si" significa que el sugerido neto es > 0 despues de descontar stock.
-- Las sugerencias manuales se SUMAN al sugerido del BI (no lo reemplazan).
+- Las sugerencias manuales se SUMAN al sugerido del BI (no lo reemplazan)."""
+
+
+def _cargar_contexto_modelo() -> str:
+    """Carga el documento del modelo Power BI (DAX, medidas, reglas, vistas) que
+    vive en la raiz del repo. Es la MISMA fuente que documenta el equipo, asi el
+    chatbot razona sobre el modelo con el contexto completo. Si el deploy no
+    incluye el archivo, cae al resumen corto para no quedar sin reglas."""
+    try:
+        ruta = Path(__file__).resolve().parents[4] / "CLAUDE contexto modelo.md"
+        texto = ruta.read_text(encoding="utf-8").strip()
+        if texto:
+            return texto
+    except Exception as e:
+        logger.warning(
+            "No se pudo cargar 'CLAUDE contexto modelo.md' (%s); uso resumen corto", e
+        )
+    return _RESUMEN_FALLBACK
+
+
+_INSTRUCCIONES = """Sos el asistente del sugerido de compras de Curifor (repuestos automotrices, Chile).
+
+OBJETIVO: ayudar al equipo de compras a entender el sugerido del Power BI y los
+datos asociados (catalogo, stock, ventas, sugerencias manuales). Sos un asistente
+de SOLO CONSULTA: respondes preguntas, no modificas datos.
+
+COMO RESPONDER:
+- En espanol de Chile, directo y breve.
+- Cuando el usuario pregunta por un producto o sugerido, usa las herramientas
+  para traer datos reales antes de responder. NO inventes valores.
+- Tenes herramientas para: detalle de producto/sugerido, historico de ventas,
+  busqueda, RANKINGS top-N por proveedor/sucursal/marca, TOTALES del sugerido,
+  STOCK por sucursal y SUGERENCIAS manuales/recurrentes vigentes. Usalas en vez
+  de estimar.
+- Para preguntas sobre como funciona el modelo (formulas, medidas, reglas, clases
+  ABC, vistas, gotchas de DAX), apoyate en el CONTEXTO DEL MODELO de mas abajo.
+- El CONTEXTO DEL MODELO se mantiene a mano y puede no reflejar cambios muy
+  recientes del Power BI. Si la pregunta depende de un detalle fino o reciente del
+  modelo, responde con lo que sabes pero sugiere verificar con Francisco.
+- Si te falta un dato, pedi clarificacion (codigo de producto, sucursal, etc.).
+- Para explicar "por que tal sugerido", trae los numeros reales con las tools y
+  explica el calculo usando las reglas del modelo.
 """
+
+SYSTEM_PROMPT = (
+    _INSTRUCCIONES
+    + "\n=== CONTEXTO DEL MODELO POWER BI (referencia completa) ===\n"
+    + _cargar_contexto_modelo()
+)
 
 
 # ---------------------------------------------------------------------------
@@ -161,11 +206,96 @@ def _tool_buscar_productos(db: Session, texto: str, limite: int = 10) -> dict:
     }
 
 
+def _tool_ranking_sugerido(
+    db: Session, por: str, limite: int = 10, vista: str = "todas"
+) -> dict:
+    """Top-N grupos (proveedor/sucursal/marca) por monto sugerido, ordenado por valor CLP."""
+    if por not in sugerido_service.DIMENSIONES:
+        return {
+            "error": (
+                f"Dimension '{por}' no valida. Usa una de: "
+                f"{', '.join(sugerido_service.DIMENSIONES)}."
+            )
+        }
+    limite = max(1, min(int(limite or 10), 50))
+    grupos = sugerido_service.agrupado(db, SugeridoFiltros(vista=vista), por, limite=limite)
+    return {"por": por, "vista": vista, "grupos": grupos}
+
+
+def _tool_resumen_sugerido(
+    db: Session, vista: str = "todas", proveedor: str | None = None
+) -> dict:
+    """Totales del sugerido (monto, valor CLP, n productos/proveedores) con filtros opcionales."""
+    filtros = SugeridoFiltros(vista=vista, proveedor=proveedor)
+    return {
+        "vista": vista,
+        "proveedor": proveedor,
+        **sugerido_service.kpis(db, filtros),
+    }
+
+
+def _tool_stock_producto(db: Session, producto: str) -> dict:
+    """Stock de un producto desglosado por sucursal/bodega, mas el total."""
+    filas = stock_service.stock_por_sucursal(db, producto)
+    if not filas:
+        return {
+            "producto": producto,
+            "stock_total": 0,
+            "detalle": [],
+            "nota": "Sin stock cargado para este producto (revisa el codigo exacto).",
+        }
+    total = sum(f["stock"] for f in filas)
+    return {"producto": producto, "stock_total": total, "detalle": filas}
+
+
+def _tool_sugerencias_vigentes(
+    db: Session, producto: str | None = None, sucursal: str | None = None
+) -> dict:
+    """Sugerencias manuales vigentes y recurrencias activas para un producto/sucursal."""
+    mq = select(SugerenciaManual).where(
+        SugerenciaManual.archivada.is_(False), sugerido_service._no_vencida()
+    )
+    rq = select(SugerenciaRecurrente).where(SugerenciaRecurrente.activa.is_(True))
+    if producto:
+        mq = mq.where(SugerenciaManual.producto == producto)
+        rq = rq.where(SugerenciaRecurrente.producto == producto)
+    if sucursal:
+        mq = mq.where(SugerenciaManual.sucursal_id == sucursal)
+        rq = rq.where(SugerenciaRecurrente.sucursal_id == sucursal)
+    manuales = [
+        {
+            "producto": m.producto,
+            "sucursal_id": m.sucursal_id,
+            "unidades": m.unidades,
+            "motivo": m.motivo,
+            "creado_por": m.creado_por,
+        }
+        for m in db.scalars(mq.limit(50)).all()
+    ]
+    recurrentes = [
+        {
+            "producto": r.producto,
+            "sucursal_id": r.sucursal_id,
+            "modo": r.modo,
+            "unidades": r.unidades,
+            "cada_dias": r.cada_dias,
+            "proxima_ejecucion": str(r.proxima_ejecucion),
+            "motivo": r.motivo,
+        }
+        for r in db.scalars(rq.limit(50)).all()
+    ]
+    return {"manuales_vigentes": manuales, "recurrencias_activas": recurrentes}
+
+
 TOOLS = {
     "obtener_producto": _tool_obtener_producto,
     "obtener_sugerido": _tool_obtener_sugerido,
     "historico_ventas": _tool_historico_ventas,
     "buscar_productos": _tool_buscar_productos,
+    "ranking_sugerido": _tool_ranking_sugerido,
+    "resumen_sugerido": _tool_resumen_sugerido,
+    "stock_producto": _tool_stock_producto,
+    "sugerencias_vigentes": _tool_sugerencias_vigentes,
 }
 
 
@@ -255,6 +385,97 @@ def _tool_declarations():
                             ),
                         },
                         required=["texto"],
+                    ),
+                ),
+                types.FunctionDeclaration(
+                    name="ranking_sugerido",
+                    description=(
+                        "Ranking top-N por monto sugerido (valor CLP) agrupado por "
+                        "proveedor, sucursal o marca. Usar para 'que proveedores hay que "
+                        "comprar mas', 'top 10 sucursales por sugerido', etc."
+                    ),
+                    parameters=types.Schema(
+                        type=types.Type.OBJECT,
+                        properties={
+                            "por": types.Schema(
+                                type=types.Type.STRING,
+                                description="Dimension: 'proveedor', 'sucursal' o 'marca'.",
+                            ),
+                            "limite": types.Schema(
+                                type=types.Type.INTEGER,
+                                description="Cuantos grupos traer (default 10, max 50).",
+                            ),
+                            "vista": types.Schema(
+                                type=types.Type.STRING,
+                                description=(
+                                    "Vista del proceso: 'todas' (default), 'sucursales' "
+                                    "(compra directa), 'cd' (compra del CD) o "
+                                    "'distribucion' (traslados CD->sucursal)."
+                                ),
+                            ),
+                        },
+                        required=["por"],
+                    ),
+                ),
+                types.FunctionDeclaration(
+                    name="resumen_sugerido",
+                    description=(
+                        "Totales agregados del sugerido: monto total, valor total en CLP, "
+                        "cantidad de productos y de proveedores. Usar para 'cuanto suma el "
+                        "sugerido', 'cuantos productos hay que pedir', etc."
+                    ),
+                    parameters=types.Schema(
+                        type=types.Type.OBJECT,
+                        properties={
+                            "vista": types.Schema(
+                                type=types.Type.STRING,
+                                description=(
+                                    "'todas' (default), 'sucursales', 'cd' o 'distribucion'."
+                                ),
+                            ),
+                            "proveedor": types.Schema(
+                                type=types.Type.STRING,
+                                description="Opcional. Acota a un proveedor (busqueda parcial).",
+                            ),
+                        },
+                    ),
+                ),
+                types.FunctionDeclaration(
+                    name="stock_producto",
+                    description=(
+                        "Stock fisico de un producto desglosado por sucursal/bodega, mas el "
+                        "total. Usar para 'cuanto stock hay de X' o 'en que sucursales hay X'."
+                    ),
+                    parameters=types.Schema(
+                        type=types.Type.OBJECT,
+                        properties={
+                            "producto": types.Schema(
+                                type=types.Type.STRING,
+                                description="Codigo exacto del producto.",
+                            )
+                        },
+                        required=["producto"],
+                    ),
+                ),
+                types.FunctionDeclaration(
+                    name="sugerencias_vigentes",
+                    description=(
+                        "Lista las sugerencias manuales vigentes y las recurrencias activas, "
+                        "opcionalmente filtradas por producto y/o sucursal. Usar para 'que "
+                        "sugerencias manuales hay para X' o 'que recurrencias estan activas'."
+                    ),
+                    parameters=types.Schema(
+                        type=types.Type.OBJECT,
+                        properties={
+                            "producto": types.Schema(
+                                type=types.Type.STRING,
+                                description="Opcional. Codigo del producto.",
+                            ),
+                            "sucursal": types.Schema(
+                                type=types.Type.STRING,
+                                description="Opcional. ID de la sucursal en mayusculas.",
+                            ),
+                        },
                     ),
                 ),
             ]
