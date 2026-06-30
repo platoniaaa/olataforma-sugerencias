@@ -224,6 +224,84 @@ def _aplicar_manuales_a_fila(d: dict, manual_unidades: int) -> None:
     d["pedir_flag"] = "Si"
 
 
+def _mes_anterior_yyyymm(hoy: "date | None" = None) -> str:
+    """Devuelve el mes calendario anterior en formato YYYYMM (string).
+
+    Si hoy es 2026-06-26 -> "202605". Helper aislado para que el test pueda
+    pasar una fecha fija.
+    """
+    from datetime import date as _date
+
+    h = hoy or _date.today()
+    if h.month == 1:
+        return f"{h.year - 1}12"
+    return f"{h.year}{h.month - 1:02d}"
+
+
+def _aplicar_regla_stock_sin_venta(items: list[dict], db: Session) -> None:
+    """Regla de negocio: si un producto tiene stock activo de sucursal >= demanda
+    mensual Y no tuvo venta en el mes calendario anterior, no se sugiere comprar.
+
+    Se aplica marcando `pedir = "No"` y `pedir_flag = "No"`. El total_sugerido_suc
+    del BI NO se altera (la regla es opinable y conviene poder revisarla); como
+    el dashboard filtra por defecto "Solo pedir = Si", las filas dejan de aparecer
+    sin perder el dato original.
+
+    Idea: evitar comprar a un proveedor cuando la sucursal tiene cubierta su
+    demanda con stock propio y ademas el producto no se movio el mes pasado
+    (= demanda historica que ya no se materializa hoy).
+
+    Muta `items` in-place. Una sola query batch a VentaMensual para todos los
+    pares (producto, sucursal) involucrados.
+    """
+    if not items:
+        return
+    pares = {
+        (it.get("producto"), it.get("sucursal_id"))
+        for it in items
+        if it.get("producto") and it.get("sucursal_id")
+    }
+    if not pares:
+        return
+    mes = _mes_anterior_yyyymm()
+    productos = {p for p, _ in pares}
+    sucursales = {s for _, s in pares}
+    # Suma de cantidad vendida el mes anterior por par.
+    rows = db.execute(
+        select(
+            VentaMensual.producto,
+            VentaMensual.sucursal_id,
+            func.coalesce(func.sum(VentaMensual.cantidad), 0).label("c"),
+        )
+        .where(
+            VentaMensual.producto.in_(productos),
+            VentaMensual.sucursal_id.in_(sucursales),
+            VentaMensual.mes == mes,
+        )
+        .group_by(VentaMensual.producto, VentaMensual.sucursal_id)
+    ).all()
+    venta_map = {(p, s): float(c or 0) for p, s, c in rows}
+
+    for it in items:
+        p = it.get("producto")
+        s = it.get("sucursal_id")
+        if not p or not s:
+            continue
+        stock_activo = it.get("stock_activo_suc")
+        demanda = it.get("demanda_mensual")
+        # Necesitamos ambos numericos y demanda > 0 (si demanda=0 la regla no
+        # aporta nada: el modelo del BI ya no deberia sugerir nada).
+        if stock_activo is None or demanda is None or float(demanda) <= 0:
+            continue
+        if float(stock_activo) < float(demanda):
+            continue
+        if venta_map.get((p, s), 0.0) > 0:
+            continue
+        # Stock cubre el mes + sin venta el mes anterior -> no pedir.
+        it["pedir"] = "No"
+        it["pedir_flag"] = "No"
+
+
 def _enriquecer_con_catalogo(items: list[dict], db: Session) -> None:
     """Agrega campos del ProductoCatalogo que NO vienen del modelo Sugerido.
 
@@ -328,6 +406,10 @@ def listar(
     # el modelo Sugerido. Las filas que ya vienen del catalogo o sinteticas no
     # se tocan: el helper salta cuando ya hay 'reemplazos' en la fila.
     _enriquecer_con_catalogo(items, db)
+
+    # Regla de negocio (jun-2026): si tiene stock para su demanda mensual y no
+    # tuvo venta el mes anterior, no se sugiere comprar.
+    _aplicar_regla_stock_sin_venta(items, db)
 
     return items, total + total_manuales_solas + total_cat
 
@@ -495,6 +577,10 @@ def listar_por_ids(db: Session, ids: list[int]) -> list[dict]:
         items.append(d)
 
     _enriquecer_con_catalogo(items, db)
+    # Misma regla de negocio que aplica `listar`: stock cubre el mes + sin venta
+    # el mes anterior -> pedir = No. Asi el export Excel respeta lo mismo que ve
+    # la grilla.
+    _aplicar_regla_stock_sin_venta(items, db)
     return items
 
 

@@ -446,3 +446,61 @@ def test_excel_labels_cubren_columnas_del_frontend():
         f"Columnas del frontend sin etiqueta en LABELS del Excel: {faltan}. "
         f"Agregalas a apps/api/src/services/excel_export.py."
     )
+
+
+def test_regla_stock_sin_venta_marca_pedir_no(db_session):
+    """Regla: si stock_activo >= demanda_mensual y no hubo venta el mes anterior,
+    la plataforma fuerza pedir='No' aunque el BI haya sugerido comprar."""
+    from src.models import Sugerido, VentaMensual
+    from src.services.sugerido_service import (
+        _aplicar_regla_stock_sin_venta,
+        _mes_anterior_yyyymm,
+    )
+
+    # La fila del seed tiene venta en 202503-04-05; vamos a usar otro producto/sucursal
+    # para evitar pisar el helper con las ventas existentes.
+    db_session.add(Sugerido(
+        tenant_id="curifor", producto="TEST-REGLA-1", descripcion="Test",
+        sucursal_id="LINDEROS", nombre_sucursal="Linderos",
+        clasificacion_abc="B", pedir="Si", pedir_flag="Si",
+        demanda_mensual=10.0, stock_activo_suc=50, total_sugerido_suc=5,
+    ))
+    db_session.add(Sugerido(
+        tenant_id="curifor", producto="TEST-REGLA-2", descripcion="Test 2",
+        sucursal_id="LINDEROS", nombre_sucursal="Linderos",
+        clasificacion_abc="B", pedir="Si", pedir_flag="Si",
+        demanda_mensual=10.0, stock_activo_suc=50, total_sugerido_suc=5,
+    ))
+    # TEST-REGLA-2 SI tuvo venta el mes anterior -> NO se debe aplicar la regla.
+    db_session.add(VentaMensual(
+        tenant_id="curifor", producto="TEST-REGLA-2", sucursal_id="LINDEROS",
+        mes=_mes_anterior_yyyymm(), cantidad=3,
+    ))
+    db_session.commit()
+
+    items = [
+        # Cumple ambas condiciones: stock 50 >= demanda 10, sin venta mes anterior.
+        {
+            "producto": "TEST-REGLA-1", "sucursal_id": "LINDEROS",
+            "stock_activo_suc": 50, "demanda_mensual": 10.0,
+            "pedir": "Si", "pedir_flag": "Si",
+        },
+        # Tiene venta mes anterior -> NO debe cambiar.
+        {
+            "producto": "TEST-REGLA-2", "sucursal_id": "LINDEROS",
+            "stock_activo_suc": 50, "demanda_mensual": 10.0,
+            "pedir": "Si", "pedir_flag": "Si",
+        },
+        # Stock insuficiente -> NO debe cambiar.
+        {
+            "producto": "TEST-REGLA-1", "sucursal_id": "TALCA",
+            "stock_activo_suc": 5, "demanda_mensual": 10.0,
+            "pedir": "Si", "pedir_flag": "Si",
+        },
+    ]
+    _aplicar_regla_stock_sin_venta(items, db_session)
+
+    assert items[0]["pedir"] == "No", "stock cubre + sin venta -> debe forzar pedir=No"
+    assert items[0]["pedir_flag"] == "No"
+    assert items[1]["pedir"] == "Si", "con venta mes anterior, no aplicar la regla"
+    assert items[2]["pedir"] == "Si", "stock insuficiente, no aplicar la regla"
