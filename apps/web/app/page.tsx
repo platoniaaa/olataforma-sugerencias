@@ -12,7 +12,7 @@ import { ConfigurarColumnas } from "@/components/configurar-columnas";
 import { ModalSugerenciaManual } from "@/components/modal-sugerencia-manual";
 import { api } from "@/lib/api-client";
 import { getEsAdmin } from "@/lib/auth";
-import { KEYS_POR_DEFECTO } from "@/lib/columnas";
+import { columnasPorDefectoVista } from "@/lib/columnas";
 import { formatoFechaHora, formatoNumero } from "@/lib/formato";
 import { STORAGE_KEYS, guardar, leer } from "@/lib/persistencia-dashboard";
 import type { Sucursal, SugeridoFiltros, SugeridoKpis, SugeridoRow } from "@/lib/types";
@@ -28,6 +28,23 @@ const VISTAS: { id: Vista; label: string; hint: string }[] = [
 const LS_COLUMNAS = "sugerido_columnas_visibles";
 
 const FILTROS_DEFAULT: SugeridoFiltros = { solo_pedir: true, vista: "todas" };
+
+// Las columnas se recuerdan por vista: cada pestania del proceso de compras tiene
+// su propio set (clave `sugerido_columnas_visibles::<vista>`). Asi "Distribución"
+// arranca con el set operativo sin pisar lo que el usuario configuro en "Todas".
+function leerColumnasVista(vista: string): string[] {
+  if (typeof window === "undefined") return columnasPorDefectoVista(vista);
+  try {
+    const saved = localStorage.getItem(`${LS_COLUMNAS}::${vista}`);
+    if (saved) {
+      const arr = JSON.parse(saved);
+      if (Array.isArray(arr) && arr.length) return arr;
+    }
+  } catch {
+    /* noop */
+  }
+  return columnasPorDefectoVista(vista);
+}
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -74,7 +91,10 @@ export default function DashboardPage() {
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
   const [proveedores, setProveedores] = useState<string[]>([]);
 
-  const [colsVisibles, setColsVisibles] = useState<string[]>(KEYS_POR_DEFECTO);
+  const vista = filtros.vista ?? "todas";
+  const [colsVisibles, setColsVisibles] = useState<string[]>(() =>
+    leerColumnasVista(leer<SugeridoFiltros>(STORAGE_KEYS.filtros, FILTROS_DEFAULT).vista ?? "todas")
+  );
   const [modalCols, setModalCols] = useState(false);
   const [modalManual, setModalManual] = useState(false);
 
@@ -102,22 +122,24 @@ export default function DashboardPage() {
     tablaRef.current?.limpiarFiltrosColumnas();
   }, [setFiltros]);
 
-  // Restaurar columnas desde localStorage.
+  // Al cambiar de vista, cargar las columnas de esa pestania (guardadas o su
+  // set por defecto). No persiste: cargar defaults no debe pisar lo guardado.
   useEffect(() => {
-    const saved = localStorage.getItem(LS_COLUMNAS);
-    if (saved) {
+    setColsVisibles(leerColumnasVista(vista));
+  }, [vista]);
+
+  // Cambios explicitos del usuario (modal de columnas): persisten en la vista actual.
+  const cambiarColumnas = useCallback(
+    (cols: string[]) => {
+      setColsVisibles(cols);
       try {
-        const arr = JSON.parse(saved);
-        if (Array.isArray(arr) && arr.length) setColsVisibles(arr);
+        localStorage.setItem(`${LS_COLUMNAS}::${vista}`, JSON.stringify(cols));
       } catch {
         /* noop */
       }
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem(LS_COLUMNAS, JSON.stringify(colsVisibles));
-  }, [colsVisibles]);
+    },
+    [vista]
+  );
 
   // Fecha/hora de la última sincronización de datos desde Power BI.
   useEffect(() => {
@@ -307,7 +329,7 @@ export default function DashboardPage() {
         open={modalCols}
         onClose={() => setModalCols(false)}
         visibles={colsVisibles}
-        onChange={setColsVisibles}
+        onChange={cambiarColumnas}
       />
       <ModalSugerenciaManual
         open={modalManual}

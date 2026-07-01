@@ -36,6 +36,7 @@ export const COLUMNAS: DefColumna[] = [
   { key: "lead_time_dias", label: "Lead Time (dias)", tipo: "numero", visiblePorDefecto: false },
   { key: "lt_efectivo", label: "LT Efectivo", tipo: "numero", visiblePorDefecto: false },
   { key: "abastece_cd", label: "Abastece CD", tipo: "texto", visiblePorDefecto: false },
+  { key: "comprar_en_el_cd", label: "¿Comprar en CD?", tipo: "texto", visiblePorDefecto: false },
   { key: "prioridad_cd", label: "Prioridad CD", tipo: "numero", visiblePorDefecto: false },
   { key: "costo_unitario", label: "Costo Unitario", tipo: "clp", visiblePorDefecto: false },
   { key: "unidad_medida", label: "Unidad", tipo: "texto", visiblePorDefecto: false },
@@ -44,3 +45,18 @@ export const COLUMNAS: DefColumna[] = [
 ];
 
 export const KEYS_POR_DEFECTO = COLUMNAS.filter((c) => c.visiblePorDefecto).map((c) => c.key as string);
+
+// Columnas por defecto de la vista "distribucion" (traslado CD -> sucursales).
+// Prioriza el set operativo del jefe de compras: cuanto trasladar, stock del CD,
+// lo que aun hay que comprar y si el CD debe comprarlo (el "Total Sugerido" se
+// omite porque estas filas lo traen en cero: la sucursal se abastece via CD).
+const COLS_DISTRIBUCION = [
+  "producto", "descripcion", "clasificacion_abc", "nombre_sucursal",
+  "sugerido_traslado", "stock_en_cd", "sugerido_compra_neto",
+  "comprar_en_el_cd", "prioridad_cd",
+];
+
+// Set de columnas por defecto segun la vista del proceso de compras.
+export function columnasPorDefectoVista(vista: string): string[] {
+  return vista === "distribucion" ? COLS_DISTRIBUCION : KEYS_POR_DEFECTO;
+}
