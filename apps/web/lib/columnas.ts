@@ -23,7 +23,7 @@ export const COLUMNAS: DefColumna[] = [
   { key: "filtro1_final", label: "Marca", tipo: "texto", visiblePorDefecto: false },
   { key: "tipo_origen", label: "Tipo Origen", tipo: "texto", visiblePorDefecto: false },
   { key: "total_valor_sugerido_clp", label: "Valor Total CLP", tipo: "clp", visiblePorDefecto: false },
-  { key: "sugerido_traslado", label: "Sug. Traslado", tipo: "numero", visiblePorDefecto: false },
+  { key: "sugerido_traslado", label: "Sugerido traslado desde el CD", tipo: "numero", visiblePorDefecto: false },
   { key: "sugerido_compra_neto", label: "Sug. Compra Neto", tipo: "numero", visiblePorDefecto: false },
   { key: "stock_activo_suc", label: "Stock Activo", tipo: "numero", visiblePorDefecto: false },
   { key: "stock_en_transito_suc", label: "Stock Transito", tipo: "numero", visiblePorDefecto: false },

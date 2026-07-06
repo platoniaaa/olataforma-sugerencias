@@ -47,7 +47,7 @@ LABELS: dict[str, str] = {
     "stock_activo_suc": "Stock Activo",
     "stock_en_transito_suc": "Stock en Transito",
     "stock_en_cd": "Stock en CD",
-    "sugerido_traslado": "Sugerido Traslado",
+    "sugerido_traslado": "Sugerido traslado desde el CD",
     "sugerido_compra_neto": "Sugerido Compra Neto",
     "total_sugerido_suc": "Total Sugerido",
     "total_valor_sugerido_clp": "Valor Total CLP",
