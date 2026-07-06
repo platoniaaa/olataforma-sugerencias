@@ -27,6 +27,8 @@ class Sugerido(Base):
 
     # --- Clasificacion / origen ---
     clasificacion_abc: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    # Clase ABC del producto a nivel AGREGADO (todas las sucursales), no local.
+    clasificacion_abc_agregada: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     proveedor: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     filtro1_final: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     tipo_origen: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
@@ -44,6 +46,9 @@ class Sugerido(Base):
     prioridad_cd: Mapped[int | None] = mapped_column(Integer, nullable=True)
     comprar_en_el_cd: Mapped[str | None] = mapped_column(String, nullable=True)
     tiene_stock_cd: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Solo en la fila del CD: sucursales cuya demanda consolida esta compra
+    # centralizada (texto: "PLACILLA, RANCAGUA"). Para mostrar a quien abastece.
+    sucursales_origen_cd: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # --- Demanda / parametros de inventario ---
     demanda_mensual: Mapped[float | None] = mapped_column(Float, nullable=True)

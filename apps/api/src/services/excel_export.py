@@ -25,6 +25,7 @@ LABELS: dict[str, str] = {
     "empresa": "Empresa",
     "descripcion": "Descripcion",
     "clasificacion_abc": "ABC",
+    "clasificacion_abc_agregada": "ABC Agregada",
     "nombre_sucursal": "Sucursal",
     "sucursal_id": "ID Sucursal",
     "proveedor": "Proveedor",

@@ -42,6 +42,8 @@ class SugeridoRow(BaseModel):
     costo_unitario: float | None = None
     pedir: str | None = None
     reemplazos: str | None = None
+    clasificacion_abc_agregada: str | None = None
+    sucursales_origen_cd: str | None = None
     sugerido_suc: float | None = None
     stock_activo_suc: float | None = None
     stock_en_transito_suc: float | None = None

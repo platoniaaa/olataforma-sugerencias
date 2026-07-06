@@ -30,6 +30,8 @@ export interface SugeridoRow {
   costo_unitario: number | null;
   pedir: string | null;
   reemplazos: string | null;
+  clasificacion_abc_agregada: string | null;
+  sucursales_origen_cd: string | null;
   sugerido_suc: number | null;
   stock_activo_suc: number | null;
   stock_en_transito_suc: number | null;

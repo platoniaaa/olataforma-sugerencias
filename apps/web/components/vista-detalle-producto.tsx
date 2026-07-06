@@ -88,6 +88,10 @@ export function VistaDetalleProducto({
     (d.demanda_diaria ?? 0) * (5 + (d.lt_efectivo ?? 0)) + (d.stock_seguridad ?? 0);
   const pctStock = stockOptimo > 0 ? Math.min(100, ((d.stock_activo_suc ?? 0) / stockOptimo) * 100) : 0;
   const reemplazos = (d.reemplazos ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const sucursalesOrigen = (d.sucursales_origen_cd ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   const manualTotal = manuales.reduce((s, m) => s + (m.unidades ?? 0), 0);
 
   return (
@@ -202,6 +206,28 @@ export function VistaDetalleProducto({
           />
         </CardContent>
       </Card>
+
+      {/* Compra centralizada: a qué sucursales abastece este pedido del CD */}
+      {sucursalesOrigen.length > 0 && (
+        <Card className="border-amber-200 bg-amber-50/50">
+          <CardHeader>
+            <CardTitle>Compra centralizada — abastece a otras sucursales</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-[13px] text-slate-600">
+              Parte de este pedido del CD cubre la demanda de baja rotación de estas
+              sucursales; el stock se recibe en el CD y desde ahí se les distribuye.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {sucursalesOrigen.map((s) => (
+                <Badge key={s} className="bg-amber-100 text-amber-800">
+                  {s}
+                </Badge>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Tendencia de venta (últimos 12 meses) */}
       <GraficoVentas
