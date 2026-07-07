@@ -214,10 +214,13 @@ export default function DashboardPage() {
   const exportar = async () => {
     setExportando(true);
     try {
-      // Recolectamos los IDs visibles del AG Grid (respeta cualquier filtro de
-      // columna que el usuario haya aplicado en la tabla). Si la grilla aun no
-      // esta montada, ids queda vacio y el backend usa los filtros server-side.
-      const ids = tablaRef.current?.obtenerIdsVisibles() ?? [];
+      // Solo pasamos IDs cuando el usuario aplico filtros de COLUMNA en la tabla
+      // (que el backend no conoce): asi el Excel los respeta. Sin filtros de
+      // columna NO mandamos IDs -> el backend exporta TODO lo que matchea los
+      // filtros server-side (hasta 100k), no solo las ~5.000 filas cargadas en
+      // la grilla. Antes se mandaban siempre los IDs visibles y el Excel quedaba
+      // topado al limite de carga de la grilla.
+      const ids = hayFiltrosColumna ? (tablaRef.current?.obtenerIdsVisibles() ?? []) : [];
       await api.exportExcel(
         filtros,
         colsVisibles,
@@ -242,7 +245,7 @@ export default function DashboardPage() {
           <p className="mt-3 text-[13px] text-ink-500">
             {cargando ? "Cargando…" : `${formatoNumero(total)} filas`}
             {total > rows.length &&
-              ` (mostrando ${formatoNumero(rows.length)} — los KPIs cubren el total; el Excel exporta solo lo visible)`}
+              ` (mostrando ${formatoNumero(rows.length)} — los KPIs y el Excel cubren el total)`}
           </p>
           {ultimaSync && (
             <p className="mt-1 text-[12px] text-ink-400">
