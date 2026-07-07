@@ -1,6 +1,7 @@
 "use client";
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { AgGridReact } from "ag-grid-react";
 import type {
@@ -9,10 +10,12 @@ import type {
   ColumnState,
   FirstDataRenderedEvent,
   GridReadyEvent,
+  IHeaderParams,
   IRowNode,
   RowClickedEvent,
+  SortDirection,
 } from "ag-grid-community";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, Info } from "lucide-react";
 import { COLUMNAS, type DefColumna } from "@/lib/columnas";
 import { formatoCLP, formatoNumero } from "@/lib/formato";
 import { STORAGE_KEYS, guardar, leer } from "@/lib/persistencia-dashboard";
@@ -63,6 +66,91 @@ function ProductoCelda(p: { value: unknown; data?: SugeridoRow }) {
   );
 }
 
+/**
+ * Encabezado custom de AG Grid: réplica del header por defecto (click para ordenar,
+ * indicador de orden, botón de filtro) MÁS un icono de info que muestra el detalle
+ * de la columna al pasar el mouse. El tooltip se renderiza en un portal a <body>
+ * (posición fija sobre el icono) para que no lo recorte el overflow del header.
+ * Se usa header component completo porque `innerHeaderComponent` no se aplica en
+ * esta versión de AG Grid React.
+ */
+function HeaderConInfo(props: IHeaderParams & { info?: string }) {
+  const { displayName, enableSorting, enableFilterButton, progressSort, showFilter, column, info } = props;
+  const [sort, setSort] = useState<SortDirection>(() => column.getSort() ?? null);
+  const [filtroActivo, setFiltroActivo] = useState<boolean>(() => column.isFilterActive());
+  const filterRef = useRef<HTMLSpanElement>(null);
+  const iconRef = useRef<HTMLSpanElement>(null);
+  const [tip, setTip] = useState<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    const onSort = () => setSort(column.getSort() ?? null);
+    const onFilter = () => setFiltroActivo(column.isFilterActive());
+    column.addEventListener("sortChanged", onSort);
+    column.addEventListener("filterChanged", onFilter);
+    return () => {
+      column.removeEventListener("sortChanged", onSort);
+      column.removeEventListener("filterChanged", onFilter);
+    };
+  }, [column]);
+
+  const mostrarTip = () => {
+    const r = iconRef.current?.getBoundingClientRect();
+    if (r) setTip({ x: r.left + r.width / 2, y: r.bottom + 6 });
+  };
+
+  return (
+    <div className="flex h-full w-full items-center gap-1">
+      <span
+        className={enableSorting ? "cursor-pointer select-none" : "select-none"}
+        onClick={(e) => enableSorting && progressSort(e.shiftKey)}
+      >
+        {displayName}
+      </span>
+      {sort === "asc" && <span className="ag-icon ag-icon-asc shrink-0" role="presentation" />}
+      {sort === "desc" && <span className="ag-icon ag-icon-desc shrink-0" role="presentation" />}
+      {info && (
+        <span
+          ref={iconRef}
+          onMouseEnter={mostrarTip}
+          onMouseLeave={() => setTip(null)}
+          onClick={(e) => e.stopPropagation()}
+          className="inline-flex shrink-0 cursor-help text-ink-400 transition-colors hover:text-accent-600"
+          aria-label={info}
+        >
+          <Info size={13} />
+        </span>
+      )}
+      <span className="flex-1" />
+      {enableFilterButton && (
+        <span
+          ref={filterRef}
+          role="button"
+          aria-label="Filtrar"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (filterRef.current) showFilter(filterRef.current);
+          }}
+          className={`ag-icon ag-icon-filter shrink-0 cursor-pointer ${
+            filtroActivo ? "text-accent-600" : "text-ink-400 hover:text-ink-600"
+          }`}
+        />
+      )}
+      {tip &&
+        info &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="pointer-events-none fixed z-[200] max-w-[280px] -translate-x-1/2 rounded-md border border-ink-200 bg-white px-3 py-2 text-[12px] font-normal normal-case leading-snug tracking-normal text-ink-700 shadow-lift"
+            style={{ left: tip.x, top: tip.y }}
+          >
+            {info}
+          </div>,
+          document.body
+        )}
+    </div>
+  );
+}
+
 function formateador(def: DefColumna) {
   return (p: { value: unknown }) => {
     const v = p.value as number | string | null;
@@ -96,6 +184,10 @@ function colDef(def: DefColumna): ColDef {
   if (def.key === "producto") {
     base.cellRenderer = ProductoCelda;
   }
+
+  // Header custom con icono de info (detalle de la columna al hover) + sort/filtro.
+  base.headerComponent = HeaderConInfo;
+  base.headerComponentParams = { info: def.info };
 
   if (def.tipo === "abc") {
     base.cellClass = "font-semibold";
