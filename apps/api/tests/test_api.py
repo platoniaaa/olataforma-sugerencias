@@ -35,6 +35,68 @@ def test_login_registra_acceso_fuera_de_auditoria(client):
     assert all(it["accion"] != "login" for it in aud["items"])
 
 
+def test_restriccion_sucursal_en_servicio(db_session):
+    from src.models import Sugerido
+    from src.schemas import SugeridoFiltros
+    from src.services import sugerido_service
+
+    db_session.add(Sugerido(tenant_id="curifor", producto="PZ-1", sucursal_id="BRASIL 18",
+                            nombre_sucursal="Brasil 18", pedir="Si", total_sugerido_suc=5))
+    db_session.add(Sugerido(tenant_id="curifor", producto="PZ-1", sucursal_id="TALCA",
+                            nombre_sucursal="Talca", pedir="Si", total_sugerido_suc=5))
+    db_session.commit()
+    items, _ = sugerido_service.listar(db_session, SugeridoFiltros(sucursales_permitidas=["BRASIL 18"]))
+    sucs = {i["sucursal_id"] for i in items}
+    assert "BRASIL 18" in sucs and "TALCA" not in sucs
+    items2, _ = sugerido_service.listar(db_session, SugeridoFiltros())
+    sucs2 = {i["sucursal_id"] for i in items2}
+    assert {"BRASIL 18", "TALCA"} <= sucs2
+
+
+def test_sucursales_permitidas_helper(db_session):
+    import json
+
+    from src.models import Usuario
+    from src.services.auth import hash_password, sucursales_permitidas
+
+    db_session.add(Usuario(email="luis@x.com", password_hash=hash_password("x"),
+                           sucursales_permitidas=json.dumps(["BRASIL 18", "DIEZ DE JULIO"])))
+    db_session.add(Usuario(email="todo@x.com", password_hash=hash_password("x")))
+    db_session.commit()
+    assert sucursales_permitidas(email="luis@x.com", db=db_session) == ["BRASIL 18", "DIEZ DE JULIO"]
+    assert sucursales_permitidas(email="todo@x.com", db=db_session) is None
+
+
+def test_endpoint_sugerido_y_dropdown_restringidos(client, db_session):
+    import json
+
+    from src.main import app
+    from src.models import DimSucursal, Sugerido, Usuario
+    from src.services.auth import hash_password, requiere_auth
+
+    db_session.add(Usuario(email="luis@x.com", password_hash=hash_password("x"),
+                           sucursales_permitidas=json.dumps(["BRASIL 18"])))
+    db_session.add(Sugerido(tenant_id="curifor", producto="PZ-2", sucursal_id="BRASIL 18",
+                            nombre_sucursal="Brasil 18", pedir="Si", total_sugerido_suc=5))
+    db_session.add(Sugerido(tenant_id="curifor", producto="PZ-2", sucursal_id="TALCA",
+                            nombre_sucursal="Talca", pedir="Si", total_sugerido_suc=5))
+    db_session.add(DimSucursal(sucursal_id="BRASIL 18", tenant_id="curifor", nombre="Brasil 18"))
+    db_session.add(DimSucursal(sucursal_id="TALCA", tenant_id="curifor", nombre="Talca"))
+    db_session.commit()
+
+    app.dependency_overrides[requiere_auth] = lambda: "luis@x.com"
+    try:
+        data = client.get("/api/sugerido?solo_pedir=true").json()
+        sucs = {it["sucursal_id"] for it in data["items"] if it["sucursal_id"]}
+        assert sucs == {"BRASIL 18"}  # no ve TALCA
+        sucursales = client.get("/api/sucursales").json()
+        assert [s["sucursal_id"] for s in sucursales] == ["BRASIL 18"]
+        # el detalle de una sucursal ajena da 404
+        assert client.get("/api/sugerido/PZ-2/TALCA").status_code == 404
+    finally:
+        app.dependency_overrides[requiere_auth] = lambda: "test@curifor.com"
+
+
 def test_accesos_requiere_autorizacion(client):
     # noadmin@curifor.com no es admin ni esta en la lista de emails autorizados -> 403.
     # (test@curifor.com ahora es admin en el seed, asi que se usa el otro usuario.)

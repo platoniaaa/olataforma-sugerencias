@@ -94,6 +94,24 @@ def requiere_admin(email: str = Depends(requiere_auth), db=Depends(get_db)) -> s
     return email
 
 
+def sucursales_permitidas(email: str = Depends(requiere_auth), db=Depends(get_db)) -> list[str] | None:
+    """Sucursales (sucursal_id) que el usuario puede ver, o None si ve TODAS.
+
+    Se inyecta en los endpoints del sugerido/compras para restringir por sucursal.
+    Un valor vacío o mal formado se trata como sin restricción (ve todas)."""
+    from ..models import Usuario  # import local para evitar ciclo
+
+    user = db.get(Usuario, email)
+    if not user or not user.sucursales_permitidas:
+        return None
+    try:
+        vals = json.loads(user.sucursales_permitidas)
+    except (ValueError, TypeError):
+        return None
+    vals = [str(v) for v in vals if v] if isinstance(vals, list) else []
+    return vals or None
+
+
 def requiere_ver_accesos(email: str = Depends(requiere_auth), db=Depends(get_db)) -> str:
     """Autoriza la vista de accesos (quien entro y cuando): admin o email en la lista."""
     from ..models import Usuario  # import local para evitar ciclo

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..models import DimProducto, DimSucursal, ProductoCatalogo
 from ..schemas import ProductoOut, ProductoPage, SucursalOut
+from ..services.auth import sucursales_permitidas
 
 router = APIRouter(prefix="/api", tags=["catalogo"])
 
@@ -99,6 +100,11 @@ def detalle_producto(producto: str, db: Session = Depends(get_db)):
 
 
 @router.get("/sucursales", response_model=list[SucursalOut])
-def listar_sucursales(db: Session = Depends(get_db)):
-    items = db.scalars(select(DimSucursal).order_by(DimSucursal.prioridad_cd)).all()
-    return list(items)
+def listar_sucursales(
+    db: Session = Depends(get_db),
+    permitidas: list[str] | None = Depends(sucursales_permitidas),
+):
+    stmt = select(DimSucursal).order_by(DimSucursal.prioridad_cd)
+    if permitidas is not None:  # usuario restringido: solo sus sucursales
+        stmt = stmt.where(DimSucursal.sucursal_id.in_(permitidas))
+    return list(db.scalars(stmt).all())

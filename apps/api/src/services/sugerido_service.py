@@ -22,6 +22,10 @@ PREFIJOS_EXCLUIDOS = ("D&P", "MEC INSUMOS", "INCENTIVOS", "APLICA-DED")
 
 
 def _apply_filters(stmt, f: SugeridoFiltros):
+    # Restriccion de acceso por sucursal (la fija el servidor segun el usuario).
+    # Debe ir primero: acota TODO el sugerido a las sucursales del usuario.
+    if f.sucursales_permitidas is not None:
+        stmt = stmt.where(Sugerido.sucursal_id.in_(f.sucursales_permitidas))
     # Excluir productos internos (D&P REPTO-TALLER, etc.) de todo el sugerido.
     for pref in PREFIJOS_EXCLUIDOS:
         stmt = stmt.where(~Sugerido.producto.ilike(f"{pref}%"))
@@ -544,20 +548,25 @@ def unidades_por_par(
     return out
 
 
-def listar_por_ids(db: Session, ids: list[int]) -> list[dict]:
+def listar_por_ids(
+    db: Session, ids: list[int], sucursales_permitidas: list[str] | None = None
+) -> list[dict]:
     """Devuelve las filas con esos IDs en formato dict (compatible con excel_export).
 
     Aplica los mismos enriquecimientos que `listar`: suma de sugerencias manuales
     vigentes y campos del catalogo (reemplazos). Solo procesa IDs del sugerido
     del BI (id > 0); las filas sinteticas de catalogo/manuales tienen IDs
-    negativos y no se incluyen aqui (caso raro en exports).
-    """
+    negativos y no se incluyen aqui (caso raro en exports). Si se pasa
+    `sucursales_permitidas`, restringe a esas sucursales (acceso por usuario)."""
     if not ids:
         return []
     ids_validos = [i for i in ids if i > 0]
     if not ids_validos:
         return []
-    rows = list(db.scalars(select(Sugerido).where(Sugerido.id.in_(ids_validos))).all())
+    stmt = select(Sugerido).where(Sugerido.id.in_(ids_validos))
+    if sucursales_permitidas is not None:
+        stmt = stmt.where(Sugerido.sucursal_id.in_(sucursales_permitidas))
+    rows = list(db.scalars(stmt).all())
     if not rows:
         return []
 

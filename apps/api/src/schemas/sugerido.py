@@ -134,6 +134,10 @@ class SugeridoFiltros(BaseModel):
     # "cd" = compra del CD (sucursal_id=CD REPUESTOS).
     # "distribucion" = traslado CD -> sucursales (Abastece CD = Si).
     vista: str = "todas"
+    # Restriccion de acceso por sucursal (sucursal_id). La setea el SERVIDOR desde
+    # el usuario autenticado, NO el cliente: si viene con valor, el sugerido se
+    # limita a esas sucursales. None = sin restriccion (ve todas).
+    sucursales_permitidas: list[str] | None = None
 
 
 class ExportRequest(BaseModel):

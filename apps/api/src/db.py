@@ -92,6 +92,8 @@ def create_all() -> None:
         # 2026-07: clase ABC agregada + sucursales que consolida el CD.
         "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS clasificacion_abc_agregada VARCHAR",
         "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS sucursales_origen_cd VARCHAR",
+        # 2026-07: acceso por sucursal (usuario ve solo sus sucursales).
+        "ALTER TABLE usuario ADD COLUMN IF NOT EXISTS sucursales_permitidas TEXT",
     ]
     # SQLite NO soporta "ADD COLUMN IF NOT EXISTS" (error de sintaxis que se
     # tragaba el try, dejando bases locales viejas sin las columnas nuevas):

@@ -14,6 +14,7 @@ from ..schemas import (
     VentasResponse,
 )
 from ..services import excel_export, sugerido_service
+from ..services.auth import sucursales_permitidas
 
 router = APIRouter(prefix="/api/sugerido", tags=["sugerido"])
 
@@ -28,11 +29,13 @@ def _filtros(
     solo_pedir: bool = Query(True, description="Mostrar solo pedir=Si"),
     solo_nacionales: bool = Query(False, description="Excluye productos importados"),
     vista: str = Query("todas", description="todas | sucursales | cd | distribucion"),
+    permitidas: list[str] | None = Depends(sucursales_permitidas),
 ) -> SugeridoFiltros:
     return SugeridoFiltros(
         q=q, sucursales=sucursal, abc=abc, filtro1=filtro1,
         tipo_origen=tipo_origen, proveedor=proveedor, solo_pedir=solo_pedir,
         solo_nacionales=solo_nacionales, vista=vista,
+        sucursales_permitidas=permitidas,
     )
 
 
@@ -68,14 +71,28 @@ def agrupado(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+def _sin_acceso(sucursal_id: str, permitidas: list[str] | None) -> bool:
+    return permitidas is not None and sucursal_id not in permitidas
+
+
 @router.get("/{producto}/{sucursal_id}/ventas", response_model=VentasResponse)
-def ventas(producto: str, sucursal_id: str, db: Session = Depends(get_db)):
+def ventas(
+    producto: str, sucursal_id: str, db: Session = Depends(get_db),
+    permitidas: list[str] | None = Depends(sucursales_permitidas),
+):
     """Histórico de venta del producto en la sucursal (últimos 12 meses)."""
+    if _sin_acceso(sucursal_id, permitidas):
+        raise HTTPException(status_code=404, detail="No existe sugerido para ese producto/sucursal")
     return VentasResponse(**sugerido_service.ventas_12m(db, producto, sucursal_id))
 
 
 @router.get("/{producto}/{sucursal_id}", response_model=SugeridoRow)
-def detalle(producto: str, sucursal_id: str, db: Session = Depends(get_db)):
+def detalle(
+    producto: str, sucursal_id: str, db: Session = Depends(get_db),
+    permitidas: list[str] | None = Depends(sucursales_permitidas),
+):
+    if _sin_acceso(sucursal_id, permitidas):
+        raise HTTPException(status_code=404, detail="No existe sugerido para ese producto/sucursal")
     row = sugerido_service.detalle(db, producto, sucursal_id)
     if not row:
         raise HTTPException(status_code=404, detail="No existe sugerido para ese producto/sucursal")
@@ -83,12 +100,18 @@ def detalle(producto: str, sucursal_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/export-excel")
-def export_excel(req: ExportRequest, db: Session = Depends(get_db)):
+def export_excel(
+    req: ExportRequest, db: Session = Depends(get_db),
+    permitidas: list[str] | None = Depends(sucursales_permitidas),
+):
     # Si vienen IDs, exportamos exactamente esas filas (preserva los filtros que el
     # usuario aplico en las columnas del AG Grid). Sino, usamos filtros server-side.
+    # La restriccion por usuario (permitidas) se aplica SIEMPRE del lado servidor,
+    # ignorando lo que venga en el body.
     if req.ids:
-        items = sugerido_service.listar_por_ids(db, req.ids)
+        items = sugerido_service.listar_por_ids(db, req.ids, sucursales_permitidas=permitidas)
     else:
+        req.filtros.sucursales_permitidas = permitidas
         items, _ = sugerido_service.listar(db, req.filtros, page=1, limit=100000, sort=req.sort)
     contenido = excel_export.generar_excel(items, req.columnas)
     nombre = excel_export.nombre_archivo()
