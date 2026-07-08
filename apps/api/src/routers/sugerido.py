@@ -15,8 +15,11 @@ from ..schemas import (
 )
 from ..services import excel_export, sugerido_service
 from ..services.auth import sucursales_permitidas
+from ..services.sugerido_service import SUCURSALES_OCULTAS
 
 router = APIRouter(prefix="/api/sugerido", tags=["sugerido"])
+
+_OCULTAS_LOWER = {s.lower() for s in SUCURSALES_OCULTAS}
 
 
 def _filtros(
@@ -72,6 +75,9 @@ def agrupado(
 
 
 def _sin_acceso(sucursal_id: str, permitidas: list[str] | None) -> bool:
+    # Sucursal cerrada/oculta: se comporta como inexistente (404) aunque se pida por URL.
+    if sucursal_id and sucursal_id.strip().lower() in _OCULTAS_LOWER:
+        return True
     return permitidas is not None and sucursal_id not in permitidas
 
 

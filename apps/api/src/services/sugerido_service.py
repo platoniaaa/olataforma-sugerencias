@@ -20,12 +20,26 @@ SORTABLE = {c.name for c in Sugerido.__table__.columns}
 # proveedor: se ocultan siempre del sugerido. Si aparece uno nuevo, agregar su prefijo aquí.
 PREFIJOS_EXCLUIDOS = ("D&P", "MEC INSUMOS", "INCENTIVOS", "APLICA-DED")
 
+# Sucursales cerradas/ocultas: siguen en el modelo del BI (arrastran ventas historicas
+# dentro de la ventana movil de 12m) pero YA NO OPERAN, asi que no deben verse en la
+# plataforma. Caso jul-2026: "DIEZ DE JULIO" cerro y fue reemplazada por la sucursal
+# activa "DIEZ DE JULIO (2)" (dos bodegas distintas). El filtro va sobre `sucursal_id`
+# (el id canonico del modelo) con comparacion EXACTA en minusculas -> nunca afecta a
+# "DIEZ DE JULIO (2)". Es una decision de presentacion (el modelo las sigue calculando).
+SUCURSALES_OCULTAS = ("DIEZ DE JULIO",)
+_OCULTAS_LOWER = [s.lower() for s in SUCURSALES_OCULTAS]
+
 
 def _apply_filters(stmt, f: SugeridoFiltros):
     # Restriccion de acceso por sucursal (la fija el servidor segun el usuario).
     # Debe ir primero: acota TODO el sugerido a las sucursales del usuario.
     if f.sucursales_permitidas is not None:
         stmt = stmt.where(Sugerido.sucursal_id.in_(f.sucursales_permitidas))
+    # Ocultar sucursales cerradas (p.ej. "DIEZ DE JULIO", reemplazada por su "(2)").
+    # Aplica a grilla, KPIs, graficos, carga masiva y carros de compra (todos pasan
+    # por aca). Exacto en minusculas: "DIEZ DE JULIO (2)" NO se ve afectada.
+    if _OCULTAS_LOWER:
+        stmt = stmt.where(func.lower(Sugerido.sucursal_id).notin_(_OCULTAS_LOWER))
     # Excluir productos internos (D&P REPTO-TALLER, etc.) de todo el sugerido.
     for pref in PREFIJOS_EXCLUIDOS:
         stmt = stmt.where(~Sugerido.producto.ilike(f"{pref}%"))

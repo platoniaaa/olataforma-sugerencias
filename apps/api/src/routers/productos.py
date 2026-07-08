@@ -7,6 +7,7 @@ from ..db import get_db
 from ..models import DimProducto, DimSucursal, ProductoCatalogo
 from ..schemas import ProductoOut, ProductoPage, SucursalOut
 from ..services.auth import sucursales_permitidas
+from ..services.sugerido_service import SUCURSALES_OCULTAS
 
 router = APIRouter(prefix="/api", tags=["catalogo"])
 
@@ -107,4 +108,8 @@ def listar_sucursales(
     stmt = select(DimSucursal).order_by(DimSucursal.prioridad_cd)
     if permitidas is not None:  # usuario restringido: solo sus sucursales
         stmt = stmt.where(DimSucursal.sucursal_id.in_(permitidas))
+    # Ocultar sucursales cerradas del selector (misma regla que el sugerido).
+    ocultas = [s.lower() for s in SUCURSALES_OCULTAS]
+    if ocultas:
+        stmt = stmt.where(func.lower(DimSucursal.sucursal_id).notin_(ocultas))
     return list(db.scalars(stmt).all())

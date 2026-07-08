@@ -97,6 +97,37 @@ def test_endpoint_sugerido_y_dropdown_restringidos(client, db_session):
         app.dependency_overrides[requiere_auth] = lambda: "test@curifor.com"
 
 
+def test_sucursal_cerrada_diez_de_julio_oculta(client, db_session):
+    """La sucursal cerrada "DIEZ DE JULIO" no debe verse en la plataforma; la activa
+    "DIEZ DE JULIO (2)" (otra bodega) si. Cubre grilla, dropdown y detalle."""
+    from src.models import DimSucursal, Sugerido
+
+    db_session.add(Sugerido(tenant_id="curifor", producto="DJ-1", sucursal_id="DIEZ DE JULIO",
+                            nombre_sucursal="Diez de Julio", pedir="Si", total_sugerido_suc=5))
+    db_session.add(Sugerido(tenant_id="curifor", producto="DJ-1", sucursal_id="DIEZ DE JULIO (2)",
+                            nombre_sucursal="Diez de Julio (2)", pedir="Si", total_sugerido_suc=7))
+    db_session.add(DimSucursal(sucursal_id="DIEZ DE JULIO", tenant_id="curifor",
+                               nombre="Diez de Julio", prioridad_cd=50))
+    db_session.add(DimSucursal(sucursal_id="DIEZ DE JULIO (2)", tenant_id="curifor",
+                               nombre="Diez de Julio (2)", prioridad_cd=1))
+    db_session.commit()
+
+    # Grilla: aparece la (2), NO la cerrada.
+    sucs = {it["sucursal_id"] for it in
+            client.get("/api/sugerido?solo_pedir=false&limit=5000").json()["items"]}
+    assert "DIEZ DE JULIO (2)" in sucs
+    assert "DIEZ DE JULIO" not in sucs
+
+    # Dropdown: oculta la cerrada, mantiene la (2).
+    ids = {s["sucursal_id"] for s in client.get("/api/sucursales").json()}
+    assert "DIEZ DE JULIO (2)" in ids
+    assert "DIEZ DE JULIO" not in ids
+
+    # Detalle: la cerrada da 404 (inexistente en la plataforma); la (2) responde 200.
+    assert client.get("/api/sugerido/DJ-1/DIEZ DE JULIO").status_code == 404
+    assert client.get("/api/sugerido/DJ-1/DIEZ DE JULIO (2)").status_code == 200
+
+
 def test_accesos_requiere_autorizacion(client):
     # noadmin@curifor.com no es admin ni esta en la lista de emails autorizados -> 403.
     # (test@curifor.com ahora es admin en el seed, asi que se usa el otro usuario.)
