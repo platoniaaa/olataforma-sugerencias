@@ -1,15 +1,40 @@
 name: keep-alive
 
-# Mantiene "despierto" el backend gratis de Render (que se duerme tras ~15 min sin uso)
-# golpeando el healthcheck cada 10 minutos. Asi los trabajadores no esperan el arranque.
+# Mantiene "despierto" el backend gratis de Render (que se duerme tras ~15 min sin
+# uso) golpeando el healthcheck cada 5 min. Antes era un cron "*/10" de una sola
+# request, pero los cron scheduled de GitHub se ejecutan con MUCHO delay (se observo
+# cada ~1,5-2,5 h), dejando gaps > 15 min -> Render dormia igual (cold start).
+#
+# Ahora cada corrida es un job de LARGA DURACION que pinguea en loop por ~5h50m
+# (bajo el limite de 6 h de GitHub). Con `concurrency` (1 a la vez, sin cancelar):
+# cuando el job en curso termina, arranca el siguiente que GitHub ya tenia encolado
+# del schedule -> cobertura continua 24/7 aunque el disparo del cron sea esporadico.
+# Repo publico => minutos de Actions gratis/ilimitados.
 on:
   schedule:
     - cron: "*/10 * * * *"
   workflow_dispatch: {}
 
+concurrency:
+  group: keep-alive
+  cancel-in-progress: false
+
 jobs:
   ping:
     runs-on: ubuntu-latest
+    timeout-minutes: 350   # ~5h50m; el maximo de GitHub es 6 h
     steps:
-      - name: Ping backend
-        run: curl -fsS https://sugerido-api.onrender.com/api/health || true
+      - name: Ping en loop cada 5 min
+        run: |
+          url="https://sugerido-api.onrender.com/api/health"
+          fin=$(( SECONDS + 349*60 ))
+          n=0
+          while [ "$SECONDS" -lt "$fin" ]; do
+            if curl -fsS --max-time 60 "$url" >/dev/null; then
+              n=$((n+1))
+            else
+              echo "ping fallo (backend despertando o caido) a los $SECONDS s"
+            fi
+            sleep 300
+          done
+          echo "listo: $n pings OK en esta corrida"
