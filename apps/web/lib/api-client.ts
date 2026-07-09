@@ -104,7 +104,7 @@ export const api = {
       throw new Error(err.detail ?? "No se pudo iniciar sesión");
     }
     const data = await res.json();
-    setSession(data.token, data.email, data.nombre ?? null, Boolean(data.es_admin));
+    setSession(data.token, data.email, data.nombre ?? null, Boolean(data.es_admin), Boolean(data.solo_lectura));
   },
 
   async health(): Promise<{ status: string }> {

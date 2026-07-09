@@ -4,6 +4,7 @@ const TOKEN = "sugerido_token";
 const EMAIL = "sugerido_email";
 const NOMBRE = "sugerido_nombre";
 const ES_ADMIN = "sugerido_es_admin";
+const SOLO_LECTURA = "sugerido_solo_lectura";
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -25,14 +26,21 @@ export function getEsAdmin(): boolean {
   return localStorage.getItem(ES_ADMIN) === "1";
 }
 
+/** True si el usuario es de solo lectura (no puede crear/editar sugerencias). */
+export function getSoloLectura(): boolean {
+  if (typeof window === "undefined") return false;
+  return localStorage.getItem(SOLO_LECTURA) === "1";
+}
+
 export function setSession(
-  token: string, email: string, nombre: string | null, esAdmin = false
+  token: string, email: string, nombre: string | null, esAdmin = false, soloLectura = false
 ) {
   localStorage.setItem(TOKEN, token);
   localStorage.setItem(EMAIL, email);
   if (nombre) localStorage.setItem(NOMBRE, nombre);
   else localStorage.removeItem(NOMBRE);
   localStorage.setItem(ES_ADMIN, esAdmin ? "1" : "0");
+  localStorage.setItem(SOLO_LECTURA, soloLectura ? "1" : "0");
 }
 
 export function clearSession() {
@@ -40,6 +48,7 @@ export function clearSession() {
   localStorage.removeItem(EMAIL);
   localStorage.removeItem(NOMBRE);
   localStorage.removeItem(ES_ADMIN);
+  localStorage.removeItem(SOLO_LECTURA);
 }
 
 export function estaAutenticado(): boolean {

@@ -11,6 +11,7 @@ import { GraficoStock } from "@/components/grafico-stock";
 import { GraficoComposicion } from "@/components/grafico-composicion";
 import { GraficoVentas } from "@/components/grafico-ventas";
 import { api } from "@/lib/api-client";
+import { getSoloLectura } from "@/lib/auth";
 import { formatoCLP, formatoFechaHora, formatoNumero } from "@/lib/formato";
 import type { Sucursal, SugerenciaManual, SugeridoRow } from "@/lib/types";
 
@@ -46,6 +47,11 @@ export function VistaDetalleProducto({
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState(false);
+  const [soloLectura, setSoloLectura] = useState(false);
+
+  useEffect(() => {
+    setSoloLectura(getSoloLectura());
+  }, []);
 
   const cargar = useCallback(async () => {
     try {
@@ -257,9 +263,11 @@ export function VistaDetalleProducto({
       <Card>
         <CardHeader className="flex items-center justify-between">
           <CardTitle>Sugerencias manuales</CardTitle>
-          <Button size="sm" onClick={() => setModal(true)}>
-            <Plus size={15} /> Agregar
-          </Button>
+          {!soloLectura && (
+            <Button size="sm" onClick={() => setModal(true)}>
+              <Plus size={15} /> Agregar
+            </Button>
+          )}
         </CardHeader>
         <CardContent>
           {manuales.length === 0 ? (

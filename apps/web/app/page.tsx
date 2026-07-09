@@ -11,7 +11,7 @@ import { TablaSugerido, type TablaSugeridoHandle } from "@/components/tabla-suge
 import { ConfigurarColumnas } from "@/components/configurar-columnas";
 import { ModalSugerenciaManual } from "@/components/modal-sugerencia-manual";
 import { api } from "@/lib/api-client";
-import { getEsAdmin } from "@/lib/auth";
+import { getEsAdmin, getSoloLectura } from "@/lib/auth";
 import { columnasPorDefectoVista } from "@/lib/columnas";
 import { formatoFechaHora, formatoNumero } from "@/lib/formato";
 import { STORAGE_KEYS, guardar, leer } from "@/lib/persistencia-dashboard";
@@ -75,10 +75,13 @@ export default function DashboardPage() {
   );
 
   const [esAdmin, setEsAdmin] = useState(false);
+  const [soloLectura, setSoloLectura] = useState(false);
 
-  // Las tabs de vista solo se muestran a admin. Detectamos al montar.
+  // Las tabs de vista solo se muestran a admin. El botón de sugerencia manual se
+  // oculta a los usuarios de solo lectura. Detectamos al montar (localStorage).
   useEffect(() => {
     setEsAdmin(getEsAdmin());
+    setSoloLectura(getSoloLectura());
   }, []);
   const [rows, setRows] = useState<SugeridoRow[]>([]);
   const [kpis, setKpis] = useState<SugeridoKpis | null>(null);
@@ -263,9 +266,11 @@ export default function DashboardPage() {
           <Button variant="outline" size="sm" onClick={exportar} disabled={exportando}>
             <Download size={15} /> {exportando ? "Generando…" : "Exportar Excel"}
           </Button>
-          <Button size="sm" onClick={() => setModalManual(true)}>
-            <Plus size={15} /> Sugerencia manual
-          </Button>
+          {!soloLectura && (
+            <Button size="sm" onClick={() => setModalManual(true)}>
+              <Plus size={15} /> Sugerencia manual
+            </Button>
+          )}
         </div>
       </div>
 

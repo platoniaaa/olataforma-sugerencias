@@ -16,20 +16,21 @@ import {
   Sigma,
   X,
 } from "lucide-react";
-import { getEmail, getEsAdmin, getNombre, logout } from "@/lib/auth";
+import { getEmail, getEsAdmin, getNombre, getSoloLectura, logout } from "@/lib/auth";
 
 type NavItem = {
   href: string;
   label: string;
   icon: typeof BarChart3;
   soloAdmin?: boolean;
+  ocultarSoloLectura?: boolean;
 };
 
 const NAV: NavItem[] = [
   { href: "/", label: "Sugerido", icon: BarChart3 },
   { href: "/compras", label: "Compras", icon: ShoppingCart },
   { href: "/catalogo", label: "Catálogo", icon: BookOpen },
-  { href: "/sugerencias-manuales", label: "Sugerencias", icon: ClipboardList },
+  { href: "/sugerencias-manuales", label: "Sugerencias", icon: ClipboardList, ocultarSoloLectura: true },
   { href: "/ventas", label: "Ventas", icon: LineChart },
   { href: "/auditoria", label: "Auditoría", icon: FileText },
   { href: "/modelo", label: "Modelo", icon: Sigma },
@@ -46,7 +47,10 @@ export function Sidebar({ open, onClose }: Props) {
   const email = getEmail();
   const nombre = getNombre();
   const esAdmin = getEsAdmin();
-  const items = NAV.filter((n) => !n.soloAdmin || esAdmin);
+  const soloLectura = getSoloLectura();
+  const items = NAV.filter(
+    (n) => (!n.soloAdmin || esAdmin) && (!n.ocultarSoloLectura || !soloLectura)
+  );
 
   // Cerrar con ESC.
   useEffect(() => {

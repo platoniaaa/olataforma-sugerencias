@@ -94,6 +94,22 @@ def requiere_admin(email: str = Depends(requiere_auth), db=Depends(get_db)) -> s
     return email
 
 
+def requiere_escritura(email: str = Depends(requiere_auth), db=Depends(get_db)) -> str:
+    """Bloquea operaciones de escritura para usuarios de solo lectura. Devuelve el email.
+
+    Se usa en los endpoints que crean/editan/borran (ej. sugerencias manuales): un
+    usuario `solo_lectura` puede ver todo pero no modificar nada."""
+    from ..models import Usuario  # import local para evitar ciclo
+
+    user = db.get(Usuario, email)
+    if user and user.solo_lectura:
+        raise HTTPException(
+            status_code=403,
+            detail="Tu usuario es de solo lectura: no puede crear ni modificar sugerencias.",
+        )
+    return email
+
+
 def sucursales_permitidas(email: str = Depends(requiere_auth), db=Depends(get_db)) -> list[str] | None:
     """Sucursales (sucursal_id) que el usuario puede ver, o None si ve TODAS.
 

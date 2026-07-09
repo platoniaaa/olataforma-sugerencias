@@ -94,6 +94,8 @@ def create_all() -> None:
         "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS sucursales_origen_cd VARCHAR",
         # 2026-07: acceso por sucursal (usuario ve solo sus sucursales).
         "ALTER TABLE usuario ADD COLUMN IF NOT EXISTS sucursales_permitidas TEXT",
+        # 2026-07: usuario de solo lectura (no puede crear/editar sugerencias).
+        "ALTER TABLE usuario ADD COLUMN IF NOT EXISTS solo_lectura BOOLEAN NOT NULL DEFAULT FALSE",
     ]
     # SQLite NO soporta "ADD COLUMN IF NOT EXISTS" (error de sintaxis que se
     # tragaba el try, dejando bases locales viejas sin las columnas nuevas):

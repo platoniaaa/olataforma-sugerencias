@@ -128,6 +128,37 @@ def test_sucursal_cerrada_diez_de_julio_oculta(client, db_session):
     assert client.get("/api/sugerido/DJ-1/DIEZ DE JULIO (2)").status_code == 200
 
 
+def test_solo_lectura_no_puede_sugerir(client, db_session):
+    """Un usuario solo_lectura puede VER pero no crear/editar sugerencias manuales
+    (403); uno normal sí (201). El login expone el flag."""
+    from src.main import app
+    from src.models import Usuario
+    from src.services.auth import hash_password, requiere_auth
+
+    db_session.add(Usuario(email="lectura@x.com", password_hash=hash_password("123456"),
+                           solo_lectura=True))
+    db_session.commit()
+
+    # El login expone solo_lectura=True.
+    r = client.post("/api/auth/login", json={"email": "lectura@x.com", "password": "123456"})
+    assert r.status_code == 200 and r.json()["solo_lectura"] is True
+
+    app.dependency_overrides[requiere_auth] = lambda: "lectura@x.com"
+    try:
+        # No puede crear (403), pero sí leer (200).
+        r = client.post("/api/sugerencias-manuales",
+                        json={"producto": "20 BXO5W30AA", "sucursal_id": "LINDEROS", "unidades": 5})
+        assert r.status_code == 403
+        assert client.get("/api/sugerencias-manuales").status_code == 200
+    finally:
+        app.dependency_overrides[requiere_auth] = lambda: "test@curifor.com"
+
+    # El usuario normal del seed (no solo_lectura) sí puede crear.
+    r = client.post("/api/sugerencias-manuales",
+                    json={"producto": "20 BXO5W30AA", "sucursal_id": "LINDEROS", "unidades": 5})
+    assert r.status_code == 201
+
+
 def test_accesos_requiere_autorizacion(client):
     # noadmin@curifor.com no es admin ni esta en la lista de emails autorizados -> 403.
     # (test@curifor.com ahora es admin en el seed, asi que se usa el otro usuario.)

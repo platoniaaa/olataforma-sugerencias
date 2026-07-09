@@ -41,7 +41,7 @@ from ..schemas import (
     SugerenciaManualUpdate,
 )
 from ..services import auditoria_service, recurrentes_service, sugerido_service
-from ..services.auth import requiere_auth
+from ..services.auth import requiere_escritura
 
 
 def _recurrente_out(rec) -> RecurrenteOut:
@@ -85,7 +85,7 @@ def listar(
 def crear(
     payload: SugerenciaManualCreate,
     db: Session = Depends(get_db),
-    email: str = Depends(requiere_auth),
+    email: str = Depends(requiere_escritura),
 ):
     if payload.dias_inventario:
         unidades = sugerido_service.unidades_desde_dias(
@@ -132,7 +132,7 @@ def crear(
 def crear_masiva(
     payload: SugerenciaManualMasiva,
     db: Session = Depends(get_db),
-    email: str = Depends(requiere_auth),
+    email: str = Depends(requiere_escritura),
 ):
     """Crea una sugerencia manual para cada producto x sucursal que cumple los filtros.
 
@@ -209,7 +209,7 @@ def crear_masiva(
 def crear_recurrente(
     payload: RecurrenteCreate,
     db: Session = Depends(get_db),
-    email: str = Depends(requiere_auth),
+    email: str = Depends(requiere_escritura),
 ):
     """Crea una regla recurrente y la aplica de inmediato (primera instancia)."""
     if payload.modo == "individual" and not (payload.producto and payload.sucursal_id):
@@ -231,7 +231,7 @@ def listar_recurrentes(
 def eliminar_recurrente(
     id: str,
     db: Session = Depends(get_db),
-    email: str = Depends(requiere_auth),
+    email: str = Depends(requiere_escritura),
 ):
     rec = recurrentes_service.eliminar(db, id, usuario_email=email)
     if not rec:
@@ -242,7 +242,7 @@ def eliminar_recurrente(
 def eliminar_lote(
     lote_id: str,
     db: Session = Depends(get_db),
-    email: str = Depends(requiere_auth),
+    email: str = Depends(requiere_escritura),
 ):
     """Elimina todas las sugerencias creadas en una misma carga masiva.
 
@@ -286,7 +286,7 @@ def actualizar(
     id: str,
     payload: SugerenciaManualUpdate,
     db: Session = Depends(get_db),
-    email: str = Depends(requiere_auth),
+    email: str = Depends(requiere_escritura),
 ):
     s = db.get(SugerenciaManual, id)
     if not s:
@@ -321,7 +321,7 @@ def actualizar(
 def eliminar(
     id: str,
     db: Session = Depends(get_db),
-    email: str = Depends(requiere_auth),
+    email: str = Depends(requiere_escritura),
 ):
     s = db.get(SugerenciaManual, id)
     if not s:
