@@ -84,7 +84,10 @@ export default function DashboardPage() {
     setSoloLectura(getSoloLectura());
   }, []);
   const [rows, setRows] = useState<SugeridoRow[]>([]);
-  const [kpis, setKpis] = useState<SugeridoKpis | null>(null);
+  // KPIs del backend (agregan sobre el TOTAL) y los que calcula la grilla sobre
+  // las filas visibles tras el filtro de columna. Cuál se muestra se decide abajo.
+  const [kpisBackend, setKpisBackend] = useState<SugeridoKpis | null>(null);
+  const [kpisVisibles, setKpisVisibles] = useState<SugeridoKpis | null>(null);
   const [total, setTotal] = useState(0);
   // Fecha/hora de la última carga de datos desde Power BI (para todos los usuarios).
   const [ultimaSync, setUltimaSync] = useState<string | null>(null);
@@ -105,9 +108,11 @@ export default function DashboardPage() {
   // de columna activos (AG Grid los maneja del lado cliente).
   const tablaRef = useRef<TablaSugeridoHandle>(null);
   // Si el server devolvio mas filas de las que la grilla puede cargar (limit 5000),
-  // los KPIs calculados sobre las filas visibles quedarian truncados: en ese caso
-  // se piden al backend (que agrega sobre el total) y se ignora el calculo del grid.
-  const truncadoRef = useRef(false);
+  // los KPIs sobre las filas visibles quedarian truncados: en ese caso, SIN filtro
+  // de columna, se usan los del backend (agregan sobre el total). CON filtro de
+  // columna se usan los del grid, que reflejan el filtro (sobre las filas cargadas).
+  const [truncado, setTruncado] = useState(false);
+  const [visiblesCount, setVisiblesCount] = useState<number | null>(null);
   const [exportando, setExportando] = useState(false);
   const [mostrarGraficos, setMostrarGraficos] = useState(false);
   // El grid notifica si hay filtros de columna activos; usamos esto para que
@@ -187,11 +192,10 @@ export default function DashboardPage() {
       setRows(page.items);
       setTotal(page.total);
       const estaTruncado = page.total > page.items.length;
-      truncadoRef.current = estaTruncado;
-      if (estaTruncado) {
-        const k = await api.kpis(filtros);
-        setKpis(k);
-      }
+      setTruncado(estaTruncado);
+      // Con truncado, los KPIs del backend cubren el total (se usan cuando NO hay
+      // filtro de columna). Sin truncar, el grid los calcula sobre todas las filas.
+      setKpisBackend(estaTruncado ? await api.kpis(filtros) : null);
     } catch (e) {
       setError(
         e instanceof Error
@@ -209,10 +213,26 @@ export default function DashboardPage() {
     return () => clearTimeout(t);
   }, [cargar]);
 
+  // Qué KPIs mostrar: con resultado truncado y SIN filtro de columna, los del
+  // backend (cubren el total); en cualquier otro caso, los del grid (reflejan el
+  // filtro de columna, o el total completo cuando no hay truncado).
+  const kpis =
+    truncado && !hayFiltrosColumna ? kpisBackend : kpisVisibles ?? kpisBackend;
+
   const nombresSucursales = useMemo(
     () => sucursales.map((s) => s.nombre ?? s.sucursal_id),
     [sucursales]
   );
+
+  // Texto de estado bajo el título: cuántas filas y qué representan los KPIs.
+  const detalleFilas = cargando
+    ? ""
+    : hayFiltrosColumna && visiblesCount != null
+      ? ` · ${formatoNumero(visiblesCount)} tras el filtro de columna` +
+        (truncado ? " (los KPIs reflejan el filtro, sobre las filas cargadas)" : "")
+      : total > rows.length
+        ? ` (mostrando ${formatoNumero(rows.length)} — los KPIs y el Excel cubren el total)`
+        : "";
 
   const exportar = async () => {
     setExportando(true);
@@ -247,8 +267,7 @@ export default function DashboardPage() {
           </h1>
           <p className="mt-3 text-[13px] text-ink-500">
             {cargando ? "Cargando…" : `${formatoNumero(total)} filas`}
-            {total > rows.length &&
-              ` (mostrando ${formatoNumero(rows.length)} — los KPIs y el Excel cubren el total)`}
+            {detalleFilas}
           </p>
           {ultimaSync && (
             <p className="mt-1 text-[12px] text-ink-400">
@@ -335,9 +354,9 @@ export default function DashboardPage() {
         rows={rows}
         columnasVisibles={colsVisibles}
         vista={filtros.vista ?? "todas"}
-        onKpisVisiblesChange={(k) => {
-          // Con resultado truncado mandan los KPIs del backend (cubren el total).
-          if (!truncadoRef.current) setKpis(k);
+        onKpisVisiblesChange={(k, totalVisibles) => {
+          setKpisVisibles(k);
+          setVisiblesCount(totalVisibles);
         }}
         onFiltrosColumnaChange={setHayFiltrosColumna}
         onRowClick={(r) =>
