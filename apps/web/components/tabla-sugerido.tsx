@@ -19,7 +19,7 @@ import { Check, Copy, Info } from "lucide-react";
 import { COLUMNAS, type DefColumna } from "@/lib/columnas";
 import { formatoCLP, formatoNumero } from "@/lib/formato";
 import { STORAGE_KEYS, guardar, leer } from "@/lib/persistencia-dashboard";
-import type { SugeridoFiltros, SugeridoKpis, SugeridoRow } from "@/lib/types";
+import type { ColumnaFiltro, SugeridoFiltros, SugeridoKpis, SugeridoRow } from "@/lib/types";
 import { FiltroMultiSelect } from "@/components/filtro-multiselect";
 
 type Vista = NonNullable<SugeridoFiltros["vista"]>;
@@ -39,8 +39,9 @@ interface Props {
    * filas realmente visibles, no sobre el universo server-side.
    */
   onKpisVisiblesChange?: (kpis: SugeridoKpis, totalVisibles: number) => void;
-  /** Se notifica al padre si hay al menos un filtro de columna activo en el grid. */
-  onFiltrosColumnaChange?: (hayFiltros: boolean) => void;
+  /** Notifica al padre los filtros de columna activos, traducidos del multi-select,
+   *  para mandarlos al backend (KPIs, conteo y Excel exactos sobre el total). */
+  onFiltrosColumnaChange?: (filtros: ColumnaFiltro[]) => void;
 }
 
 export interface TablaSugeridoHandle {
@@ -216,6 +217,22 @@ function colDef(def: DefColumna): ColDef {
 type FilterModelByVista = Record<string, Record<string, unknown>>;
 type FilterModel = Record<string, unknown>;
 
+/** Traduce el filter model del grid (multi-select) a la forma del backend: por
+ *  columna, {contiene} (busqueda) o {valores} (lista exacta; "(en blanco)" = nulo). */
+function traducirFilterModel(model: Record<string, unknown>): ColumnaFiltro[] {
+  const out: ColumnaFiltro[] = [];
+  for (const [campo, raw] of Object.entries(model ?? {})) {
+    const m = raw as { contains?: string; values?: string[] } | null;
+    if (!m) continue;
+    if (typeof m.contains === "string" && m.contains !== "") {
+      out.push({ campo, contiene: m.contains });
+    } else if (Array.isArray(m.values)) {
+      out.push({ campo, valores: m.values });
+    }
+  }
+  return out;
+}
+
 export const TablaSugerido = forwardRef<TablaSugeridoHandle, Props>(function TablaSugerido(
   { rows, columnasVisibles, vista, onRowClick, onKpisVisiblesChange, onFiltrosColumnaChange },
   ref
@@ -268,24 +285,17 @@ export const TablaSugerido = forwardRef<TablaSugeridoHandle, Props>(function Tab
    * las tarjetas de arriba muestran exactamente lo que ve en la tabla.
    */
   const notificarKpis = () => {
-    const cb = onKpisRef.current;
-    if (!cb) return;
     const api = gridRef.current?.api;
     if (!api) return;
-
-    // Decision: si NO hay filtros de columna activos, sumamos directamente desde
-    // el state `rows` (sin pasar por el grid). AG Grid con paginacion activa
-    // tiene quirks donde forEachNodeAfterFilter[AndSort] puede devolver solo la
-    // pagina visible en ciertos momentos (justo despues de cambiar columnDefs,
-    // p.ej. al agregar/quitar una columna). Esto produce KPIs incorrectos.
-    // Sumar desde `rows` evita toda esa dependencia con el ciclo interno de AG
-    // Grid y es lo correcto: cuando no hay filtros, los KPIs deben reflejar el
-    // total cargado en el state.
     const filterModel = api.getFilterModel() ?? {};
+    // Notificar SIEMPRE los filtros de columna (traducidos) al padre, para que los
+    // mande al backend y KPIs/conteo/Excel salgan EXACTOS sobre el total. Va antes
+    // del calculo local para que funcione aunque el padre no compute KPIs en el grid.
+    onFiltrosColRef.current?.(traducirFilterModel(filterModel));
+
+    const cb = onKpisRef.current;
+    if (!cb) return; // el padre calcula los KPIs en el backend; no los computamos aca
     const hayFiltros = Object.keys(filterModel).length > 0;
-    // Notificar al padre para que muestre el boton "Limpiar todo" si hay
-    // filtros de columna, aunque los filtros server-side esten en default.
-    onFiltrosColRef.current?.(hayFiltros);
 
     let totalSugerido = 0;
     let valorTotal = 0;

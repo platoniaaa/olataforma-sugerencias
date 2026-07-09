@@ -84,6 +84,9 @@ class SugeridoKpis(BaseModel):
     valor_total_clp: float = 0
     n_productos: int = 0
     n_proveedores: int = 0
+    # Conteo exacto de filas que cumplen los filtros (incluidos los de columna del
+    # grid). El dashboard lo muestra como "N filas tras el filtro".
+    n_filas: int = 0
 
 
 class AgrupadoRow(BaseModel):
@@ -114,6 +117,19 @@ class VentasResponse(BaseModel):
     total_sucursal: float = 0
 
 
+class ColumnaFiltro(BaseModel):
+    """Filtro de una columna de la tabla, traducido del filtro multi-select del
+    grid. Se usa el campo que venga:
+    - `contiene`: ILIKE %texto% (como el buscador global).
+    - `valores`: lista exacta de valores a incluir (IN); el centinela
+      "(en blanco)" representa NULL/vacio.
+    """
+
+    campo: str
+    contiene: str | None = None
+    valores: list[str] | None = None
+
+
 class SugeridoFiltros(BaseModel):
     """Filtros reutilizables del dashboard (usados por listado, KPIs y export)."""
 
@@ -138,6 +154,9 @@ class SugeridoFiltros(BaseModel):
     # el usuario autenticado, NO el cliente: si viene con valor, el sugerido se
     # limita a esas sucursales. None = sin restriccion (ve todas).
     sucursales_permitidas: list[str] | None = None
+    # Filtros de columna de la tabla (multi-select del grid). El frontend los manda
+    # a KPIs y export (no al listado de filas) para que los agregados sean exactos.
+    filtros_columna: list[ColumnaFiltro] = Field(default_factory=list)
 
 
 class ExportRequest(BaseModel):

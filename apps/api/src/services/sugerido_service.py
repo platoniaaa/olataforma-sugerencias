@@ -6,7 +6,7 @@ Solo se filtra/agrega lo que ya esta cargado en la tabla.
 import math
 from datetime import datetime, timezone
 
-from sqlalchemy import distinct, func, or_, select
+from sqlalchemy import Float, Integer, Numeric, String, distinct, false, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..models import ProductoCatalogo, Sugerido, SugerenciaManual, VentaMensual
@@ -28,6 +28,52 @@ PREFIJOS_EXCLUIDOS = ("D&P", "MEC INSUMOS", "INCENTIVOS", "APLICA-DED")
 # "DIEZ DE JULIO (2)". Es una decision de presentacion (el modelo las sigue calculando).
 SUCURSALES_OCULTAS = ("DIEZ DE JULIO",)
 _OCULTAS_LOWER = [s.lower() for s in SUCURSALES_OCULTAS]
+
+# Centinela del filtro multi-select del grid para valores nulos/vacios.
+BLANCO_SENTINEL = "(en blanco)"
+
+
+def _columna_numerica(campo: str) -> bool:
+    col = Sugerido.__table__.columns.get(campo)
+    return col is not None and isinstance(col.type, (Integer, Float, Numeric))
+
+
+def _clausula_columna(fc):
+    """Traduce un filtro de columna (del multi-select del grid) a una clausula
+    SQLAlchemy. `contiene` -> ILIKE %texto%; `valores` -> IN exacto, con el
+    centinela "(en blanco)" = NULL/vacio. None si el campo no es valido o esta vacio."""
+    campo = getattr(fc, "campo", None)
+    if not campo or campo not in SORTABLE:
+        return None
+    col = getattr(Sugerido, campo)
+    contiene = getattr(fc, "contiene", None)
+    if contiene:
+        # Cast a texto para poder hacer "contiene" tambien en columnas numericas.
+        return func.cast(col, String).ilike(f"%{contiene}%")
+    valores = getattr(fc, "valores", None)
+    if valores is not None:
+        incluir_blanco = BLANCO_SENTINEL in valores
+        reales = [v for v in valores if v != BLANCO_SENTINEL]
+        clausulas = []
+        if _columna_numerica(campo):
+            nums = []
+            for v in reales:
+                try:
+                    nums.append(float(v))
+                except (TypeError, ValueError):
+                    pass
+            if nums:
+                clausulas.append(col.in_(nums))
+            if incluir_blanco:
+                clausulas.append(col.is_(None))
+        else:
+            if reales:
+                clausulas.append(col.in_(reales))
+            if incluir_blanco:
+                clausulas.append(or_(col.is_(None), col == ""))
+        # Sin clausulas (el usuario destildo todo) -> no matchea ninguna fila.
+        return or_(*clausulas) if clausulas else false()
+    return None
 
 
 def _apply_filters(stmt, f: SugeridoFiltros):
@@ -105,6 +151,14 @@ def _apply_filters(stmt, f: SugeridoFiltros):
             stmt = stmt.where(
                 or_(Sugerido.sugerido_traslado > 0, Sugerido.total_sugerido_suc > 0)
             )
+    # Filtros de columna de la tabla (traducidos del multi-select del grid). Se
+    # aplican server-side para que KPIs, conteo y Excel sean EXACTOS sobre el total.
+    # El listado de filas NO los envia (el grid filtra del lado cliente para
+    # conservar todas las opciones del multi-select): aca solo llegan en KPIs/export.
+    for fc in getattr(f, "filtros_columna", None) or []:
+        cl = _clausula_columna(fc)
+        if cl is not None:
+            stmt = stmt.where(cl)
     return stmt
 
 
@@ -455,12 +509,16 @@ def kpis(db: Session, f: SugeridoFiltros) -> dict:
     valor_total = db.scalar(select(func.coalesce(func.sum(base.c.total_valor_sugerido_clp), 0))) or 0
     n_productos = db.scalar(select(func.count(distinct(base.c.producto)))) or 0
     n_proveedores = db.scalar(select(func.count(distinct(base.c.proveedor)))) or 0
+    # Conteo exacto de filas que cumplen los filtros (incluye los de columna):
+    # el dashboard lo usa para mostrar cuántas filas quedan tras el filtro.
+    n_filas = db.scalar(select(func.count()).select_from(base)) or 0
 
     return {
         "total_sugerido": float(total_sugerido),
         "valor_total_clp": float(valor_total),
         "n_productos": int(n_productos),
         "n_proveedores": int(n_proveedores),
+        "n_filas": int(n_filas),
     }
 
 

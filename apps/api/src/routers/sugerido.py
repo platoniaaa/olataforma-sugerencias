@@ -1,4 +1,6 @@
 """Endpoints del sugerido: listado, KPIs, detalle y export a Excel."""
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -6,6 +8,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..schemas import (
     AgrupadoRow,
+    ColumnaFiltro,
     ExportRequest,
     SugeridoFiltros,
     SugeridoKpis,
@@ -22,6 +25,26 @@ router = APIRouter(prefix="/api/sugerido", tags=["sugerido"])
 _OCULTAS_LOWER = {s.lower() for s in SUCURSALES_OCULTAS}
 
 
+def _parse_filtros_columna(raw: str | None) -> list[ColumnaFiltro]:
+    """Parsea el query param `filtros_columna` (JSON) a una lista de ColumnaFiltro.
+    Tolera JSON invalido o entradas mal formadas (las ignora)."""
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    out: list[ColumnaFiltro] = []
+    if isinstance(data, list):
+        for c in data:
+            if isinstance(c, dict):
+                try:
+                    out.append(ColumnaFiltro(**c))
+                except Exception:  # noqa: BLE001 - entrada del cliente, se ignora
+                    pass
+    return out
+
+
 def _filtros(
     q: str | None = Query(None, description="Busqueda en producto o descripcion"),
     sucursal: list[str] = Query(default=[], description="Nombres de sucursal"),
@@ -32,6 +55,9 @@ def _filtros(
     solo_pedir: bool = Query(True, description="Mostrar solo pedir=Si"),
     solo_nacionales: bool = Query(False, description="Excluye productos importados"),
     vista: str = Query("todas", description="todas | sucursales | cd | distribucion"),
+    filtros_columna: str | None = Query(
+        None, description="Filtros de columna del grid (JSON): [{campo, contiene|valores}]"
+    ),
     permitidas: list[str] | None = Depends(sucursales_permitidas),
 ) -> SugeridoFiltros:
     return SugeridoFiltros(
@@ -39,6 +65,7 @@ def _filtros(
         tipo_origen=tipo_origen, proveedor=proveedor, solo_pedir=solo_pedir,
         solo_nacionales=solo_nacionales, vista=vista,
         sucursales_permitidas=permitidas,
+        filtros_columna=_parse_filtros_columna(filtros_columna),
     )
 
 

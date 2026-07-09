@@ -123,11 +123,14 @@ export const api = {
   },
 
   async kpis(f: SugeridoFiltros): Promise<SugeridoKpis> {
-    return getJSON(`/api/sugerido/kpis?${filtrosToParams(f).toString()}`);
+    const p = filtrosToParams(f);
+    if (f.filtros_columna?.length) p.set("filtros_columna", JSON.stringify(f.filtros_columna));
+    return getJSON(`/api/sugerido/kpis?${p.toString()}`);
   },
 
   async agrupado(f: SugeridoFiltros, por: DimensionAgrupado): Promise<AgrupadoRow[]> {
     const p = filtrosToParams(f);
+    if (f.filtros_columna?.length) p.set("filtros_columna", JSON.stringify(f.filtros_columna));
     p.set("por", por);
     return getJSON(`/api/sugerido/agrupado?${p.toString()}`);
   },

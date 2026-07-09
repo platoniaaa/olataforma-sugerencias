@@ -159,6 +159,60 @@ def test_solo_lectura_no_puede_sugerir(client, db_session):
     assert r.status_code == 201
 
 
+def test_filtros_columna_server_side(db_session):
+    """Los filtros de columna del grid (multi-select) se aplican server-side en KPIs
+    y conteo: valores IN, contiene, centinela '(en blanco)', numérico y lista vacía."""
+    from src.models import Sugerido
+    from src.schemas import ColumnaFiltro, SugeridoFiltros
+    from src.services import sugerido_service
+
+    # Sucursales/valores distintos del seed (LINDEROS, Ford) para no mezclar.
+    db_session.add_all([
+        Sugerido(tenant_id="curifor", producto="FC-1", sucursal_id="BRASIL 18",
+                 nombre_sucursal="Brasil 18", proveedor="FORD", pedir="Si", total_sugerido_suc=17),
+        Sugerido(tenant_id="curifor", producto="FC-2", sucursal_id="TALCA",
+                 nombre_sucursal="Talca", proveedor="BOSCH", pedir="Si", total_sugerido_suc=5),
+        Sugerido(tenant_id="curifor", producto="FC-3", sucursal_id="CURICO",
+                 nombre_sucursal="Curico", proveedor=None, pedir="Si", total_sugerido_suc=3),
+    ])
+    db_session.commit()
+
+    def kpis(fc):
+        return sugerido_service.kpis(
+            db_session, SugeridoFiltros(solo_pedir=False, filtros_columna=fc)
+        )
+
+    base = kpis([])["n_filas"]  # seed + 3
+
+    # valores IN (una y dos sucursales).
+    k = kpis([ColumnaFiltro(campo="nombre_sucursal", valores=["Brasil 18"])])
+    assert k["n_filas"] == 1 and k["total_sugerido"] == 17
+    k = kpis([ColumnaFiltro(campo="nombre_sucursal", valores=["Brasil 18", "Talca"])])
+    assert k["n_filas"] == 2 and k["total_sugerido"] == 22
+
+    # contiene (case-insensitive), único a mis filas.
+    assert kpis([ColumnaFiltro(campo="proveedor", contiene="bosch")])["n_filas"] == 1
+
+    # centinela "(en blanco)" -> proveedor NULL.
+    assert kpis([ColumnaFiltro(campo="proveedor", valores=["(en blanco)"])])["n_filas"] == 1
+
+    # dos filtros de columna combinan con AND.
+    k = kpis([
+        ColumnaFiltro(campo="nombre_sucursal", valores=["Brasil 18", "Talca"]),
+        ColumnaFiltro(campo="proveedor", valores=["FORD"]),
+    ])
+    assert k["n_filas"] == 1
+
+    # columna numérica (valores llegan como texto).
+    assert kpis([ColumnaFiltro(campo="total_sugerido_suc", valores=["17"])])["n_filas"] == 1
+
+    # lista vacía (destildó todo) -> ninguna fila.
+    assert kpis([ColumnaFiltro(campo="nombre_sucursal", valores=[])])["n_filas"] == 0
+
+    # campo inválido -> se ignora (no rompe, no filtra).
+    assert kpis([ColumnaFiltro(campo="no_existe", valores=["x"])])["n_filas"] == base
+
+
 def test_accesos_requiere_autorizacion(client):
     # noadmin@curifor.com no es admin ni esta en la lista de emails autorizados -> 403.
     # (test@curifor.com ahora es admin en el seed, asi que se usa el otro usuario.)

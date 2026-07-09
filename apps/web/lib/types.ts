@@ -68,6 +68,16 @@ export interface SugeridoKpis {
   valor_total_clp: number;
   n_productos: number;
   n_proveedores: number;
+  /** Conteo exacto de filas que cumplen los filtros (incluidos los de columna). */
+  n_filas?: number;
+}
+
+/** Filtro de una columna del grid (traducido del multi-select). Se usa el campo
+ *  que venga: `contiene` (ILIKE %texto%) o `valores` (IN exacto; "(en blanco)" = nulo). */
+export interface ColumnaFiltro {
+  campo: string;
+  contiene?: string;
+  valores?: string[];
 }
 
 export interface AgrupadoRow {
@@ -106,6 +116,9 @@ export interface SugeridoFiltros {
   solo_pedir?: boolean;
   solo_nacionales?: boolean;
   vista?: "todas" | "sucursales" | "cd" | "distribucion";
+  /** Filtros de columna del grid. El front los manda a KPIs y export (no al
+   *  listado de filas) para que los agregados sean exactos sobre el total. */
+  filtros_columna?: ColumnaFiltro[];
 }
 
 export interface Sucursal {

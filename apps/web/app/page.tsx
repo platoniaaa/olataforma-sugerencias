@@ -15,7 +15,7 @@ import { getEsAdmin, getSoloLectura } from "@/lib/auth";
 import { columnasPorDefectoVista } from "@/lib/columnas";
 import { formatoFechaHora, formatoNumero } from "@/lib/formato";
 import { STORAGE_KEYS, guardar, leer } from "@/lib/persistencia-dashboard";
-import type { Sucursal, SugeridoFiltros, SugeridoKpis, SugeridoRow } from "@/lib/types";
+import type { ColumnaFiltro, Sucursal, SugeridoFiltros, SugeridoKpis, SugeridoRow } from "@/lib/types";
 
 type Vista = NonNullable<SugeridoFiltros["vista"]>;
 const VISTAS: { id: Vista; label: string; hint: string }[] = [
@@ -84,10 +84,9 @@ export default function DashboardPage() {
     setSoloLectura(getSoloLectura());
   }, []);
   const [rows, setRows] = useState<SugeridoRow[]>([]);
-  // KPIs del backend (agregan sobre el TOTAL) y los que calcula la grilla sobre
-  // las filas visibles tras el filtro de columna. Cuál se muestra se decide abajo.
-  const [kpisBackend, setKpisBackend] = useState<SugeridoKpis | null>(null);
-  const [kpisVisibles, setKpisVisibles] = useState<SugeridoKpis | null>(null);
+  // KPIs exactos del backend (agregan sobre TODO el set filtrado, incluidos los
+  // filtros de columna del grid). No se calculan en el grid.
+  const [kpis, setKpis] = useState<SugeridoKpis | null>(null);
   const [total, setTotal] = useState(0);
   // Fecha/hora de la última carga de datos desde Power BI (para todos los usuarios).
   const [ultimaSync, setUltimaSync] = useState<string | null>(null);
@@ -104,21 +103,16 @@ export default function DashboardPage() {
   const [modalCols, setModalCols] = useState(false);
   const [modalManual, setModalManual] = useState(false);
 
-  // Ref para recolectar IDs visibles de la grilla cuando se exporta con filtros
-  // de columna activos (AG Grid los maneja del lado cliente).
+  // Ref al grid (para limpiar sus filtros de columna desde "Limpiar filtros").
   const tablaRef = useRef<TablaSugeridoHandle>(null);
-  // Si el server devolvio mas filas de las que la grilla puede cargar (limit 5000),
-  // los KPIs sobre las filas visibles quedarian truncados: en ese caso, SIN filtro
-  // de columna, se usan los del backend (agregan sobre el total). CON filtro de
-  // columna se usan los del grid, que reflejan el filtro (sobre las filas cargadas).
-  const [truncado, setTruncado] = useState(false);
-  const [visiblesCount, setVisiblesCount] = useState<number | null>(null);
   const [exportando, setExportando] = useState(false);
   const [mostrarGraficos, setMostrarGraficos] = useState(false);
-  // El grid notifica si hay filtros de columna activos; usamos esto para que
-  // el boton "Limpiar filtros" aparezca tambien cuando los server-side estan
-  // en default pero hay filtros aplicados sobre alguna columna de la tabla.
-  const [hayFiltrosColumna, setHayFiltrosColumna] = useState(false);
+  // Filtros de columna del grid (traducidos del multi-select). Se mandan al backend
+  // para que KPIs, conteo y Excel sean EXACTOS sobre el total (no solo las 5.000
+  // filas cargadas). El listado de filas NO los usa: el grid filtra del lado cliente
+  // para conservar todas las opciones del multi-select.
+  const [filtrosColumna, setFiltrosColumna] = useState<ColumnaFiltro[]>([]);
+  const hayFiltrosColumna = filtrosColumna.length > 0;
 
   const limpiarFiltrosTodo = useCallback(() => {
     // Filtros server-side -> default.
@@ -130,7 +124,9 @@ export default function DashboardPage() {
       // no implica cambiar de pestania.
       vista: f.vista ?? "todas",
     }));
-    // Filtros de columna del grid.
+    // Filtros de columna del grid (el grid tambien notifica [] al limpiarse, pero
+    // lo reseteamos ya para que el fetch de KPIs no use el valor viejo).
+    setFiltrosColumna([]);
     tablaRef.current?.limpiarFiltrosColumnas();
   }, [setFiltros]);
 
@@ -180,22 +176,16 @@ export default function DashboardPage() {
     })();
   }, []);
 
-  const cargar = useCallback(async () => {
+  // Filas: dependen SOLO de los filtros server-side. Los de columna NO recargan las
+  // filas (el grid filtra del lado cliente): así conservamos las opciones del
+  // multi-select y no se reinicia el scroll al filtrar por columna.
+  const cargarFilas = useCallback(async () => {
     setCargando(true);
     setError(null);
     try {
-      // KPIs: los calcula la grilla sobre las filas visibles tras los filtros de
-      // columna (ver onKpisVisiblesChange abajo)... salvo que el resultado exceda
-      // el limite de 5000 filas: ahi la grilla veria un subconjunto y los KPIs
-      // saldrian truncados, asi que se piden al backend (agrega sobre el total).
       const page = await api.sugerido(filtros, { limit: 5000, sort: "-total_sugerido_suc" });
       setRows(page.items);
       setTotal(page.total);
-      const estaTruncado = page.total > page.items.length;
-      setTruncado(estaTruncado);
-      // Con truncado, los KPIs del backend cubren el total (se usan cuando NO hay
-      // filtro de columna). Sin truncar, el grid los calcula sobre todas las filas.
-      setKpisBackend(estaTruncado ? await api.kpis(filtros) : null);
     } catch (e) {
       setError(
         e instanceof Error
@@ -207,29 +197,43 @@ export default function DashboardPage() {
     }
   }, [filtros]);
 
-  // Recargar al cambiar filtros (con debounce para texto).
-  useEffect(() => {
-    const t = setTimeout(cargar, 300);
-    return () => clearTimeout(t);
-  }, [cargar]);
+  // KPIs + conteo EXACTOS: backend con TODOS los filtros (server-side + columna).
+  const cargarKpis = useCallback(async () => {
+    try {
+      const k = await api.kpis({ ...filtros, filtros_columna: filtrosColumna });
+      setKpis(k);
+    } catch {
+      /* el backend puede no estar arriba todavia */
+    }
+  }, [filtros, filtrosColumna]);
 
-  // Qué KPIs mostrar: con resultado truncado y SIN filtro de columna, los del
-  // backend (cubren el total); en cualquier otro caso, los del grid (reflejan el
-  // filtro de columna, o el total completo cuando no hay truncado).
-  const kpis =
-    truncado && !hayFiltrosColumna ? kpisBackend : kpisVisibles ?? kpisBackend;
+  // Refresco manual (botón Actualizar / tras guardar una sugerencia): filas + KPIs.
+  const cargar = useCallback(async () => {
+    await Promise.all([cargarFilas(), cargarKpis()]);
+  }, [cargarFilas, cargarKpis]);
+
+  // Filas al cambiar filtros server-side; KPIs al cambiar cualquiera (con debounce).
+  useEffect(() => {
+    const t = setTimeout(cargarFilas, 300);
+    return () => clearTimeout(t);
+  }, [cargarFilas]);
+  useEffect(() => {
+    const t = setTimeout(cargarKpis, 300);
+    return () => clearTimeout(t);
+  }, [cargarKpis]);
 
   const nombresSucursales = useMemo(
     () => sucursales.map((s) => s.nombre ?? s.sucursal_id),
     [sucursales]
   );
 
-  // Texto de estado bajo el título: cuántas filas y qué representan los KPIs.
+  // Conteo a mostrar: con filtro de columna, el conteo EXACTO del backend (n_filas);
+  // si no, el total del set server-side.
+  const nFiltradas = hayFiltrosColumna ? kpis?.n_filas ?? 0 : total;
   const detalleFilas = cargando
     ? ""
-    : hayFiltrosColumna && visiblesCount != null
-      ? ` · ${formatoNumero(visiblesCount)} tras el filtro de columna` +
-        (truncado ? " (los KPIs reflejan el filtro, sobre las filas cargadas)" : "")
+    : hayFiltrosColumna
+      ? " tras el filtro de columna · KPIs y Excel exactos"
       : total > rows.length
         ? ` (mostrando ${formatoNumero(rows.length)} — los KPIs y el Excel cubren el total)`
         : "";
@@ -237,18 +241,12 @@ export default function DashboardPage() {
   const exportar = async () => {
     setExportando(true);
     try {
-      // Solo pasamos IDs cuando el usuario aplico filtros de COLUMNA en la tabla
-      // (que el backend no conoce): asi el Excel los respeta. Sin filtros de
-      // columna NO mandamos IDs -> el backend exporta TODO lo que matchea los
-      // filtros server-side (hasta 100k), no solo las ~5.000 filas cargadas en
-      // la grilla. Antes se mandaban siempre los IDs visibles y el Excel quedaba
-      // topado al limite de carga de la grilla.
-      const ids = hayFiltrosColumna ? (tablaRef.current?.obtenerIdsVisibles() ?? []) : [];
+      // Los filtros de columna viajan dentro de `filtros`: el backend exporta el
+      // set filtrado COMPLETO (no solo las ~5.000 filas cargadas en la grilla).
       await api.exportExcel(
-        filtros,
+        { ...filtros, filtros_columna: filtrosColumna },
         colsVisibles,
-        "-total_sugerido_suc",
-        ids.length ? ids : undefined
+        "-total_sugerido_suc"
       );
     } catch (e) {
       alert(e instanceof Error ? e.message : "No se pudo exportar");
@@ -266,7 +264,7 @@ export default function DashboardPage() {
             Sugerido de compras
           </h1>
           <p className="mt-3 text-[13px] text-ink-500">
-            {cargando ? "Cargando…" : `${formatoNumero(total)} filas`}
+            {cargando ? "Cargando…" : `${formatoNumero(nFiltradas)} filas`}
             {detalleFilas}
           </p>
           {ultimaSync && (
@@ -331,7 +329,7 @@ export default function DashboardPage() {
         </button>
         {mostrarGraficos && (
           <div className="mt-3">
-            <GraficosDashboard filtros={filtros} />
+            <GraficosDashboard filtros={{ ...filtros, filtros_columna: filtrosColumna }} />
           </div>
         )}
       </div>
@@ -354,11 +352,11 @@ export default function DashboardPage() {
         rows={rows}
         columnasVisibles={colsVisibles}
         vista={filtros.vista ?? "todas"}
-        onKpisVisiblesChange={(k, totalVisibles) => {
-          setKpisVisibles(k);
-          setVisiblesCount(totalVisibles);
-        }}
-        onFiltrosColumnaChange={setHayFiltrosColumna}
+        onFiltrosColumnaChange={(fc) =>
+          setFiltrosColumna((prev) =>
+            JSON.stringify(prev) === JSON.stringify(fc) ? prev : fc
+          )
+        }
         onRowClick={(r) =>
           router.push(
             `/producto/${encodeURIComponent(r.producto)}?sucursal=${encodeURIComponent(
