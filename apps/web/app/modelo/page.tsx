@@ -1,31 +1,46 @@
 "use client";
 
 import type { ReactNode } from "react";
-import {
-  Boxes,
-  CalendarDays,
-  Info,
-  Lightbulb,
-  Minus,
-  Plus,
-  Truck,
-} from "lucide-react";
+import { Download, Info, Lightbulb, Truck } from "lucide-react";
 
 /* Documentación del modelo de sugerido, en lenguaje de negocio (audiencia:
-   Abastecimiento, no técnica). Refleja la lógica REAL del modelo de Power BI,
-   extraída de la tabla 'Sugerido por Sucursal' y sus medidas. Si el modelo
-   cambia, actualizar también acá. */
+   Abastecimiento, no técnica). Refleja la lógica REAL del modelo de Power BI
+   (tabla 'Sugerido por Sucursal' y sus medidas). Si el modelo cambia, actualizar
+   también acá Y el .docx de /public (modelo-sugerido-de-compras.docx). */
+
+const DOC = "/modelo-sugerido-de-compras.docx";
 
 type Seccion = { id: string; titulo: string };
 
 const SECCIONES: Seccion[] = [
-  { id: "que-hace", titulo: "Para qué sirve" },
-  { id: "clasificacion", titulo: "Cómo se clasifican los productos" },
-  { id: "quien-compra", titulo: "Quién compra cada producto" },
-  { id: "como-decide", titulo: "Cómo se calcula cuánto pedir" },
-  { id: "colchon", titulo: "El colchón de seguridad" },
-  { id: "ventas", titulo: "Qué ventas se consideran" },
-  { id: "sucursales", titulo: "Sucursales y prioridad del CD" },
+  { id: "que-hace", titulo: "Qué hace el modelo" },
+  { id: "fuentes", titulo: "De dónde salen los datos" },
+  { id: "limpieza", titulo: "1 · Limpieza de las ventas" },
+  { id: "abc", titulo: "2 · Clasificación ABC" },
+  { id: "demanda", titulo: "3 · Demanda mensual" },
+  { id: "proveedor", titulo: "4 · Proveedor y lead time" },
+  { id: "cd", titulo: "5 · ¿Se abastece por el CD?" },
+  { id: "colchon", titulo: "6 · Stock de seguridad" },
+  { id: "sugerido", titulo: "7 · El sugerido de compra" },
+  { id: "traslados", titulo: "8 · Distribución y traslados" },
+  { id: "reglas", titulo: "Reglas de negocio" },
+  { id: "parametros", titulo: "Parámetros de referencia" },
+];
+
+const ETAPAS = [
+  "Limpiar las ventas",
+  "Clasificar cada producto (ABC)",
+  "Estimar la demanda",
+  "Asignar proveedor y tiempo de entrega",
+  "Decidir si se abastece por el CD",
+  "Calcular el stock de seguridad",
+  "Calcular el sugerido de compra",
+  "Repartir el stock del CD (traslados)",
+];
+
+const PRIORIDAD = [
+  "Diez de Julio (2)", "Brasil 18", "Linderos", "Placilla", "Rancagua",
+  "Rancagua 2", "Curicó", "Talca", "Talca (2)", "Chillán", "Chillán Viejo",
 ];
 
 export default function ModeloPage() {
@@ -33,17 +48,28 @@ export default function ModeloPage() {
     <div className="space-y-8">
       {/* Encabezado */}
       <header className="border-b border-ink-200 pb-5">
-        <p className="kicker mb-2 flex items-center gap-1.5">
-          <Lightbulb size={13} className="text-accent-500" /> Cómo funciona
-        </p>
-        <h1 className="font-display text-3xl font-medium tracking-tight text-ink-900">
-          Cómo se calcula el sugerido
-        </h1>
-        <p className="mt-2 max-w-3xl text-[14.5px] leading-relaxed text-ink-600">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="kicker mb-2 flex items-center gap-1.5">
+              <Lightbulb size={13} className="text-accent-500" /> Cómo funciona
+            </p>
+            <h1 className="font-display text-3xl font-medium tracking-tight text-ink-900">
+              Cómo se calcula el sugerido
+            </h1>
+          </div>
+          <a
+            href={DOC}
+            download
+            className="inline-flex shrink-0 items-center gap-2 rounded-sm border border-ink-300 bg-white px-3.5 py-2 text-[13px] font-semibold text-ink-800 transition-colors hover:border-accent-500 hover:text-accent-600"
+          >
+            <Download size={15} /> Exportar a Word
+          </a>
+        </div>
+        <p className="mt-3 max-w-3xl text-[14.5px] leading-relaxed text-ink-600">
           Esta página explica, en simple, de dónde sale cada número que ves en la
-          plataforma: cómo se clasifican los productos, quién los compra (la
-          sucursal o el Centro de Distribución) y cómo se decide la cantidad a
-          pedir. Es la base para revisar y validar el sugerido con confianza.
+          plataforma: qué datos usa, cómo se clasifican los productos, cómo se
+          estima la demanda y cómo se decide cuánto pedir o trasladar. Es la
+          documentación completa del modelo, para revisar y validar con confianza.
         </p>
       </header>
 
@@ -69,305 +95,231 @@ export default function ModeloPage() {
 
         {/* Contenido */}
         <div className="min-w-0 space-y-12">
-          {/* 1. Para qué sirve */}
-          <Section id="que-hace" titulo="Para qué sirve">
+          <Section id="que-hace" titulo="Qué hace el modelo">
             <P>
-              La herramienta calcula, para cada repuesto y cada sucursal,{" "}
-              <strong>cuánto conviene pedir</strong>. El objetivo es simple: que no
-              falte stock para vender, sin comprar de más y dejar plata detenida en
-              la bodega.
+              A partir del <strong>historial de ventas</strong>, el{" "}
+              <strong>stock actual</strong>, las <strong>órdenes de compra</strong> y
+              los <strong>tiempos de entrega de cada proveedor</strong>, el modelo
+              estima cuánto se vende y cuánto stock hace falta para no quebrar, y con
+              eso calcula <strong>cuánto pedir</strong> (al proveedor) o{" "}
+              <strong>cuánto trasladar</strong> (desde el Centro de Distribución) en
+              cada producto y sucursal.
             </P>
             <P>
-              Para eso mira las ventas de cada producto, cada cuánto se vende, cuánto
-              demora el proveedor en entregar, cuánto stock hay hoy y cuánto ya viene
-              en camino. Con eso propone una cantidad, que el equipo de compras
-              revisa antes de generar la orden.
+              El cálculo es una cadena de <strong>8 etapas</strong>; cada una usa el
+              resultado de la anterior:
             </P>
+            <ol className="grid max-w-3xl gap-1.5 sm:grid-cols-2">
+              {ETAPAS.map((e, i) => (
+                <li
+                  key={e}
+                  className="flex items-center gap-2.5 rounded-sm border border-ink-200 bg-white px-3 py-2 text-[13px] text-ink-700"
+                >
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm bg-brand text-[11px] font-semibold text-white">
+                    {i + 1}
+                  </span>
+                  {e}
+                </li>
+              ))}
+            </ol>
           </Section>
 
-          {/* 2. Clasificación */}
-          <Section id="clasificacion" titulo="Cómo se clasifican los productos">
-            <P>
-              Lo primero que hace el modelo es ponerle una nota a cada producto según{" "}
-              <strong>qué tan seguido se vende</strong>: en cuántos de los últimos
-              meses tuvo venta. Esa nota (A, B, C o D) define cómo se trata después.
-            </P>
-            <div className="space-y-2.5">
-              <ClaseRow
-                clase="A"
-                tono="a"
-                titulo="Se vende casi todos los meses"
-                regla="Tuvo venta en 5 o 6 de los últimos 6 meses"
-                desc="Los más constantes y críticos. Quebrarse en uno de estos es lo que más duele."
-              />
-              <ClaseRow
-                clase="B"
-                tono="b"
-                titulo="Se vende seguido"
-                regla="Tuvo venta en 4 de los últimos 6 meses"
-                desc="Rotación buena pero algo menos pareja que la clase A."
-              />
-              <ClaseRow
-                clase="C"
-                tono="c"
-                titulo="Se vende de a poco"
-                regla="Venta en 3 de los últimos 6 meses, con presencia reciente (o respaldo de los últimos 12)"
-                desc="Rotación baja pero real. Se le hace seguimiento más holgado."
-              />
-              <ClaseRow
-                clase="D"
-                tono="d"
-                titulo="Venta esporádica o nula"
-                regla="El resto: casi no registra venta reciente"
-                desc="Por sí solo no se repone en la sucursal. Puede entrar igual si a nivel global vende bien (ver abajo)."
-              />
-            </div>
-            <Callout tono="info">
-              <strong>Dos miradas de la misma nota.</strong> Cada producto tiene su
-              clase <strong>en la sucursal</strong> (cómo se vende ahí) y su clase{" "}
-              <strong>global</strong> (cómo se vende sumando todas las sucursales). La
-              diferencia entre las dos es la que decide si conviene que el CD lo
-              consolide. La clasificación se basa en la frecuencia de venta, no en el
-              monto facturado.
-            </Callout>
+          <Section id="fuentes" titulo="De dónde salen los datos">
+            <Tabla
+              headers={["Fuente", "Qué aporta al modelo"]}
+              rows={[
+                ["Ventas (Curifor + Frontera)", "El historial de venta mensual por producto y sucursal. Base para clasificar y estimar la demanda."],
+                ["Seguimiento de compras (OC)", "Las órdenes de compra: proveedor, fechas de OC y recepción (para el lead time) y lo que está en tránsito."],
+                ["Stock por bodega (Curifor + Frontera)", "El stock disponible hoy en cada sucursal y en el CD."],
+                ["Catálogos y reemplazos", "Descripción, marca, unidad, región de la sucursal y qué códigos son reemplazo de cuál (se tratan como un mismo producto)."],
+              ]}
+            />
           </Section>
 
-          {/* 3. Quién compra */}
-          <Section id="quien-compra" titulo="Quién compra cada producto">
-            <P>
-              Según la clase del producto (en la sucursal y a nivel global) y si es
-              importado, el modelo decide quién lo compra:
-            </P>
-
-            <div className="max-w-3xl overflow-hidden rounded-sm border border-ink-200 bg-white">
-              <table className="w-full text-[13.5px]">
-                <thead>
-                  <tr className="border-b border-ink-200 bg-ink-50 text-left">
-                    <th className="px-4 py-2.5 font-semibold text-ink-700">Situación</th>
-                    <th className="px-4 py-2.5 font-semibold text-ink-700">
-                      Quién lo abastece
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-ink-100">
-                  <FilaAbast
-                    tipo="Clase A, B o C en la sucursal (y no importado)"
-                    modo="directo"
-                    como="La sucursal le compra directo al proveedor."
-                  />
-                  <FilaAbast
-                    tipo="Importado"
-                    modo="cd"
-                    como="Siempre se abastece desde el CD."
-                  />
-                  <FilaAbast
-                    tipo="Clase D en la sucursal, pero A/B/C a nivel global"
-                    modo="cd"
-                    como="El CD lo consolida y lo reparte por traslado: en vez de que cada sucursal chica lo pida suelto, lo centraliza."
-                  />
-                  <FilaAbast
-                    tipo="Clase D en la sucursal y también a nivel global"
-                    modo="ninguno"
-                    como="No se pide (venta demasiado esporádica). Excepción: importados con stock en el CD."
-                  />
-                </tbody>
-              </table>
-            </div>
-
-            <Callout tono="info">
-              El <strong>Centro de Distribución (CD)</strong> compra un producto cuando,
-              mirándolo a nivel global, es clase A, B o C. Después lo reparte a las
-              sucursales que lo necesitan por orden de prioridad (ver más abajo).
-            </Callout>
-
-            <P>El sugerido se muestra en tres listas separadas, según el caso:</P>
-            <div className="space-y-3">
-              <VistaCard
-                n="1"
-                icon={Boxes}
-                titulo="Compra directa de sucursal"
-                desc="Lo que cada sucursal le pide directamente a su proveedor."
-              />
-              <VistaCard
-                n="2"
-                icon={Boxes}
-                titulo="Compra del Centro de Distribución"
-                desc="Lo que compra el CD para abastecer a varias sucursales (importados y productos que conviene consolidar)."
-              />
-              <VistaCard
-                n="3"
-                icon={Truck}
-                titulo="Traslados desde el CD"
-                desc="Lo que el CD envía a cada sucursal desde su propio stock, sin volver a comprarlo."
-              />
-            </div>
-          </Section>
-
-          {/* 4. Cómo se calcula cuánto pedir */}
-          <Section id="como-decide" titulo="Cómo se calcula cuánto pedir">
-            <P>
-              Una vez que se sabe quién compra, la cantidad sale de sumar y restar
-              cuatro cosas, producto por producto y sucursal por sucursal:
-            </P>
-            <div className="max-w-2xl space-y-2.5 rounded-sm border border-ink-200 bg-white p-5">
-              <Ingrediente
-                signo="mas"
-                titulo="Lo que se espera vender hasta el próximo pedido"
-                desc="El ritmo de venta del producto, multiplicado por el tiempo que tarda en llegar (entrega del proveedor) más el ciclo de pedido."
-              />
-              <Ingrediente
-                signo="mas"
-                titulo="Un colchón de seguridad"
-                desc="Stock extra para no quebrar si la venta sube o el proveedor se atrasa. Depende de la clase (ver abajo)."
-              />
-              <Ingrediente
-                signo="menos"
-                titulo="Lo que ya hay en la sucursal"
-                desc="El stock disponible hoy no hay que volver a pedirlo."
-              />
-              <Ingrediente
-                signo="menos"
-                titulo="Lo que ya viene en camino"
-                desc="Las órdenes de compra pendientes de llegar también se descuentan."
-              />
-              <div className="mt-1 border-t border-ink-100 pt-3 text-[13px] text-ink-600">
-                Si el resultado da <strong>mayor que cero</strong>, ese es el sugerido
-                a pedir. Si da cero o negativo, ya hay suficiente y{" "}
-                <strong>no se pide</strong>.
-              </div>
-            </div>
-            <div className="grid max-w-3xl gap-3 sm:grid-cols-2">
-              <DatoCard icon={CalendarDays} titulo="Ciclo de pedido">
-                <strong>5 días</strong> si la sucursal compra directo;{" "}
-                <strong>3 días</strong> si el producto se abastece desde el CD (se
-                pide más seguido).
-              </DatoCard>
-              <DatoCard icon={Truck} titulo="Tiempo de entrega">
-                El tiempo <strong>real</strong> de cada proveedor (calculado con su
-                historial). Para traslados internos del CD a la sucursal: 1 a 2 días.
-              </DatoCard>
-            </div>
-            <P className="text-[13px] text-ink-600">
-              El ritmo de venta se promedia sobre los <strong>últimos 6 meses</strong>{" "}
-              para los productos de mayor rotación (A y B), y sobre los{" "}
-              <strong>últimos 12 meses</strong> para los de baja rotación (C y D), para
-              suavizar los altibajos.
-            </P>
-          </Section>
-
-          {/* 5. Colchón de seguridad */}
-          <Section id="colchon" titulo="El colchón de seguridad">
-            <P>
-              El colchón (o stock de seguridad) es el extra que se pide para no
-              quebrar ante imprevistos. Mientras más importante el producto, más alto
-              el nivel de servicio al que apunta el modelo:
-            </P>
-            <div className="max-w-2xl overflow-hidden rounded-sm border border-ink-200 bg-white">
-              <table className="w-full text-[13.5px]">
-                <thead>
-                  <tr className="border-b border-ink-200 bg-ink-50 text-left">
-                    <th className="px-4 py-2.5 font-semibold text-ink-700">Clase</th>
-                    <th className="px-4 py-2.5 font-semibold text-ink-700">
-                      Apunta a no quebrar en…
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-ink-100">
-                  <FilaServicio clase="A" nivel="~95% de los casos" />
-                  <FilaServicio clase="B" nivel="~90% de los casos" />
-                  <FilaServicio clase="C" nivel="~80% de los casos" />
-                  <FilaServicio clase="D" nivel="Sin colchón (solo lo justo)" apagado />
-                </tbody>
-              </table>
-            </div>
-            <P className="text-[13px] text-ink-600">
-              El tamaño del colchón también crece cuando el producto vende de forma
-              más irregular (más altibajos mes a mes) o cuando el proveedor tarda más
-              en entregar. Los importados gestionados por el CD usan un colchón algo
-              más bajo, porque se piden con más anticipación.
-            </P>
-          </Section>
-
-          {/* 6. Qué ventas se consideran */}
-          <Section id="ventas" titulo="Qué ventas se consideran">
-            <P>
-              Para que la demanda refleje lo que de verdad se vende, el modelo limpia
-              las ventas antes de calcular:
-            </P>
+          <Section id="limpieza" titulo="1 · Limpieza de las ventas">
+            <P>Antes de calcular nada, se depura la venta para que el número sea real y comparable:</P>
             <ul className="max-w-3xl space-y-2 text-[14px] text-ink-700">
-              <Bullet>
-                <strong>No cuenta las notas de crédito</strong> (devoluciones): se
-                descuentan para no inflar la venta.
-              </Bullet>
-              <Bullet>
-                <strong>Solo meses cerrados.</strong> El mes en curso no se usa,
-                porque está incompleto y distorsionaría el promedio.
-              </Bullet>
-              <Bullet>
-                <strong>Deja fuera lo que no es repuesto comprable</strong> — insumos
-                de taller, incentivos y ajustes (6 conceptos), más las categorías{" "}
-                <strong>Colisión</strong> y <strong>Campañas</strong>.
-              </Bullet>
-              <Bullet>
-                <strong>Los productos que se reemplazan entre sí se suman juntos.</strong>{" "}
-                Cuando un repuesto sustituye a otro, su venta y su stock se miran como
-                un solo grupo, para no pedir de más.
-              </Bullet>
+              <Bullet><strong>Venta neta:</strong> se descuentan devoluciones y notas de crédito (no la venta bruta).</Bullet>
+              <Bullet><strong>Solo meses cerrados:</strong> se ignora el mes en curso (incompleto).</Bullet>
+              <Bullet><strong>Reemplazos agrupados:</strong> si un código reemplaza a otro, su venta y stock se suman al producto “maestro”.</Bullet>
+              <Bullet><strong>Sucursales excluidas:</strong> las cerradas o fuera de alcance (La Florida, Lira, Lo Blanco, los Mall Plaza, Ovalle (3), Gran Avenida, Coquimbo y Diez de Julio antigua).</Bullet>
+              <Bullet><strong>Productos internos excluidos:</strong> conceptos que no se compran a proveedor (taller D&P, insumos mecánica, incentivos, deducciones).</Bullet>
+              <Bullet><strong>Categorías excluidas:</strong> Colisión y Campañas no participan del sugerido de reposición.</Bullet>
+              <Bullet><strong>Ventas móviles y canales al CD:</strong> Linderos “venta móvil”, Canal Digital y Oficinas Centrales se consolidan en el CD.</Bullet>
+            </ul>
+            <Callout>
+              Para las <strong>compras</strong> (proveedor y tránsito) se usan solo las OC con motivo
+              <strong> “reposición”</strong>; las compras puntuales (colisión, garantía, calzada) no
+              cuentan como abastecimiento normal.
+            </Callout>
+          </Section>
+
+          <Section id="abc" titulo="2 · Clasificación ABC (por frecuencia de venta)">
+            <P>
+              No es un ABC de Pareto (por facturación). Acá la clase mide{" "}
+              <strong>con qué frecuencia se vende</strong>: se cuentan los meses con venta en los
+              últimos 3, 6 y 12 meses.
+            </P>
+            <Tabla
+              headers={["Clase", "Condición (meses con venta)", "Lectura"]}
+              rows={[
+                ["A", "5 o 6 de los últimos 6 meses", "Muy frecuente"],
+                ["B", "4 de los últimos 6 meses", "Frecuente"],
+                ["C", "3 de los últimos 6 (con apoyo en 3m o 12m)", "Intermitente"],
+                ["D", "el resto", "Esporádico / casi sin venta"],
+              ]}
+            />
+            <Callout>
+              Se calcula en dos niveles: <strong>local</strong> (el producto en esa sucursal) y{" "}
+              <strong>agregada</strong> (el producto en toda la empresa). La combinación de ambas
+              decide si conviene centralizar el producto en el CD. La clase define casi todo lo que
+              sigue: cuántos meses de historia se miran, cuánto colchón se exige y si se compra
+              directo o vía CD.
+            </Callout>
+          </Section>
+
+          <Section id="demanda" titulo="3 · Demanda mensual">
+            <P>Es el motor del cálculo: cuántas unidades por mes se espera vender.</P>
+            <ul className="max-w-3xl space-y-2 text-[14px] text-ink-700">
+              <Bullet><strong>Ventana según clase:</strong> los A/B miran los últimos 6 meses; los C/D, los últimos 12.</Bullet>
+              <Bullet><strong>Se arma la serie mensual</strong> (la venta de cada mes; 0 en los meses sin venta).</Bullet>
+              <Bullet><strong>Winsorización:</strong> se recortan los meses atípicamente altos con un tope robusto (mediana + k × 1,4826 × MAD, con k = 3) para que un pedido puntual no infle la demanda. El detalle está en el documento “Método de winsorización”.</Bullet>
+              <Bullet><strong>Demanda mensual = promedio</strong> de la serie ya recortada; la demanda diaria = demanda mensual ÷ 22 días hábiles.</Bullet>
+              <Bullet><strong>Caso CD:</strong> para los productos que el CD centraliza, la demanda consolida su venta más la de las sucursales que se abastecen de él, sobre 12 meses.</Bullet>
             </ul>
           </Section>
 
-          {/* 7. Sucursales y prioridad */}
-          <Section id="sucursales" titulo="Sucursales y prioridad del CD">
-            <SubTitulo icon={Info}>Sucursales que no entran al cálculo</SubTitulo>
-            <P className="!mt-1">
-              9 sucursales quedan fuera del sugerido: La Florida, Lira, Lo Blanco, las
-              3 de Mall Plaza (Norte, Sur y Vespucio), Ovalle (3), Gran Avenida y
-              Coquimbo.
+          <Section id="proveedor" titulo="4 · Proveedor y tiempo de entrega (lead time)">
+            <P>
+              <strong>Proveedor:</strong> se toma el de la orden de compra de reposición más reciente
+              de ese producto en esa sucursal. Si esa sucursal nunca lo compró por reposición, se
+              completa con el proveedor que el modelo deduce del histórico del producto (válido porque
+              cada código tiene un único proveedor).
             </P>
+            <P>
+              <strong>Lead time</strong> (días que tarda en llegar): se calcula desde el seguimiento,
+              midiendo los días entre la OC y su recepción, descartando la cola de casos lentos y
+              promediando el resto. La jerarquía:
+            </P>
+            <ul className="max-w-3xl space-y-2 text-[14px] text-ink-700">
+              <Bullet>el lead time de ese proveedor en esa sucursal (si hay historial);</Bullet>
+              <Bullet>si no, el lead time general de ese proveedor;</Bullet>
+              <Bullet>si tampoco hay, 8 días por defecto.</Bullet>
+            </ul>
             <P className="text-[13px] text-ink-600">
-              Además, Oficinas Centrales, Canal Digital y Linderos Vta Móvil se
-              manejan <strong>dentro del CD</strong>, y Rancagua 2 se suma a Rancagua.
+              <strong>Lead time del CD a la sucursal:</strong> 1 día en la Región Metropolitana, 2 en
+              el resto (casos fijos: Diez de Julio (2) = 1, Talca (2) = 2). El{" "}
+              <strong>lead time efectivo</strong> es el del CD si el producto se abastece por el CD, o
+              el del proveedor si se compra directo.
             </P>
+          </Section>
 
-            <SubTitulo icon={Truck}>Cuándo el CD sale a comprar</SubTitulo>
-            <P className="!mt-1">
-              Cuando varias sucursales necesitan el mismo producto desde el CD, su
-              stock se reparte por <strong>orden de prioridad de sucursal</strong>. El
-              CD sale a comprar solo cuando la necesidad acumulada de las sucursales
-              con prioridad supera el stock que ya tiene; si no alcanza para todas,
-              primero se cubre a las de mayor prioridad.
+          <Section id="cd" titulo="5 · ¿Se abastece por el Centro de Distribución?">
+            <P>
+              Algunos productos conviene centralizarlos en el CD y desde ahí distribuir, en vez de que
+              cada sucursal le compre al proveedor:
             </P>
+            <ul className="max-w-3xl space-y-2 text-[14px] text-ink-700">
+              <Bullet><strong>En una sucursal:</strong> se abastece por el CD si el producto es importado, o si es de baja rotación local (C/D) pero de alta rotación a nivel empresa (agregada A/B).</Bullet>
+              <Bullet><strong>En el CD:</strong> solo se abastece a sí mismo si el producto es importado.</Bullet>
+            </ul>
+            <P className="text-[13px] text-ink-600">
+              Esta decisión cambia el ciclo de orden y el lead time efectivo, y habilita los traslados
+              (etapa 8).
+            </P>
+          </Section>
+
+          <Section id="colchon" titulo="6 · Stock de seguridad">
+            <P>
+              Es el colchón para no quebrar mientras llega la reposición, frente a la variabilidad de
+              la venta:
+            </P>
+            <Formula>Stock de seguridad = Z × desviación × √(meses de protección)</Formula>
+            <Tabla
+              headers={["Clase", "Z (normal)", "Z (importado por CD)"]}
+              rows={[
+                ["A", "1,645", "1,282"],
+                ["B", "1,282", "1,036"],
+                ["C", "0,842", "—"],
+                ["D", "0", "—"],
+              ]}
+            />
+            <ul className="max-w-3xl space-y-2 text-[14px] text-ink-700">
+              <Bullet><strong>Z (nivel de servicio) según la clase:</strong> cuanto más importante el producto, más colchón.</Bullet>
+              <Bullet><strong>Desviación:</strong> cuánto varía la venta mes a mes (de la misma serie ya winsorizada).</Bullet>
+              <Bullet><strong>Meses de protección = (lead time efectivo + ciclo de orden) ÷ 22.</strong> El ciclo de orden es 5 días directo y 3 vía CD.</Bullet>
+            </ul>
+            <P className="text-[13px] text-ink-600">
+              En criollo: productos importantes y de venta irregular llevan más colchón; los parejos o
+              de baja clase, menos o nada.
+            </P>
+          </Section>
+
+          <Section id="sugerido" titulo="7 · El sugerido de compra">
+            <P>Con la demanda, el lead time y el colchón se calcula la necesidad y se descuenta lo que ya se tiene:</P>
+            <Formula>
+              Necesidad = Demanda diaria × (ciclo orden + lead time) + Stock seguridad − Stock actual − En tránsito
+            </Formula>
+            <ul className="max-w-3xl space-y-2 text-[14px] text-ink-700">
+              <Bullet><strong>Stock actual:</strong> lo disponible hoy en la sucursal (sumando el grupo de reemplazos, Curifor + Frontera).</Bullet>
+              <Bullet><strong>En tránsito:</strong> las OC pendientes que ya vienen en camino (nacional de reposición hasta 30 días, importado hasta 180, frontera hasta 30).</Bullet>
+              <Bullet><strong>Sugerido:</strong> esa necesidad (nunca negativa), pero solo se sugiere comprar en productos cuya clase que compra es A/B; los de baja clase quedan en 0.</Bullet>
+              <Bullet><strong>Punto de pedido = Demanda diaria × lead time + Stock seguridad.</strong> Indica <em>cuándo</em> reponer (no cuánto).</Bullet>
+              <Bullet><strong>Pedir:</strong> la fila queda “Sí” cuando el sugerido es mayor que 0.</Bullet>
+            </ul>
+          </Section>
+
+          <Section id="traslados" titulo="8 · Distribución desde el CD y traslados">
+            <P>Para los productos centralizados, antes de comprarle al proveedor se reparte el stock que ya está en el CD:</P>
+            <ul className="max-w-3xl space-y-2 text-[14px] text-ink-700">
+              <Bullet><strong>Reparto por prioridad:</strong> el stock del CD se asigna a las sucursales elegibles siguiendo un ranking fijo. Cada una recibe hasta cubrir su necesidad, con lo que quede después de las de mayor prioridad.</Bullet>
+              <Bullet><strong>Comprar en el CD:</strong> se marca “Sí” cuando, al llegar el turno de una sucursal, la necesidad acumulada supera el stock del CD (señal de que el CD debe reponerse).</Bullet>
+              <Bullet><strong>Compra neta:</strong> el sugerido menos lo que se cubre con traslado desde el CD. Es lo que efectivamente hay que comprarle al proveedor.</Bullet>
+              <Bullet><strong>Traslado lateral (informativo):</strong> para las filas con sugerido, se listan otras sucursales con stock del producto, por si conviene un traslado en vez de comprar.</Bullet>
+            </ul>
             <div className="max-w-2xl rounded-sm border border-ink-200 bg-white p-4">
-              <p className="kicker mb-2.5">Orden de prioridad</p>
+              <p className="flex items-center gap-1.5 kicker mb-2.5">
+                <Truck size={13} className="text-accent-500" /> Orden de prioridad del CD
+              </p>
               <div className="flex flex-wrap gap-1.5 text-[12.5px]">
-                {[
-                  "Diez de Julio (2)",
-                  "Brasil 18",
-                  "Linderos",
-                  "Placilla",
-                  "Rancagua",
-                  "Rancagua 2",
-                  "Curicó",
-                  "Talca",
-                  "Talca (2)",
-                  "Chillán",
-                  "Chillán Viejo",
-                ].map((s, i) => (
+                {PRIORIDAD.map((s, i) => (
                   <span
                     key={s}
                     className="inline-flex items-center gap-1.5 rounded-sm border border-ink-200 bg-paper-50 px-2 py-1"
                   >
-                    <span className="font-mono font-semibold text-accent-600">
-                      {i + 1}
-                    </span>
+                    <span className="font-mono font-semibold text-accent-600">{i + 1}</span>
                     <span className="text-ink-700">{s}</span>
                   </span>
                 ))}
               </div>
-              <p className="mt-2.5 text-[12px] text-ink-500">
-                El resto de las sucursales queda en prioridad más baja.
-              </p>
+              <p className="mt-2.5 text-[12px] text-ink-500">El resto de las sucursales queda en prioridad más baja.</p>
             </div>
+          </Section>
+
+          <Section id="reglas" titulo="Reglas de negocio adicionales">
+            <P>Sobre el cálculo del modelo, la plataforma aplica algunos ajustes de sentido común:</P>
+            <ul className="max-w-3xl space-y-2 text-[14px] text-ink-700">
+              <Bullet><strong>Stock cubre + sin venta reciente → no pedir:</strong> si una sucursal tiene stock suficiente para su demanda mensual y no vendió el producto el mes anterior, no se sugiere comprar.</Bullet>
+              <Bullet><strong>Sucursales cerradas ocultas:</strong> la Diez de Julio antigua (cerrada) no se muestra; solo la Diez de Julio (2) activa.</Bullet>
+              <Bullet><strong>Proveedores rellenados:</strong> los productos sin reposición confirmada en la sucursal muestran igual el proveedor deducido, para reducir las filas “sin proveedor”.</Bullet>
+              <Bullet><strong>Aceites en mililitros:</strong> se mantienen como vienen (decisión de Abastecimiento); pueden inflar totales pero es esperado.</Bullet>
+            </ul>
+          </Section>
+
+          <Section id="parametros" titulo="Parámetros y clasificaciones de referencia">
+            <P>Valores fijos del modelo (auditados jul-2026):</P>
+            <Tabla
+              headers={["Parámetro", "Valor", "Qué es"]}
+              rows={[
+                ["Escalar winsorización (k)", "3", "Qué tan estricto es el recorte de meses pico (antes 1)."],
+                ["Días hábiles por mes", "22", "Divisor para pasar de demanda mensual a diaria."],
+                ["Ciclo de orden", "5 directo / 3 vía CD", "Días de cobertura extra que se agregan al pedir."],
+                ["Lead time por defecto", "8 días", "Cuando no hay proveedor ni historial de OC."],
+                ["Lead time CD → sucursal", "1 (RM) / 2 (resto)", "Días de traslado del CD a la sucursal."],
+                ["Vigencia de tránsito", "30 d nacional / 180 d importado", "Ventana para contar una OC como “en camino”."],
+                ["Nivel de servicio Z", "A 1,645 · B 1,282 · C 0,842 · D 0", "Colchón por clase (más alto = más stock de seguridad)."],
+              ]}
+            />
           </Section>
         </div>
       </div>
@@ -377,15 +329,7 @@ export default function ModeloPage() {
 
 /* ---------- Componentes de presentación ---------- */
 
-function Section({
-  id,
-  titulo,
-  children,
-}: {
-  id: string;
-  titulo: string;
-  children: ReactNode;
-}) {
+function Section({ id, titulo, children }: { id: string; titulo: string; children: ReactNode }) {
   return (
     <section id={id} className="scroll-mt-24 space-y-4">
       <h2 className="font-display text-2xl font-medium tracking-tight text-ink-900 editorial-rule">
@@ -396,221 +340,25 @@ function Section({
   );
 }
 
-function SubTitulo({
-  children,
-  icon: Icon,
-}: {
-  children: ReactNode;
-  icon: typeof Boxes;
-}) {
+function P({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
-    <h3 className="flex items-center gap-2 pt-2 text-[15px] font-semibold text-ink-900">
-      <Icon size={16} className="text-accent-500" />
-      {children}
-    </h3>
+    <p className={`max-w-3xl text-[14.5px] leading-relaxed text-ink-700 ${className}`}>{children}</p>
   );
 }
 
-function P({
-  children,
-  className = "",
-}: {
-  children: ReactNode;
-  className?: string;
-}) {
+function Formula({ children }: { children: ReactNode }) {
   return (
-    <p className={`max-w-3xl text-[14.5px] leading-relaxed text-ink-700 ${className}`}>
+    <div className="max-w-3xl overflow-x-auto rounded-sm border border-brand-200 bg-brand-50/40 px-4 py-3 text-center font-mono text-[13px] font-semibold text-brand-900">
       {children}
-    </p>
-  );
-}
-
-function Ingrediente({
-  signo,
-  titulo,
-  desc,
-}: {
-  signo: "mas" | "menos";
-  titulo: string;
-  desc: string;
-}) {
-  const esMas = signo === "mas";
-  return (
-    <div className="flex gap-3">
-      <span
-        className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-sm ${
-          esMas ? "bg-emerald-50 text-emerald-700" : "bg-accent-50 text-accent-700"
-        }`}
-      >
-        {esMas ? <Plus size={15} /> : <Minus size={15} />}
-      </span>
-      <div>
-        <p className="text-[14px] font-semibold text-ink-900">{titulo}</p>
-        <p className="text-[13px] leading-relaxed text-ink-600">{desc}</p>
-      </div>
     </div>
   );
 }
 
-function Callout({
-  children,
-  tono = "info",
-}: {
-  children: ReactNode;
-  tono?: "info" | "warn";
-}) {
-  const estilos =
-    tono === "warn"
-      ? "border-accent-100 bg-accent-50/60"
-      : "border-brand-200 bg-brand-50/60";
-  const colorIcono = tono === "warn" ? "text-accent-600" : "text-brand";
+function Callout({ children }: { children: ReactNode }) {
   return (
-    <div
-      className={`flex max-w-3xl gap-2.5 rounded-sm border px-4 py-3 text-[13.5px] leading-relaxed text-ink-700 ${estilos}`}
-    >
-      <Info size={16} className={`mt-0.5 shrink-0 ${colorIcono}`} />
+    <div className="flex max-w-3xl gap-2.5 rounded-sm border border-brand-200 bg-brand-50/60 px-4 py-3 text-[13.5px] leading-relaxed text-ink-700">
+      <Info size={16} className="mt-0.5 shrink-0 text-brand" />
       <div>{children}</div>
-    </div>
-  );
-}
-
-function DatoCard({
-  icon: Icon,
-  titulo,
-  children,
-}: {
-  icon: typeof Boxes;
-  titulo: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="rounded-sm border border-ink-200 bg-white p-3.5">
-      <p className="flex items-center gap-1.5 text-[13px] font-semibold text-ink-900">
-        <Icon size={15} className="text-brand" />
-        {titulo}
-      </p>
-      <p className="mt-1 text-[12.5px] leading-relaxed text-ink-600">{children}</p>
-    </div>
-  );
-}
-
-function ClaseRow({
-  clase,
-  tono,
-  titulo,
-  regla,
-  desc,
-}: {
-  clase: string;
-  tono: "a" | "b" | "c" | "d";
-  titulo: string;
-  regla: string;
-  desc: string;
-}) {
-  const cls =
-    tono === "a"
-      ? "bg-accent-500 text-white"
-      : tono === "b"
-        ? "bg-brand text-white"
-        : tono === "c"
-          ? "bg-brand-200 text-brand-900"
-          : "bg-ink-200 text-ink-600";
-  return (
-    <div className="flex items-start gap-3 rounded-sm border border-ink-200 bg-white p-3.5">
-      <span
-        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-sm font-display text-lg font-semibold ${cls}`}
-      >
-        {clase}
-      </span>
-      <div className="min-w-0">
-        <p className="text-[14px] font-semibold text-ink-900">{titulo}</p>
-        <p className="mt-0.5 text-[12px] font-medium uppercase tracking-wide text-accent-600">
-          {regla}
-        </p>
-        <p className="mt-1 text-[13px] leading-relaxed text-ink-600">{desc}</p>
-      </div>
-    </div>
-  );
-}
-
-function FilaAbast({
-  tipo,
-  modo,
-  como,
-}: {
-  tipo: string;
-  modo: "directo" | "cd" | "ninguno";
-  como: string;
-}) {
-  const etiqueta =
-    modo === "directo"
-      ? { txt: "Compra directa", cls: "bg-brand-50 text-brand" }
-      : modo === "cd"
-        ? { txt: "Vía CD", cls: "bg-accent-50 text-accent-700" }
-        : { txt: "No se pide", cls: "bg-ink-100 text-ink-500" };
-  return (
-    <tr className="align-top">
-      <td className="px-4 py-3">
-        <span className="font-semibold text-ink-900">{tipo}</span>
-        <span
-          className={`ml-2 inline-block whitespace-nowrap rounded-sm px-1.5 py-0.5 text-[10.5px] font-semibold ${etiqueta.cls}`}
-        >
-          {etiqueta.txt}
-        </span>
-      </td>
-      <td className="px-4 py-3 text-ink-600">{como}</td>
-    </tr>
-  );
-}
-
-function FilaServicio({
-  clase,
-  nivel,
-  apagado = false,
-}: {
-  clase: string;
-  nivel: string;
-  apagado?: boolean;
-}) {
-  return (
-    <tr>
-      <td className="px-4 py-2.5">
-        <span
-          className={`inline-flex h-6 w-6 items-center justify-center rounded-sm font-display text-sm font-semibold ${
-            apagado ? "bg-ink-200 text-ink-600" : "bg-brand text-white"
-          }`}
-        >
-          {clase}
-        </span>
-      </td>
-      <td className={`px-4 py-2.5 ${apagado ? "text-ink-500" : "text-ink-800"}`}>
-        {nivel}
-      </td>
-    </tr>
-  );
-}
-
-function VistaCard({
-  n,
-  icon: Icon,
-  titulo,
-  desc,
-}: {
-  n: string;
-  icon: typeof Boxes;
-  titulo: string;
-  desc: string;
-}) {
-  return (
-    <div className="flex items-center gap-4 rounded-sm border border-ink-200 bg-white p-4">
-      <span className="figure shrink-0 text-2xl text-accent-500">{`0${n}.`}</span>
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-sm bg-ink-50 text-brand">
-        <Icon size={18} />
-      </div>
-      <div className="min-w-0">
-        <p className="text-[14.5px] font-semibold text-ink-900">{titulo}</p>
-        <p className="mt-0.5 text-[13px] leading-relaxed text-ink-600">{desc}</p>
-      </div>
     </div>
   );
 }
@@ -621,5 +369,35 @@ function Bullet({ children }: { children: ReactNode }) {
       <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-accent-500" />
       <span className="leading-relaxed">{children}</span>
     </li>
+  );
+}
+
+function Tabla({ headers, rows }: { headers: string[]; rows: string[][] }) {
+  return (
+    <div className="max-w-3xl overflow-x-auto rounded-sm border border-ink-200 bg-white">
+      <table className="w-full text-[13.5px]">
+        <thead>
+          <tr className="border-b border-ink-200 bg-ink-50 text-left">
+            {headers.map((h) => (
+              <th key={h} className="px-4 py-2.5 font-semibold text-ink-700">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-ink-100">
+          {rows.map((r, i) => (
+            <tr key={i} className="align-top">
+              {r.map((c, j) => (
+                <td
+                  key={j}
+                  className={`px-4 py-2.5 ${j === 0 ? "font-semibold text-ink-900" : "text-ink-600"}`}
+                >
+                  {c}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
