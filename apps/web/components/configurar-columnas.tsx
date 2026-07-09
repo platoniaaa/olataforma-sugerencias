@@ -2,6 +2,7 @@
 
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { InfoTooltip } from "@/components/info-tooltip";
 import { COLUMNAS, KEYS_POR_DEFECTO } from "@/lib/columnas";
 
 interface Props {
@@ -39,7 +40,8 @@ export function ConfigurarColumnas({ open, onClose, visibles, onChange }: Props)
               checked={visibles.includes(c.key as string)}
               onChange={() => toggle(c.key as string)}
             />
-            {c.label}
+            <span className="flex-1">{c.label}</span>
+            {c.info && <InfoTooltip texto={c.info} />}
           </label>
         ))}
       </div>
