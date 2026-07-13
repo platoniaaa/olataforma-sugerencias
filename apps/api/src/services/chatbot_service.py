@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import distinct, func, select
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -72,10 +72,13 @@ COMO RESPONDER:
 - En espanol de Chile, directo y breve.
 - Cuando el usuario pregunta por un producto o sugerido, usa las herramientas
   para traer datos reales antes de responder. NO inventes valores.
-- Tenes herramientas para: detalle de producto/sugerido, historico de ventas,
-  busqueda, RANKINGS top-N por proveedor/sucursal/marca, TOTALES del sugerido,
-  STOCK por sucursal y SUGERENCIAS manuales/recurrentes vigentes. Usalas en vez
-  de estimar.
+- Tenes herramientas para: detalle de producto/sugerido, sugerido de un producto
+  en TODAS sus sucursales, PRECIOS FORD (flota/dealer/publico/etc.), historico de
+  ventas, busqueda, RANKINGS top-N por proveedor/sucursal/marca, TOTALES del
+  sugerido, STOCK por sucursal, SUGERENCIAS manuales/recurrentes vigentes, y las
+  LISTAS validas de sucursales/marcas/proveedores. Usalas en vez de estimar.
+- Si dudas del nombre/ID exacto de una sucursal, marca o proveedor, usa
+  `opciones_validas` antes de consultar; no inventes nombres.
 - Para preguntas sobre como funciona el modelo (formulas, medidas, reglas, clases
   ABC, vistas, gotchas de DAX), apoyate en el CONTEXTO DEL MODELO de mas abajo.
 - El CONTEXTO DEL MODELO se mantiene a mano y puede no reflejar cambios muy
@@ -291,8 +294,101 @@ def _tool_sugerencias_vigentes(
     return {"manuales_vigentes": manuales, "recurrencias_activas": recurrentes}
 
 
+def _tool_precios_ford(db: Session, producto: str) -> dict:
+    """Precios FORD de un producto (en CLP). Son por codigo, iguales en todas las
+    sucursales; se lee de cualquier fila del sugerido de ese producto."""
+    s = db.scalars(select(Sugerido).where(Sugerido.producto == producto).limit(1)).first()
+    if not s:
+        return {"error": f"Producto '{producto}' no esta en el sugerido (revisa el codigo exacto)."}
+    precios = {
+        "precio_flota": s.precio_flota_ford,
+        "precio_dealer": s.precio_dealer_ford,
+        "precio_publico": s.precio_publico_ford,
+        "precio_publico_con_iva": s.precio_publico_iva_ford,
+        "precio_reposicion": s.precio_reposicion_ford,
+        "precio_urgente_vor": s.precio_urgente_vor_ford,
+        "precio_promociones": s.precio_promociones_ford,
+        "precio_urgente_recargo_15": s.precio_urgente_recargo15_ford,
+    }
+    if all(v is None for v in precios.values()):
+        return {
+            "producto": producto,
+            "descripcion": s.descripcion,
+            "nota": "Sin precio FORD: el codigo no esta en la lista de precios de FORD.",
+        }
+    return {
+        "producto": producto,
+        "descripcion": s.descripcion,
+        "marca": s.filtro1_final,
+        "precios_clp": precios,
+    }
+
+
+def _tool_sugerido_por_producto(db: Session, producto: str) -> dict:
+    """Sugerido de un producto en TODAS sus sucursales, para comparar o ver donde y
+    cuanto hay que pedir. Excluye las sucursales ocultas."""
+    rows = list(db.scalars(select(Sugerido).where(Sugerido.producto == producto)).all())
+    if not rows:
+        return {"error": f"Producto '{producto}' no esta en el sugerido (revisa el codigo exacto)."}
+    ocultas = sugerido_service._OCULTAS_LOWER
+    visibles = [r for r in rows if (r.sucursal_id or "").lower() not in ocultas]
+    sucursales = [
+        {
+            "sucursal": r.nombre_sucursal,
+            "sucursal_id": r.sucursal_id,
+            "abc": r.clasificacion_abc,
+            "pedir": r.pedir,
+            "total_sugerido": r.total_sugerido_suc,
+            "sugerido_traslado": r.sugerido_traslado,
+            "sugerido_compra_neto": r.sugerido_compra_neto,
+            "stock_activo": r.stock_activo_suc,
+            "abastece_cd": r.abastece_cd,
+        }
+        for r in visibles
+    ]
+    return {
+        "producto": producto,
+        "descripcion": visibles[0].descripcion if visibles else None,
+        "proveedor": visibles[0].proveedor if visibles else None,
+        "marca": visibles[0].filtro1_final if visibles else None,
+        "total_sugerido_todas_sucursales": sum(float(r.total_sugerido_suc or 0) for r in visibles),
+        "n_sucursales_que_piden": sum(1 for r in visibles if (r.pedir or "").lower() == "si"),
+        "sucursales": sucursales,
+    }
+
+
+def _tool_opciones_validas(db: Session) -> dict:
+    """Listas validas de referencia (para no inventar nombres/IDs): sucursales con su
+    ID, marcas y top proveedores por monto sugerido."""
+    ocultas = sugerido_service._OCULTAS_LOWER
+    sucs = db.execute(
+        select(Sugerido.sucursal_id, Sugerido.nombre_sucursal)
+        .where(Sugerido.sucursal_id.isnot(None))
+        .distinct()
+    ).all()
+    sucursales = sorted(
+        ({"sucursal_id": sid, "nombre": nom} for sid, nom in sucs
+         if (sid or "").lower() not in ocultas),
+        key=lambda d: d["sucursal_id"],
+    )
+    marcas = sorted(
+        m for (m,) in db.execute(
+            select(distinct(Sugerido.filtro1_final)).where(Sugerido.filtro1_final.isnot(None))
+        ).all()
+    )
+    top_prov = sugerido_service.agrupado(db, SugeridoFiltros(), "proveedor", limite=25)
+    return {
+        "sucursales": sucursales,
+        "marcas": marcas,
+        "top_proveedores": [p["grupo"] for p in top_prov],
+    }
+
+
 TOOLS = {
     "obtener_producto": _tool_obtener_producto,
+    "precios_ford": _tool_precios_ford,
+    "sugerido_por_producto": _tool_sugerido_por_producto,
+    "opciones_validas": _tool_opciones_validas,
     "obtener_sugerido": _tool_obtener_sugerido,
     "historico_ventas": _tool_historico_ventas,
     "buscar_productos": _tool_buscar_productos,
@@ -481,6 +577,51 @@ def _tool_declarations():
                             ),
                         },
                     ),
+                ),
+                types.FunctionDeclaration(
+                    name="precios_ford",
+                    description=(
+                        "Precios FORD de un producto en CLP: flota, dealer, publico, publico "
+                        "con IVA, reposicion, urgente VOR, promociones y urgente +15%. Usar para "
+                        "'cual es el precio flota/dealer de X' o 'a cuanto compro X'."
+                    ),
+                    parameters=types.Schema(
+                        type=types.Type.OBJECT,
+                        properties={
+                            "producto": types.Schema(
+                                type=types.Type.STRING,
+                                description="Codigo exacto del producto.",
+                            )
+                        },
+                        required=["producto"],
+                    ),
+                ),
+                types.FunctionDeclaration(
+                    name="sugerido_por_producto",
+                    description=(
+                        "Sugerido de un producto en TODAS sus sucursales (con el total y en "
+                        "cuantas hay que pedir). Usar para 'en que sucursales hay que pedir X y "
+                        "cuanto' o 'compara el sugerido de X entre sucursales'."
+                    ),
+                    parameters=types.Schema(
+                        type=types.Type.OBJECT,
+                        properties={
+                            "producto": types.Schema(
+                                type=types.Type.STRING,
+                                description="Codigo exacto del producto.",
+                            )
+                        },
+                        required=["producto"],
+                    ),
+                ),
+                types.FunctionDeclaration(
+                    name="opciones_validas",
+                    description=(
+                        "Listas validas de referencia: sucursales (con su ID), marcas y top "
+                        "proveedores. Usar para conocer los nombres/IDs exactos antes de otra "
+                        "consulta, o si preguntan 'que sucursales/marcas/proveedores hay'."
+                    ),
+                    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
                 ),
             ]
         )
