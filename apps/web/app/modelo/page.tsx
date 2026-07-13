@@ -5,8 +5,9 @@ import { Download, Info, Lightbulb, Truck } from "lucide-react";
 
 /* Documentación del modelo de sugerido, en lenguaje de negocio (audiencia:
    Abastecimiento, no técnica). Refleja la lógica REAL del modelo de Power BI
-   (tabla 'Sugerido por Sucursal' y sus medidas). Si el modelo cambia, actualizar
-   también acá Y el .docx de /public (modelo-sugerido-de-compras.docx). */
+   (tabla 'Sugerido por Sucursal' y sus medidas). Si el modelo cambia, actualizar los
+   TRES lugares: acá, el .docx de /public (modelo-sugerido-de-compras.docx) y el
+   contexto del chatbot (apps/api/src/services/modelo_negocio.md). */
 
 const DOC = "/modelo-sugerido-de-compras.docx";
 

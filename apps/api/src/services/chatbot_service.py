@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # modelo en el deploy. Mantiene al chatbot util aunque pierda el contexto largo.
 _RESUMEN_FALLBACK = """REGLAS DE NEGOCIO IMPORTANTES (del modelo Power BI):
 - Formula principal: Sugerido Suc = DD * (CO + LT) + SS - SA - ST
-  donde DD=Demanda Diaria, CO=Ciclo de Orden (5 dias habiles),
+  donde DD=Demanda Diaria, CO=Ciclo de Orden (5 dias directo / 3 via CD),
   LT=Lead Time efectivo, SS=Stock Seguridad, SA=Stock Activo, ST=Stock en Transito.
 - LT efectivo: si el producto se abastece via CD, usa 1-2 dias (CD->sucursal).
   Si no, usa el lead time real del proveedor.
@@ -46,20 +46,19 @@ _RESUMEN_FALLBACK = """REGLAS DE NEGOCIO IMPORTANTES (del modelo Power BI):
 - Las sugerencias manuales se SUMAN al sugerido del BI (no lo reemplazan)."""
 
 
-def _cargar_contexto_modelo() -> str:
-    """Carga el documento del modelo Power BI (DAX, medidas, reglas, vistas) que
-    vive en la raiz del repo. Es la MISMA fuente que documenta el equipo, asi el
-    chatbot razona sobre el modelo con el contexto completo. Si el deploy no
-    incluye el archivo, cae al resumen corto para no quedar sin reglas."""
+def _cargar_doc_negocio() -> str:
+    """Documentacion de NEGOCIO del modelo (el mismo contenido que el modulo /modelo
+    de la plataforma): las 8 etapas, reglas y parametros explicados en lenguaje simple.
+    Vive junto a este servicio (`modelo_negocio.md`) para que el deploy siempre lo
+    incluya. Es la referencia principal del chatbot para explicar como funciona el
+    sugerido; el contexto tecnico (DAX) queda como respaldo."""
     try:
-        ruta = Path(__file__).resolve().parents[4] / "CLAUDE contexto modelo.md"
+        ruta = Path(__file__).parent / "modelo_negocio.md"
         texto = ruta.read_text(encoding="utf-8").strip()
         if texto:
             return texto
     except Exception as e:
-        logger.warning(
-            "No se pudo cargar 'CLAUDE contexto modelo.md' (%s); uso resumen corto", e
-        )
+        logger.warning("No se pudo cargar 'modelo_negocio.md' (%s); uso resumen corto", e)
     return _RESUMEN_FALLBACK
 
 
@@ -93,8 +92,8 @@ COMO RESPONDER:
 
 SYSTEM_PROMPT = (
     _INSTRUCCIONES
-    + "\n=== CONTEXTO DEL MODELO POWER BI (referencia completa) ===\n"
-    + _cargar_contexto_modelo()
+    + "\n=== CÓMO FUNCIONA EL MODELO (referencia completa — el módulo /modelo de la plataforma) ===\n"
+    + _cargar_doc_negocio()
 )
 
 
