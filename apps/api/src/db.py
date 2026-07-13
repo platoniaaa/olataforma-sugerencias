@@ -96,6 +96,15 @@ def create_all() -> None:
         "ALTER TABLE usuario ADD COLUMN IF NOT EXISTS sucursales_permitidas TEXT",
         # 2026-07: usuario de solo lectura (no puede crear/editar sugerencias).
         "ALTER TABLE usuario ADD COLUMN IF NOT EXISTS solo_lectura BOOLEAN NOT NULL DEFAULT FALSE",
+        # 2026-07: precios FORD (cruce por codigo con la tabla Precios del BI).
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS precio_flota_ford INTEGER",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS precio_dealer_ford INTEGER",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS precio_publico_ford INTEGER",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS precio_publico_iva_ford INTEGER",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS precio_reposicion_ford INTEGER",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS precio_urgente_vor_ford INTEGER",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS precio_promociones_ford INTEGER",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS precio_urgente_recargo15_ford INTEGER",
     ]
     # SQLite NO soporta "ADD COLUMN IF NOT EXISTS" (error de sintaxis que se
     # tragaba el try, dejando bases locales viejas sin las columnas nuevas):

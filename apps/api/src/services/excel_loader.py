@@ -107,6 +107,15 @@ HEADER_ALIASES: dict[str, str] = {
     "stock_placilla": "stock_placilla",
     "stock_chillan_viejo": "stock_chillan_viejo",
     "stock_talca_2": "stock_talca_2",
+    # Precios FORD (columnas del BI que cruzan el codigo del sugerido con la tabla Precios).
+    "precio_flota_ford": "precio_flota_ford",
+    "precio_dealer_ford": "precio_dealer_ford",
+    "precio_publico_ford": "precio_publico_ford",
+    "precio_publico_iva_ford": "precio_publico_iva_ford",
+    "precio_reposicion_ford": "precio_reposicion_ford",
+    "precio_urgente_vor_ford": "precio_urgente_vor_ford",
+    "precio_promociones_ford": "precio_promociones_ford",
+    "precio_urgente_recargo15_ford": "precio_urgente_recargo15_ford",
     # Nombres tal como aparecen en el VISUAL de Power BI (medidas):
     "total_sugerido": "total_sugerido_suc",
     "stock_activo": "stock_activo_suc",
@@ -121,6 +130,9 @@ INT_FIELDS = {
     "stock_linderos", "stock_curico", "stock_talca", "stock_rancagua",
     "stock_diez_de_julio_2", "stock_chillan", "stock_cd_repuestos",
     "stock_brasil_18", "stock_placilla", "stock_chillan_viejo", "stock_talca_2",
+    "precio_flota_ford", "precio_dealer_ford", "precio_publico_ford",
+    "precio_publico_iva_ford", "precio_reposicion_ford", "precio_urgente_vor_ford",
+    "precio_promociones_ford", "precio_urgente_recargo15_ford",
 }
 FLOAT_FIELDS = {
     "demanda_mensual", "demanda_diaria", "desv_std_mensual", "costo_unitario",

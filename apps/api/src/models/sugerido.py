@@ -88,6 +88,19 @@ class Sugerido(Base):
     stock_chillan_viejo: Mapped[int | None] = mapped_column(Integer, nullable=True)
     stock_talca_2: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # --- Precios FORD (cruce por codigo contra la tabla Precios del BI) ---
+    # El modelo cruza el codigo del producto SIN el rubro contra el PartNumber de
+    # FORD sin los "/". Vienen en blanco (None) si el producto no esta en la lista
+    # de precios FORD. Enteros en CLP.
+    precio_flota_ford: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    precio_dealer_ford: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    precio_publico_ford: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    precio_publico_iva_ford: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    precio_reposicion_ford: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    precio_urgente_vor_ford: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    precio_promociones_ford: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    precio_urgente_recargo15_ford: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     __table_args__ = (
         Index("ix_sugerido_prod_suc", "producto", "sucursal_id"),
     )

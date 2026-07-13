@@ -66,6 +66,15 @@ class SugeridoRow(BaseModel):
     stock_placilla: int | None = None
     stock_chillan_viejo: int | None = None
     stock_talca_2: int | None = None
+    # Precios FORD (cruce por codigo con la tabla Precios; None si no esta en la lista).
+    precio_flota_ford: int | None = None
+    precio_dealer_ford: int | None = None
+    precio_publico_ford: int | None = None
+    precio_publico_iva_ford: int | None = None
+    precio_reposicion_ford: int | None = None
+    precio_urgente_vor_ford: int | None = None
+    precio_promociones_ford: int | None = None
+    precio_urgente_recargo15_ford: int | None = None
 
 
 class SugeridoPage(BaseModel):

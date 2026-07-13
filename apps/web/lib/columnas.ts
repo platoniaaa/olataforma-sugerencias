@@ -100,6 +100,23 @@ export const COLUMNAS: DefColumna[] = [
     info: "Stock del producto (y su grupo de reemplazos) en la bodega de Chillán Viejo." },
   { key: "stock_talca_2", label: "Stock Talca (2)", tipo: "numero", visiblePorDefecto: false,
     info: "Stock del producto (y su grupo de reemplazos) en la bodega de Talca (2)." },
+  // Precios FORD (cruce por codigo con la tabla Precios; en blanco si el codigo no esta en la lista de FORD).
+  { key: "precio_flota_ford", label: "Precio Flota FORD", tipo: "clp", visiblePorDefecto: false,
+    info: "Precio de flota de FORD para el repuesto (cruce por código). En blanco si el código no está en la lista de precios de FORD." },
+  { key: "precio_dealer_ford", label: "Precio Dealer FORD", tipo: "clp", visiblePorDefecto: false,
+    info: "Precio dealer (concesionario) de FORD para el repuesto. En blanco si el código no está en la lista de FORD." },
+  { key: "precio_publico_ford", label: "Precio Público FORD", tipo: "clp", visiblePorDefecto: false,
+    info: "Precio público de lista de FORD (neto). En blanco si el código no está en la lista de FORD." },
+  { key: "precio_publico_iva_ford", label: "Precio Público c/IVA FORD", tipo: "clp", visiblePorDefecto: false,
+    info: "Precio público de FORD con impuestos incluidos. En blanco si el código no está en la lista de FORD." },
+  { key: "precio_reposicion_ford", label: "Precio Reposición FORD", tipo: "clp", visiblePorDefecto: false,
+    info: "Precio de reposición de FORD para el repuesto. En blanco si el código no está en la lista de FORD." },
+  { key: "precio_urgente_vor_ford", label: "Precio Urgente VOR FORD", tipo: "clp", visiblePorDefecto: false,
+    info: "Precio de FORD en pedido urgente VOR (Vehicle Off Road). En blanco si el código no está en la lista de FORD." },
+  { key: "precio_promociones_ford", label: "Precio Promociones FORD", tipo: "clp", visiblePorDefecto: false,
+    info: "Precio de FORD en promoción para el repuesto. En blanco si el código no está en la lista de FORD." },
+  { key: "precio_urgente_recargo15_ford", label: "Precio Urgente +15% FORD", tipo: "clp", visiblePorDefecto: false,
+    info: "Precio de FORD en pedido urgente con recargo del 15%. En blanco si el código no está en la lista de FORD." },
 ];
 
 export const KEYS_POR_DEFECTO = COLUMNAS.filter((c) => c.visiblePorDefecto).map((c) => c.key as string);

@@ -54,6 +54,15 @@ export interface SugeridoRow {
   stock_placilla: number | null;
   stock_chillan_viejo: number | null;
   stock_talca_2: number | null;
+  // Precios FORD (cruce por codigo con la tabla Precios del BI; null si no esta en la lista).
+  precio_flota_ford: number | null;
+  precio_dealer_ford: number | null;
+  precio_publico_ford: number | null;
+  precio_publico_iva_ford: number | null;
+  precio_reposicion_ford: number | null;
+  precio_urgente_vor_ford: number | null;
+  precio_promociones_ford: number | null;
+  precio_urgente_recargo15_ford: number | null;
 }
 
 export interface SugeridoPage {

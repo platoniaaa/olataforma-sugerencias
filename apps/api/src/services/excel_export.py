@@ -65,6 +65,15 @@ LABELS: dict[str, str] = {
     "stock_placilla": "Stock Placilla",
     "stock_chillan_viejo": "Stock Chillan Viejo",
     "stock_talca_2": "Stock Talca (2)",
+    # Precios FORD (cruce por codigo con la tabla Precios del BI).
+    "precio_flota_ford": "Precio Flota FORD",
+    "precio_dealer_ford": "Precio Dealer FORD",
+    "precio_publico_ford": "Precio Publico FORD",
+    "precio_publico_iva_ford": "Precio Publico c/IVA FORD",
+    "precio_reposicion_ford": "Precio Reposicion FORD",
+    "precio_urgente_vor_ford": "Precio Urgente VOR FORD",
+    "precio_promociones_ford": "Precio Promociones FORD",
+    "precio_urgente_recargo15_ford": "Precio Urgente +15% FORD",
 }
 
 # Columnas por defecto si el cliente no especifica.
@@ -73,7 +82,12 @@ DEFAULT_COLUMNS = [
     "proveedor", "total_sugerido_suc", "total_valor_sugerido_clp",
 ]
 
-CLP_COLUMNS = {"total_valor_sugerido_clp", "costo_unitario"}
+CLP_COLUMNS = {
+    "total_valor_sugerido_clp", "costo_unitario",
+    "precio_flota_ford", "precio_dealer_ford", "precio_publico_ford",
+    "precio_publico_iva_ford", "precio_reposicion_ford", "precio_urgente_vor_ford",
+    "precio_promociones_ford", "precio_urgente_recargo15_ford",
+}
 HEADER_FILL = PatternFill("solid", fgColor="1E40AF")
 HEADER_FONT = Font(color="FFFFFF", bold=True)
 
