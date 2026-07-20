@@ -149,7 +149,9 @@ export function VistaDetalleProducto({
               <div className="mb-1 flex items-baseline justify-between">
                 <span className="text-[13px] text-slate-500">Stock Activo Suc</span>
                 <span className="tabular text-sm font-medium">
-                  {formatoNumero(d.stock_activo_suc)} / {formatoNumero(Math.ceil(stockOptimo))}
+                  {/* Math.round (no ceil): mismo redondeo que la barra "Stock Optimo" y que el
+                      sugerido del modelo, si no la misma cifra se ve distinta en dos lugares. */}
+                  {formatoNumero(d.stock_activo_suc)} / {formatoNumero(Math.round(stockOptimo))}
                 </span>
               </div>
               <div className="h-2 overflow-hidden rounded-full bg-slate-100">
