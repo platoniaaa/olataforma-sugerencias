@@ -8,6 +8,7 @@ import { Badge, colorABC } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ModalSugerenciaManual } from "@/components/modal-sugerencia-manual";
 import { ModalIncidencia } from "@/components/modal-incidencia";
+import { EtiquetaSugerencia } from "@/components/etiqueta-sugerencia";
 import { GraficoStock } from "@/components/grafico-stock";
 import { GraficoComposicion } from "@/components/grafico-composicion";
 import { GraficoVentas } from "@/components/grafico-ventas";
@@ -363,14 +364,20 @@ export function VistaDetalleProducto({
           ) : (
             <ul className="divide-y divide-slate-100">
               {manuales.map((m) => (
-                <li key={m.id} className="flex items-center justify-between gap-3 py-2">
-                  <div>
-                    <span className="tabular font-semibold text-slate-900">
-                      +{formatoNumero(m.unidades)}
-                    </span>{" "}
-                    <span className="text-[13px] text-slate-500">{m.motivo ?? "Sin motivo"}</span>
+                <li key={m.id} className="flex items-start justify-between gap-3 py-2">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="tabular font-semibold text-slate-900">
+                        +{formatoNumero(m.unidades)} u
+                      </span>
+                      <EtiquetaSugerencia m={m} />
+                    </div>
+                    <p className="mt-0.5 text-[13px] text-slate-500">
+                      {m.motivo ?? "Sin motivo"}
+                    </p>
                     <p className="text-[11px] text-slate-400">
-                      {m.creado_por} · {formatoFechaHora(m.creado_en)}
+                      {m.creado_por === "recurrente" ? "Generada automáticamente" : m.creado_por} ·{" "}
+                      {formatoFechaHora(m.creado_en)}
                       {m.aprobado && " · aprobada"}
                     </p>
                   </div>

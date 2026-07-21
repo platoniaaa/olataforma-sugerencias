@@ -48,6 +48,7 @@ def _recurrente_out(rec) -> RecurrenteOut:
     return RecurrenteOut(
         id=rec.id, modo=rec.modo, resumen=recurrentes_service.resumen(rec),
         unidades=rec.unidades, dias_inventario=rec.dias_inventario,
+        stock_objetivo=rec.stock_objetivo,
         motivo=rec.motivo, cada_dias=rec.cada_dias,
         proxima_ejecucion=rec.proxima_ejecucion, fecha_fin=rec.fecha_fin,
         activa=rec.activa, ultima_ejecucion=rec.ultima_ejecucion,
@@ -55,6 +56,45 @@ def _recurrente_out(rec) -> RecurrenteOut:
 
 router = APIRouter(prefix="/api/sugerencias-manuales", tags=["sugerencias manuales"])
 settings = get_settings()
+
+
+def _n(x: float) -> str:
+    """Numero corto: sin decimales cuando es entero (5 y no 5.0)."""
+    return f"{x:.0f}" if float(x).is_integer() else f"{x:.1f}"
+
+
+def _desglose(d: dict) -> str:
+    """Texto con las partes que cubren el nivel, omitiendo las que estan en cero.
+
+    Nombra las bodegas: decir "hay 3" sin decir donde deja al usuario sin forma de
+    comprobarlo (el producto puede ni siquiera aparecer en la grilla)."""
+    bodegas = d.get("bodegas") or []
+    detalle_bodegas = (
+        " (" + ", ".join(f"{b['bodega']}: {_n(b['stock'])}" for b in bodegas[:4]) + ")"
+        if bodegas
+        else ""
+    )
+    partes = [f"{_n(d['stock'])} en stock{detalle_bodegas}"]
+    if d["transito"]:
+        partes.append(f"{_n(d['transito'])} en transito")
+    if d["sugerido_sistema"]:
+        partes.append(f"{_n(d['sugerido_sistema'])} que ya sugiere el sistema")
+    return " + ".join(partes) + f" = {_n(d['cubierto'])} u"
+
+
+@router.get("/previsualizar-objetivo")
+def previsualizar_objetivo(
+    producto: str = Query(...),
+    sucursal_id: str = Query(...),
+    stock_objetivo: int = Query(..., gt=0),
+    db: Session = Depends(get_db),
+):
+    """Que pasaria si se pide mantener ese nivel, ANTES de guardar.
+
+    Devuelve el desglose para que la pantalla explique de donde sale el numero en
+    vez de mostrar un total que el usuario tiene que creer."""
+    d = sugerido_service.detalle_objetivo(db, producto, sucursal_id, stock_objetivo)
+    return {**d, "desglose": _desglose(d)}
 
 
 @router.get("", response_model=list[SugerenciaManualOut])
@@ -96,10 +136,29 @@ def crear(
                 status_code=400,
                 detail="Sin demanda diaria para este producto/sucursal. Usa modo 'unidades'.",
             )
+    elif payload.stock_objetivo:
+        # Funciona aunque el producto no este en el sugerido de esa sucursal: ahi
+        # el stock sale de las bodegas y se pide el nivel completo si no hay nada.
+        d = sugerido_service.detalle_objetivo(
+            db, payload.producto, payload.sucursal_id, payload.stock_objetivo
+        )
+        unidades = d["faltante"]
+        if unidades == 0:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"El nivel de {payload.stock_objetivo} u ya esta cubierto: "
+                    f"{_desglose(d)}. Hoy no hay nada que pedir. Marca "
+                    "'Repetir periodicamente' para dejarlo como regla y que se "
+                    "reponga solo cuando el stock baje."
+                ),
+            )
     elif payload.unidades:
         unidades = payload.unidades
     else:
-        raise HTTPException(status_code=400, detail="Falta unidades o dias_inventario.")
+        raise HTTPException(
+            status_code=400, detail="Falta unidades, dias_inventario o stock_objetivo."
+        )
     s = SugerenciaManual(
         producto=payload.producto,
         sucursal_id=payload.sucursal_id,
@@ -108,6 +167,8 @@ def crear(
         creado_por=email,
         tenant_id=settings.default_tenant_id,
         expira_en=_expira_en(payload.expira_en),
+        dias_inventario=payload.dias_inventario,
+        stock_objetivo=payload.stock_objetivo,
     )
     db.add(s)
     db.flush()
@@ -115,6 +176,9 @@ def crear(
         db, accion="creada", entidad="sugerencia_manual", entidad_id=s.id,
         usuario_email=email, producto=s.producto, sucursal_id=s.sucursal_id,
         unidades=unidades, dias_inventario=payload.dias_inventario, motivo=payload.motivo,
+        detalle=(
+            f"Mantener {payload.stock_objetivo} u en stock" if payload.stock_objetivo else None
+        ),
     )
     auditoria_service.notificar(
         db, tipo="sugerencia_creada",
@@ -149,8 +213,12 @@ def crear_masiva(
     nuevas: list[SugerenciaManual] = []
     lote_id = str(_uuid_mod.uuid4())
     expira_en = _expira_en(payload.expira_en)
-    if payload.dias_inventario:
-        mapa = sugerido_service.unidades_por_par(db, pares, payload.dias_inventario)
+    if payload.dias_inventario or payload.stock_objetivo:
+        if payload.stock_objetivo:
+            # Omitidos aca = productos que YA estan en el nivel pedido (no falta nada).
+            mapa = sugerido_service.unidades_objetivo_por_par(db, pares, payload.stock_objetivo)
+        else:
+            mapa = sugerido_service.unidades_por_par(db, pares, payload.dias_inventario)
         for par in pares:
             u = mapa.get(par)
             if u is None:
@@ -162,6 +230,8 @@ def crear_masiva(
                     motivo=payload.motivo, creado_por=email,
                     tenant_id=settings.default_tenant_id,
                     lote_id=lote_id, expira_en=expira_en,
+                    dias_inventario=payload.dias_inventario,
+                    stock_objetivo=payload.stock_objetivo,
                 )
             )
     elif payload.unidades:
@@ -175,26 +245,31 @@ def crear_masiva(
             for p, s in pares
         ]
     else:
-        raise HTTPException(status_code=400, detail="Falta unidades o dias_inventario.")
+        raise HTTPException(
+            status_code=400, detail="Falta unidades, dias_inventario o stock_objetivo."
+        )
     db.add_all(nuevas)
     db.flush()
+    # Ya trae el signo: el modo objetivo no "suma N", mantiene un nivel.
     cantidad_str = (
-        f"{payload.dias_inventario} dias" if payload.dias_inventario
-        else f"{payload.unidades} u"
+        f"+{payload.dias_inventario} dias" if payload.dias_inventario
+        else f"mantener {payload.stock_objetivo} u en stock" if payload.stock_objetivo
+        else f"+{payload.unidades} u"
     )
     auditoria_service.registrar(
         db, accion="masiva_creada", entidad="sugerencia_manual",
         entidad_id=lote_id,
         usuario_email=email, unidades=payload.unidades,
         dias_inventario=payload.dias_inventario, motivo=payload.motivo,
-        detalle=f"Masiva: {len(nuevas)} pares, {omitidas} omitidos, +{cantidad_str} (lote {lote_id[:8]})",
+        detalle=f"Masiva: {len(nuevas)} pares, {omitidas} omitidos, {cantidad_str} (lote {lote_id[:8]})",
     )
+    razon_omitidas = "ya estaban en nivel" if payload.stock_objetivo else "sin demanda"
     auditoria_service.notificar(
         db, tipo="masiva_creada",
         titulo=f"{email.split('@')[0]} cargo {len(nuevas)} sugerencias",
-        mensaje=f"+{cantidad_str} por producto"
+        mensaje=f"{cantidad_str} por producto"
         + (f". Motivo: {payload.motivo}" if payload.motivo else "")
-        + (f". {omitidas} omitidos sin demanda." if omitidas else ""),
+        + (f". {omitidas} omitidos ({razon_omitidas})." if omitidas else ""),
         creado_por_email=email,
     )
     db.commit()
@@ -214,8 +289,10 @@ def crear_recurrente(
     """Crea una regla recurrente y la aplica de inmediato (primera instancia)."""
     if payload.modo == "individual" and not (payload.producto and payload.sucursal_id):
         raise HTTPException(status_code=400, detail="Falta producto o sucursal.")
-    if not payload.unidades and not payload.dias_inventario:
-        raise HTTPException(status_code=400, detail="Falta unidades o dias_inventario.")
+    if not payload.unidades and not payload.dias_inventario and not payload.stock_objetivo:
+        raise HTTPException(
+            status_code=400, detail="Falta unidades, dias_inventario o stock_objetivo."
+        )
     rec = recurrentes_service.crear(db, payload, usuario_email=email)
     return _recurrente_out(rec)
 

@@ -9,10 +9,12 @@ import { MultiSelect } from "@/components/ui/multiselect";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api-client";
 import { formatoNumero } from "@/lib/formato";
-import type { Producto, Sucursal, SugeridoFiltros } from "@/lib/types";
+import type { PreviewObjetivo, Producto, Sucursal, SugeridoFiltros } from "@/lib/types";
 
 type Modo = "individual" | "grupo" | "todos";
-type TipoCantidad = "dias" | "unidades";
+// "objetivo" no suma sobre el sugerido como los otros dos: fija un nivel de stock
+// a mantener y pide solo la brecha que falta para llegar a el.
+type TipoCantidad = "dias" | "unidades" | "objetivo";
 
 interface Props {
   open: boolean;
@@ -67,6 +69,9 @@ export function ModalSugerenciaManual({
   const [soloPedir, setSoloPedir] = useState(true);
   const [conteo, setConteo] = useState<number | null>(null);
   const [contando, setContando] = useState(false);
+
+  // Vista previa del modo "mantener stock" (solo individual: necesita el par exacto).
+  const [preview, setPreview] = useState<PreviewObjetivo | null>(null);
 
   // Recurrencia
   const [recurrente, setRecurrente] = useState(false);
@@ -125,6 +130,24 @@ export function ModalSugerenciaManual({
     return () => clearTimeout(t);
   }, [producto, productoInicial, modo]);
 
+  // Vista previa: explica de dónde sale el número antes de guardar. Se recalcula
+  // al cambiar producto, sucursal o nivel.
+  useEffect(() => {
+    const nivel = parseInt(cantidad, 10);
+    if (tipoCantidad !== "objetivo" || modo !== "individual" || !producto || !sucursal || !nivel) {
+      setPreview(null);
+      return;
+    }
+    const t = setTimeout(async () => {
+      try {
+        setPreview(await api.previsualizarObjetivo(producto, sucursal, nivel));
+      } catch {
+        setPreview(null);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [tipoCantidad, modo, producto, sucursal, cantidad]);
+
   // Filtros equivalentes al modo grupo/todos.
   const filtrosModo: SugeridoFiltros = useMemo(() => {
     if (modo === "todos") return { solo_pedir: soloPedir };
@@ -161,12 +184,18 @@ export function ModalSugerenciaManual({
       setError(
         tipoCantidad === "dias"
           ? "Ingresa los días de inventario (entero positivo)."
-          : "Ingresa una cantidad de unidades (entero positivo)."
+          : tipoCantidad === "objetivo"
+            ? "Ingresa el nivel de stock a mantener (entero positivo)."
+            : "Ingresa una cantidad de unidades (entero positivo)."
       );
       return;
     }
     const cantidadPayload =
-      tipoCantidad === "dias" ? { dias_inventario: n } : { unidades: n };
+      tipoCantidad === "dias"
+        ? { dias_inventario: n }
+        : tipoCantidad === "objetivo"
+          ? { stock_objetivo: n }
+          : { unidades: n };
     // Fecha límite de vigencia. Solo aplica a sugerencias no recurrentes: las
     // recurrencias controlan su fin con "Hasta (fecha)".
     const expiraEn = !recurrente && fechaLimite ? fechaLimite : undefined;
@@ -226,7 +255,9 @@ export function ModalSugerenciaManual({
           // Avisa pero igual cerramos: las creadas ya se aplicaron.
           alert(
             `Se aplicaron ${r.creadas} sugerencias. ` +
-              `${r.omitidas} producto/sucursal sin demanda diaria se omitieron.`
+              (tipoCantidad === "objetivo"
+                ? `${r.omitidas} producto/sucursal ya estaban en el nivel pedido.`
+                : `${r.omitidas} producto/sucursal sin demanda diaria se omitieron.`)
           );
         }
       }
@@ -261,7 +292,11 @@ export function ModalSugerenciaManual({
       open={open}
       onClose={onClose}
       title="Agregar sugerencia manual"
-      description="Suma unidades por sobre lo que sugiere el sistema."
+      description={
+        tipoCantidad === "objetivo"
+          ? "Mantiene un nivel de stock: pide solo lo que falta para llegar a él."
+          : "Suma unidades por sobre lo que sugiere el sistema."
+      }
     >
       <div className="space-y-4">
         {/* Selector de modo */}
@@ -418,41 +453,48 @@ export function ModalSugerenciaManual({
 
         {/* Cantidad (dias o unidades) + motivo (comunes) */}
         <div>
-          <div className="mb-1.5 flex items-center justify-between">
+          <div className="mb-1.5 flex items-center justify-between gap-2">
             <Label htmlFor="uni" className="!mb-0">
               {tipoCantidad === "dias"
                 ? modo === "individual"
                   ? "Días de inventario adicional"
                   : "Días de inventario adicional para cada producto"
-                : modo === "individual"
-                  ? "Unidades adicionales"
-                  : "Unidades para cada producto"}
+                : tipoCantidad === "objetivo"
+                  ? modo === "individual"
+                    ? "Stock a mantener (unidades)"
+                    : "Stock a mantener en cada producto"
+                  : modo === "individual"
+                    ? "Unidades adicionales"
+                    : "Unidades para cada producto"}
             </Label>
-            <div className="inline-flex rounded-md border border-slate-200 bg-white p-0.5 text-[11px] font-medium">
-              <button
-                type="button"
-                onClick={() => setTipoCantidad("dias")}
-                className={cn(
-                  "rounded px-2 py-0.5 transition-colors",
-                  tipoCantidad === "dias"
-                    ? "bg-brand text-white"
-                    : "text-slate-500 hover:text-slate-800"
-                )}
-              >
-                Días
-              </button>
-              <button
-                type="button"
-                onClick={() => setTipoCantidad("unidades")}
-                className={cn(
-                  "rounded px-2 py-0.5 transition-colors",
-                  tipoCantidad === "unidades"
-                    ? "bg-brand text-white"
-                    : "text-slate-500 hover:text-slate-800"
-                )}
-              >
-                Unidades
-              </button>
+            <div className="inline-flex shrink-0 rounded-md border border-slate-200 bg-white p-0.5 text-[11px] font-medium">
+              {(
+                [
+                  { id: "dias", label: "Días" },
+                  { id: "unidades", label: "Unidades" },
+                  { id: "objetivo", label: "Mantener stock" },
+                ] as const
+              ).map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => {
+                    setTipoCantidad(t.id);
+                    // "Mantener stock" es una regla, no una compra puntual: sin
+                    // repeticion el nivel se cubre una vez y nunca mas. Se puede
+                    // desmarcar si solo se quiere el relleno de hoy.
+                    if (t.id === "objetivo") setRecurrente(true);
+                  }}
+                  className={cn(
+                    "rounded px-2 py-0.5 transition-colors",
+                    tipoCantidad === t.id
+                      ? "bg-brand text-white"
+                      : "text-slate-500 hover:text-slate-800"
+                  )}
+                >
+                  {t.label}
+                </button>
+              ))}
             </div>
           </div>
           <Input
@@ -468,6 +510,80 @@ export function ModalSugerenciaManual({
               Se convierte a unidades por cada producto/sucursal segun su demanda
               diaria (redondeo hacia arriba). Los productos sin demanda registrada se omiten.
             </p>
+          )}
+          {tipoCantidad === "objetivo" && (
+            <p className="mt-1 text-[11px] text-slate-500">
+              Nivel que quieres tener en bodega. Se pide <b>solo lo que falta</b> para llegar
+              a ese nivel: descuenta el stock actual, lo que viene en tránsito y lo que el
+              sistema ya está sugiriendo. Lo que ya está en nivel se omite. Sirve también
+              para productos que el sistema no sugiere: ahí se mira el stock de bodega.
+              {!recurrente && (
+                <>
+                  {" "}
+                  Marca <b>Repetir periódicamente</b> para que el nivel se mantenga solo.
+                </>
+              )}
+            </p>
+          )}
+
+          {/* De dónde sale el número, antes de guardar. */}
+          {preview && (
+            <div
+              className={cn(
+                "mt-2 rounded-md px-3 py-2 text-[12px]",
+                preview.faltante > 0
+                  ? "bg-brand-50 text-brand"
+                  : "bg-amber-50 text-amber-800"
+              )}
+            >
+              <p className="font-medium">
+                {preview.faltante > 0 ? (
+                  <>Se pedirán {formatoNumero(preview.faltante)} unidades.</>
+                ) : recurrente ? (
+                  <>
+                    El nivel ya está cubierto hoy: no se pide nada ahora, y la regla
+                    repone sola cuando baje.
+                  </>
+                ) : (
+                  <>
+                    El nivel ya está cubierto hoy. Marca <b>Repetir periódicamente</b> para
+                    dejarlo como regla y que se reponga cuando baje.
+                  </>
+                )}
+              </p>
+              <ul className="mt-1 space-y-0.5 text-[11.5px] opacity-90">
+                <li>
+                  Stock hoy en la sucursal: <b>{formatoNumero(preview.stock)}</b>
+                  {preview.bodegas.length > 0 && (
+                    <span className="opacity-80">
+                      {" — "}
+                      {preview.bodegas
+                        .map((b) => `${b.bodega}: ${formatoNumero(b.stock)}`)
+                        .join(", ")}
+                    </span>
+                  )}
+                </li>
+                {preview.transito > 0 && (
+                  <li>
+                    En tránsito: <b>{formatoNumero(preview.transito)}</b>
+                  </li>
+                )}
+                {preview.sugerido_sistema > 0 && (
+                  <li>
+                    Ya sugerido por el sistema: <b>{formatoNumero(preview.sugerido_sistema)}</b>
+                  </li>
+                )}
+                <li className="border-t border-current/15 pt-0.5">
+                  Cubierto: <b>{formatoNumero(preview.cubierto)}</b> de{" "}
+                  {formatoNumero(preview.objetivo)}
+                </li>
+              </ul>
+              {!preview.en_sugerido && (
+                <p className="mt-1 text-[11px] opacity-80">
+                  El sistema no sugiere este producto en esta sucursal.
+                </p>
+              )}
+            </div>
           )}
         </div>
 
@@ -535,9 +651,20 @@ export function ModalSugerenciaManual({
                 />
               </div>
               <p className="col-span-2 text-[12px] text-slate-500">
-                Se aplica ahora y se vuelve a aplicar cada {parseInt(cadaDias, 10) || "—"} días
-                {fechaFin ? ` hasta el ${fechaFin}` : " hasta que la elimines"}. Cada repetición
-                reemplaza la anterior (no se acumulan).
+                {tipoCantidad === "objetivo" ? (
+                  <>
+                    Cada {parseInt(cadaDias, 10) || "—"} días se revisa el stock y se repone
+                    <b> solo lo que falte</b> para volver a {cantidad || "—"} unidades
+                    {fechaFin ? `, hasta el ${fechaFin}` : ", hasta que elimines la regla"}. Si
+                    el nivel ya está cubierto, esa vez no pide nada.
+                  </>
+                ) : (
+                  <>
+                    Se aplica ahora y se vuelve a aplicar cada {parseInt(cadaDias, 10) || "—"} días
+                    {fechaFin ? ` hasta el ${fechaFin}` : " hasta que la elimines"}. Cada repetición
+                    reemplaza la anterior (no se acumulan).
+                  </>
+                )}
               </p>
             </div>
           )}
