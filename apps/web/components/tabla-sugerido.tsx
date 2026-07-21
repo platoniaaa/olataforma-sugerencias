@@ -163,6 +163,8 @@ function formateador(def: DefColumna) {
         return formatoNumero(v as number, 0);
       case "decimal":
         return formatoNumero(v as number, 2);
+      case "porcentaje":
+        return `${formatoNumero(v as number, 1)}%`;
       default:
         return String(v);
     }

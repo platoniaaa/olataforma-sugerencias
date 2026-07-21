@@ -63,6 +63,12 @@ export interface SugeridoRow {
   precio_urgente_vor_ford: number | null;
   precio_promociones_ford: number | null;
   precio_urgente_recargo15_ford: number | null;
+  // Margen calculado en el backend (services/margen.py).
+  margen_unitario_clp: number | null;
+  margen_pct: number | null;
+  margen_flota_pct: number | null;
+  margen_sugerido_clp: number | null;
+  sobrecosto_vs_dealer_pct: number | null;
 }
 
 export interface SugeridoPage {

@@ -194,6 +194,63 @@ export function VistaDetalleProducto({
         </Card>
       </div>
 
+      {/* Margen: solo para los productos que estan en la lista de precios FORD. */}
+      {d.margen_pct != null && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Margen FORD</CardTitle>
+          </CardHeader>
+          <CardContent className="py-2">
+            <div className="flex flex-wrap items-baseline gap-x-8 gap-y-2">
+              <div>
+                <p className="text-[12px] text-slate-500">Margen sobre precio público</p>
+                <p
+                  className={`text-2xl font-semibold tabular ${
+                    d.margen_pct >= 0 ? "text-emerald-700" : "text-red-700"
+                  }`}
+                >
+                  {formatoNumero(d.margen_pct, 1)}%
+                </p>
+              </div>
+              <div>
+                <p className="text-[12px] text-slate-500">Por unidad</p>
+                <p className="text-lg font-medium tabular">
+                  {formatoCLP(d.margen_unitario_clp)}
+                </p>
+              </div>
+              {d.margen_sugerido_clp != null && (
+                <div>
+                  <p className="text-[12px] text-slate-500">Margen del sugerido</p>
+                  <p className="text-lg font-medium tabular">
+                    {formatoCLP(d.margen_sugerido_clp)}
+                  </p>
+                </div>
+              )}
+            </div>
+            <div className="mt-3 border-t border-slate-100 pt-2">
+              <Dato label="Precio Público FORD" valor={formatoCLP(d.precio_publico_ford)} />
+              <Dato label="Precio Flota FORD" valor={formatoCLP(d.precio_flota_ford)} />
+              {d.margen_flota_pct != null && (
+                <Dato
+                  label="Margen a precio flota"
+                  valor={`${formatoNumero(d.margen_flota_pct, 1)}%`}
+                />
+              )}
+              {d.sobrecosto_vs_dealer_pct != null && (
+                <Dato
+                  label="Costo vs precio dealer"
+                  valor={`${d.sobrecosto_vs_dealer_pct > 0 ? "+" : ""}${formatoNumero(
+                    d.sobrecosto_vs_dealer_pct,
+                    1
+                  )}%`}
+                  tooltip="Cuánto está el costo unitario por encima (o debajo) del precio dealer de FORD."
+                />
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Banner sugerido */}
       <Card className="border-brand/20 bg-gradient-to-br from-brand-50 to-white">
         <CardContent className="flex flex-wrap items-center justify-between gap-4">

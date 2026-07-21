@@ -74,6 +74,12 @@ LABELS: dict[str, str] = {
     "precio_urgente_vor_ford": "Precio Urgente VOR FORD",
     "precio_promociones_ford": "Precio Promociones FORD",
     "precio_urgente_recargo15_ford": "Precio Urgente +15% FORD",
+    # Margen calculado contra el costo unitario (services/margen.py).
+    "margen_unitario_clp": "Margen Unitario CLP",
+    "margen_pct": "Margen %",
+    "margen_flota_pct": "Margen Flota %",
+    "margen_sugerido_clp": "Margen del Sugerido CLP",
+    "sobrecosto_vs_dealer_pct": "Sobrecosto vs Dealer %",
 }
 
 # Columnas por defecto si el cliente no especifica.
@@ -87,6 +93,7 @@ CLP_COLUMNS = {
     "precio_flota_ford", "precio_dealer_ford", "precio_publico_ford",
     "precio_publico_iva_ford", "precio_reposicion_ford", "precio_urgente_vor_ford",
     "precio_promociones_ford", "precio_urgente_recargo15_ford",
+    "margen_unitario_clp", "margen_sugerido_clp",
 }
 HEADER_FILL = PatternFill("solid", fgColor="1E40AF")
 HEADER_FONT = Font(color="FFFFFF", bold=True)

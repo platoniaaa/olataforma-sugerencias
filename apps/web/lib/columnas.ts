@@ -1,7 +1,7 @@
 // Definicion central de las columnas del sugerido: etiqueta, tipo y si se ven por defecto.
 import type { SugeridoRow } from "./types";
 
-export type TipoColumna = "texto" | "numero" | "decimal" | "clp" | "abc";
+export type TipoColumna = "texto" | "numero" | "decimal" | "clp" | "abc" | "porcentaje";
 
 export interface DefColumna {
   key: keyof SugeridoRow;
@@ -117,6 +117,17 @@ export const COLUMNAS: DefColumna[] = [
     info: "Precio de FORD en promoción para el repuesto. En blanco si el código no está en la lista de FORD." },
   { key: "precio_urgente_recargo15_ford", label: "Precio Urgente +15% FORD", tipo: "clp", visiblePorDefecto: false,
     info: "Precio de FORD en pedido urgente con recargo del 15%. En blanco si el código no está en la lista de FORD." },
+  // Margen: precio de lista FORD contra el costo unitario. En blanco si falta alguno de los dos.
+  { key: "margen_pct", label: "Margen %", tipo: "porcentaje", visiblePorDefecto: false,
+    info: "Margen sobre el precio público de FORD: (precio público − costo unitario) / precio público. En blanco si el producto no tiene precio FORD o no tiene costo." },
+  { key: "margen_unitario_clp", label: "Margen Unitario CLP", tipo: "clp", visiblePorDefecto: false,
+    info: "Pesos que deja cada unidad vendida al precio público de FORD: precio público − costo unitario." },
+  { key: "margen_sugerido_clp", label: "Margen del Sugerido CLP", tipo: "clp", visiblePorDefecto: false,
+    info: "Margen potencial de lo que el modelo sugiere comprar: margen unitario × total sugerido. Sirve para priorizar la compra." },
+  { key: "margen_flota_pct", label: "Margen Flota %", tipo: "porcentaje", visiblePorDefecto: false,
+    info: "Margen si la venta se hace al precio de flota (más bajo que el público)." },
+  { key: "sobrecosto_vs_dealer_pct", label: "Sobrecosto vs Dealer %", tipo: "porcentaje", visiblePorDefecto: false,
+    info: "Cuánto está el costo unitario por encima del precio dealer de FORD. Positivo = se está comprando más caro que la lista dealer; conviene revisar." },
 ];
 
 export const KEYS_POR_DEFECTO = COLUMNAS.filter((c) => c.visiblePorDefecto).map((c) => c.key as string);
