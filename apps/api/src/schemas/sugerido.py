@@ -81,6 +81,8 @@ class SugeridoRow(BaseModel):
     margen_flota_pct: float | None = None
     margen_sugerido_clp: float | None = None
     sobrecosto_vs_dealer_pct: float | None = None
+    # Unidades ya pedidas de esta linea (services/pedidos_service.py).
+    unidades_pedidas: float | None = None
 
 
 class SugeridoPage(BaseModel):

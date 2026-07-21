@@ -443,6 +443,56 @@ export const api = {
     return res.json();
   },
 
+  /** Simulador what-if: recalcula el sugerido con otros parametros. No guarda nada. */
+  async simular(payload: {
+    sucursales?: string[];
+    marcas?: string[];
+    ciclo_orden_dias?: number;
+    ciclo_orden_dias_cd?: number;
+    z_por_clase?: Record<string, number>;
+    factor_lead_time?: number;
+  }): Promise<import("./types").SimulacionResultado> {
+    const res = await req("/api/inventario/simular", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo simular"));
+    return res.json();
+  },
+
+  /** Marcar una linea del sugerido como ya pedida (cierra el loop con la OC). */
+  async marcarPedido(payload: {
+    producto: string;
+    sucursal_id: string;
+    unidades: number;
+    n_oc?: string | null;
+    proveedor?: string | null;
+  }): Promise<{ id: string }> {
+    const res = await req("/api/compras/pedidos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo registrar el pedido"));
+    return res.json();
+  },
+
+  async pedidos(
+    producto?: string,
+    sucursalId?: string
+  ): Promise<{ items: import("./types").LineaPedida[] }> {
+    const p = new URLSearchParams();
+    if (producto) p.set("producto", producto);
+    if (sucursalId) p.set("sucursal_id", sucursalId);
+    return getJSON(`/api/compras/pedidos?${p.toString()}`);
+  },
+
+  async eliminarPedido(id: string): Promise<void> {
+    const res = await req(`/api/compras/pedidos/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!res.ok && res.status !== 204) throw new Error("No se pudo eliminar el pedido");
+  },
+
   /** Comparaciones del motor propio contra el Power BI (modo sombra). */
   async comparacionesMotor(
     limit = 10

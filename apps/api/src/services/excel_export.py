@@ -80,6 +80,7 @@ LABELS: dict[str, str] = {
     "margen_flota_pct": "Margen Flota %",
     "margen_sugerido_clp": "Margen del Sugerido CLP",
     "sobrecosto_vs_dealer_pct": "Sobrecosto vs Dealer %",
+    "unidades_pedidas": "Ya Pedido (unidades)",
 }
 
 # Columnas por defecto si el cliente no especifica.

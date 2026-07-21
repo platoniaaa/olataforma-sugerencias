@@ -12,6 +12,7 @@ import { GraficoStock } from "@/components/grafico-stock";
 import { GraficoComposicion } from "@/components/grafico-composicion";
 import { GraficoVentas } from "@/components/grafico-ventas";
 import { GraficoHistoria } from "@/components/grafico-historia";
+import { BloquePedidos } from "@/components/bloque-pedidos";
 import { api } from "@/lib/api-client";
 import { getSoloLectura } from "@/lib/auth";
 import { formatoCLP, formatoFechaHora, formatoNumero } from "@/lib/formato";
@@ -286,6 +287,14 @@ export function VistaDetalleProducto({
           />
         </CardContent>
       </Card>
+
+      {/* Cierre del loop: qué de esta línea ya se pidió de verdad. */}
+      <BloquePedidos
+        producto={d.producto}
+        sucursalId={d.sucursal_id}
+        sugerido={(d.total_sugerido_suc ?? 0) + manualTotal}
+        proveedor={d.proveedor}
+      />
 
       {/* Compra centralizada: a qué sucursales abastece este pedido del CD */}
       {sucursalesOrigen.length > 0 && (

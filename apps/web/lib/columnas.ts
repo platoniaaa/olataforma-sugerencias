@@ -128,6 +128,8 @@ export const COLUMNAS: DefColumna[] = [
     info: "Margen si la venta se hace al precio de flota (más bajo que el público)." },
   { key: "sobrecosto_vs_dealer_pct", label: "Sobrecosto vs Dealer %", tipo: "porcentaje", visiblePorDefecto: false,
     info: "Cuánto está el costo unitario por encima del precio dealer de FORD. Positivo = se está comprando más caro que la lista dealer; conviene revisar." },
+  { key: "unidades_pedidas", label: "Ya Pedido", tipo: "numero", visiblePorDefecto: false,
+    info: "Unidades de esta línea que alguien ya marcó como pedidas (últimos 45 días, sin recibir todavía). Es informativo: no descuenta del sugerido." },
 ];
 
 export const KEYS_POR_DEFECTO = COLUMNAS.filter((c) => c.visiblePorDefecto).map((c) => c.key as string);

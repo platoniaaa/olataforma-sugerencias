@@ -69,6 +69,8 @@ export interface SugeridoRow {
   margen_flota_pct: number | null;
   margen_sugerido_clp: number | null;
   sobrecosto_vs_dealer_pct: number | null;
+  /** Unidades ya marcadas como pedidas (services/pedidos_service.py). */
+  unidades_pedidas: number | null;
 }
 
 export interface SugeridoPage {
@@ -517,4 +519,60 @@ export interface ComparacionMotor {
     ejemplos_solo_motor: string[];
     ejemplos_solo_bi: string[];
   } | null;
+}
+
+/** Linea del sugerido que ya se pidio (cierre del loop con la OC). */
+export interface LineaPedida {
+  id: string;
+  producto: string;
+  sucursal_id: string;
+  unidades: number;
+  n_oc: string | null;
+  proveedor: string | null;
+  recibido: boolean;
+  fecha_recepcion: string | null;
+  creado_por: string | null;
+  creado_en: string;
+}
+
+/** Resultado del simulador what-if. */
+export interface SimulacionSucursal {
+  sucursal_id: string;
+  nombre_sucursal: string;
+  actual_u: number;
+  simulado_u: number;
+  actual_clp: number;
+  simulado_clp: number;
+  delta_u: number;
+  delta_clp: number;
+}
+
+export interface SimulacionCambio {
+  producto: string;
+  sucursal_id: string;
+  actual: number;
+  simulado: number;
+  delta: number;
+  delta_clp: number;
+}
+
+export interface SimulacionResultado {
+  parametros: {
+    ciclo_orden_dias: number;
+    ciclo_orden_dias_cd: number;
+    z_por_clase: Record<string, number>;
+    factor_lead_time: number;
+  };
+  resumen: {
+    actual_unidades: number;
+    simulado_unidades: number;
+    delta_unidades: number;
+    actual_clp: number;
+    simulado_clp: number;
+    delta_clp: number;
+    lineas_que_cambian: number;
+    n_filas: number;
+  };
+  por_sucursal: SimulacionSucursal[];
+  mayores_cambios: SimulacionCambio[];
 }
