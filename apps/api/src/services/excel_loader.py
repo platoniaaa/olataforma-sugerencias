@@ -398,4 +398,11 @@ def cargar_sugerido(db: Session, filename: str, content: bytes) -> dict:
 
     registros = [dict(zip(headers, raw)) for raw in data]
     filas, detectadas, ignoradas = procesar_registros(registros)
-    return persistir_filas(db, filas, detectadas, ignoradas)
+    resumen = persistir_filas(db, filas, detectadas, ignoradas)
+
+    # Historia + alertas. Va DESPUES del commit de la carga y no propaga errores:
+    # un problema guardando la foto del dia no puede dejar la plataforma sin datos.
+    from . import snapshot_service
+
+    resumen["post_carga"] = snapshot_service.post_carga(db)
+    return resumen

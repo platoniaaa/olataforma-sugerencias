@@ -48,6 +48,16 @@ class Settings(BaseSettings):
     # y a que hora). Los admin siempre pueden. Separados por coma.
     emails_ver_accesos: str = "mramos@curifor.com"
 
+    # --- Historia del sugerido y alertas (post-sincronizacion) ---
+    # Guarda una foto diaria del sugerido (solo filas con actividad) para ver la
+    # evolucion y, mas adelante, medir la precision del modelo.
+    snapshot_habilitado: bool = True
+    # Retencion de esa historia. 60 dias es el equilibrio entre tener contexto y no
+    # llenar la base (son ~8k filas por dia).
+    snapshot_retencion_dias: int = 60
+    # Notificacion por sucursal con quiebres y productos bajo el punto de pedido.
+    alertas_habilitadas: bool = True
+
     # --- Power BI (ingesta automatica via API executeQueries) ---
     # Credenciales de un "service principal" (app registrada en Entra ID) con acceso
     # al workspace. Si quedan vacias, la sincronizacion con Power BI esta desactivada.

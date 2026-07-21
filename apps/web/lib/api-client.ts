@@ -443,6 +443,17 @@ export const api = {
     return res.json();
   },
 
+  /** Evolucion diaria del producto (snapshots guardados tras cada sync). */
+  async historiaProducto(
+    producto: string,
+    sucursalId: string,
+    dias = 90
+  ): Promise<{ items: { fecha: string; sugerido: number; stock: number; punto_pedido: number }[] }> {
+    return getJSON(
+      `/api/sugerido/${encodeURIComponent(producto)}/${encodeURIComponent(sucursalId)}/historia?dias=${dias}`
+    );
+  },
+
   /** Mesa de incidencias: reportes de errores de la plataforma. */
   async incidencias(estado?: string): Promise<import("./types").IncidenciasResponse> {
     const q = estado ? `?estado=${encodeURIComponent(estado)}` : "";

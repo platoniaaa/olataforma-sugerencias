@@ -11,6 +11,7 @@ import { ModalIncidencia } from "@/components/modal-incidencia";
 import { GraficoStock } from "@/components/grafico-stock";
 import { GraficoComposicion } from "@/components/grafico-composicion";
 import { GraficoVentas } from "@/components/grafico-ventas";
+import { GraficoHistoria } from "@/components/grafico-historia";
 import { api } from "@/lib/api-client";
 import { getSoloLectura } from "@/lib/auth";
 import { formatoCLP, formatoFechaHora, formatoNumero } from "@/lib/formato";
@@ -314,6 +315,9 @@ export function VistaDetalleProducto({
         sucursalId={d.sucursal_id}
         sucursalNombre={d.nombre_sucursal}
       />
+
+      {/* Evolución diaria: la tarjeta aparece sola cuando hay al menos dos snapshots. */}
+      <GraficoHistoria producto={d.producto} sucursalId={d.sucursal_id} />
 
       {reemplazos.length > 0 && (
         <Card>

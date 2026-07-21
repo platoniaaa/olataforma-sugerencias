@@ -17,7 +17,7 @@ from ..schemas import (
     SugeridoRow,
     VentasResponse,
 )
-from ..services import excel_export, margen, sugerido_service
+from ..services import excel_export, margen, snapshot_service, sugerido_service
 from ..services.auth import sucursales_permitidas
 from ..services.sugerido_service import SUCURSALES_OCULTAS
 
@@ -118,6 +118,19 @@ def ventas(
     if _sin_acceso(sucursal_id, permitidas):
         raise HTTPException(status_code=404, detail="No existe sugerido para ese producto/sucursal")
     return VentasResponse(**sugerido_service.ventas_12m(db, producto, sucursal_id))
+
+
+@router.get("/{producto}/{sucursal_id}/historia")
+def historia(
+    producto: str, sucursal_id: str,
+    dias: int = Query(90, ge=7, le=365),
+    db: Session = Depends(get_db),
+    permitidas: list[str] | None = Depends(sucursales_permitidas),
+):
+    """Evolucion del sugerido y el stock segun los snapshots diarios guardados."""
+    if _sin_acceso(sucursal_id, permitidas):
+        raise HTTPException(status_code=404, detail="No existe sugerido para ese producto/sucursal")
+    return {"items": snapshot_service.serie(db, producto, sucursal_id, dias=dias)}
 
 
 @router.get("/{producto}/{sucursal_id}", response_model=SugeridoRow)

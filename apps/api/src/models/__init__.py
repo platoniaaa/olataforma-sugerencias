@@ -14,6 +14,7 @@ from .auditoria import AuditoriaLog
 from .notificacion import Notificacion
 from .enlace_documento import EnlaceDocumento
 from .incidencia import Incidencia
+from .sugerido_snapshot import SugeridoSnapshot
 
 __all__ = [
     "Sugerido",
@@ -32,4 +33,5 @@ __all__ = [
     "Notificacion",
     "EnlaceDocumento",
     "Incidencia",
+    "SugeridoSnapshot",
 ]
