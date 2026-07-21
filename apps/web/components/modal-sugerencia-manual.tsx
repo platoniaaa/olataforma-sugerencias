@@ -9,7 +9,7 @@ import { MultiSelect } from "@/components/ui/multiselect";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api-client";
 import { formatoNumero } from "@/lib/formato";
-import type { Producto, Sucursal, SugeridoFiltros } from "@/lib/types";
+import type { PreviewObjetivo, Producto, Sucursal, SugeridoFiltros } from "@/lib/types";
 
 type Modo = "individual" | "grupo" | "todos";
 // "objetivo" no suma sobre el sugerido como los otros dos: fija un nivel de stock
@@ -70,6 +70,9 @@ export function ModalSugerenciaManual({
   const [conteo, setConteo] = useState<number | null>(null);
   const [contando, setContando] = useState(false);
 
+  // Vista previa del modo "mantener stock" (solo individual: necesita el par exacto).
+  const [preview, setPreview] = useState<PreviewObjetivo | null>(null);
+
   // Recurrencia
   const [recurrente, setRecurrente] = useState(false);
   const [cadaDias, setCadaDias] = useState("7");
@@ -126,6 +129,24 @@ export function ModalSugerenciaManual({
     }, 250);
     return () => clearTimeout(t);
   }, [producto, productoInicial, modo]);
+
+  // Vista previa: explica de dónde sale el número antes de guardar. Se recalcula
+  // al cambiar producto, sucursal o nivel.
+  useEffect(() => {
+    const nivel = parseInt(cantidad, 10);
+    if (tipoCantidad !== "objetivo" || modo !== "individual" || !producto || !sucursal || !nivel) {
+      setPreview(null);
+      return;
+    }
+    const t = setTimeout(async () => {
+      try {
+        setPreview(await api.previsualizarObjetivo(producto, sucursal, nivel));
+      } catch {
+        setPreview(null);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [tipoCantidad, modo, producto, sucursal, cantidad]);
 
   // Filtros equivalentes al modo grupo/todos.
   const filtrosModo: SugeridoFiltros = useMemo(() => {
@@ -457,7 +478,13 @@ export function ModalSugerenciaManual({
                 <button
                   key={t.id}
                   type="button"
-                  onClick={() => setTipoCantidad(t.id)}
+                  onClick={() => {
+                    setTipoCantidad(t.id);
+                    // "Mantener stock" es una regla, no una compra puntual: sin
+                    // repeticion el nivel se cubre una vez y nunca mas. Se puede
+                    // desmarcar si solo se quiere el relleno de hoy.
+                    if (t.id === "objetivo") setRecurrente(true);
+                  }}
                   className={cn(
                     "rounded px-2 py-0.5 transition-colors",
                     tipoCantidad === t.id
@@ -497,6 +524,66 @@ export function ModalSugerenciaManual({
                 </>
               )}
             </p>
+          )}
+
+          {/* De dónde sale el número, antes de guardar. */}
+          {preview && (
+            <div
+              className={cn(
+                "mt-2 rounded-md px-3 py-2 text-[12px]",
+                preview.faltante > 0
+                  ? "bg-brand-50 text-brand"
+                  : "bg-amber-50 text-amber-800"
+              )}
+            >
+              <p className="font-medium">
+                {preview.faltante > 0 ? (
+                  <>Se pedirán {formatoNumero(preview.faltante)} unidades.</>
+                ) : recurrente ? (
+                  <>
+                    El nivel ya está cubierto hoy: no se pide nada ahora, y la regla
+                    repone sola cuando baje.
+                  </>
+                ) : (
+                  <>
+                    El nivel ya está cubierto hoy. Marca <b>Repetir periódicamente</b> para
+                    dejarlo como regla y que se reponga cuando baje.
+                  </>
+                )}
+              </p>
+              <ul className="mt-1 space-y-0.5 text-[11.5px] opacity-90">
+                <li>
+                  Stock hoy en la sucursal: <b>{formatoNumero(preview.stock)}</b>
+                  {preview.bodegas.length > 0 && (
+                    <span className="opacity-80">
+                      {" — "}
+                      {preview.bodegas
+                        .map((b) => `${b.bodega}: ${formatoNumero(b.stock)}`)
+                        .join(", ")}
+                    </span>
+                  )}
+                </li>
+                {preview.transito > 0 && (
+                  <li>
+                    En tránsito: <b>{formatoNumero(preview.transito)}</b>
+                  </li>
+                )}
+                {preview.sugerido_sistema > 0 && (
+                  <li>
+                    Ya sugerido por el sistema: <b>{formatoNumero(preview.sugerido_sistema)}</b>
+                  </li>
+                )}
+                <li className="border-t border-current/15 pt-0.5">
+                  Cubierto: <b>{formatoNumero(preview.cubierto)}</b> de{" "}
+                  {formatoNumero(preview.objetivo)}
+                </li>
+              </ul>
+              {!preview.en_sugerido && (
+                <p className="mt-1 text-[11px] opacity-80">
+                  El sistema no sugiere este producto en esta sucursal.
+                </p>
+              )}
+            </div>
           )}
         </div>
 

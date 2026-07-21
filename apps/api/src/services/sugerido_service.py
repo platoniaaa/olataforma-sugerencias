@@ -663,6 +663,16 @@ def unidades_para_objetivo(
     """
     if objetivo <= 0:
         return None
+    return detalle_objetivo(db, producto, sucursal_id, objetivo)["faltante"]
+
+
+def detalle_objetivo(
+    db: Session, producto: str, sucursal_id: str, objetivo: int
+) -> dict:
+    """Lo mismo que `unidades_para_objetivo`, pero mostrando de donde sale el numero.
+
+    Es lo que necesita la pantalla para explicar por que faltan N unidades (o por
+    que no falta ninguna): un total sin desglose obliga al usuario a confiar."""
     row = db.execute(
         select(
             Sugerido.stock_activo_suc,
@@ -671,11 +681,46 @@ def unidades_para_objetivo(
         ).where(Sugerido.producto == producto, Sugerido.sucursal_id == sucursal_id)
     ).first()
     if row:
-        return _faltante_para_objetivo(objetivo, row[0], row[1], row[2])
-    # Fuera del sugerido: el stock igual se conoce por bodega.
-    return _faltante_para_objetivo(
-        objetivo, _stock_en_sucursal(db, producto, sucursal_id), 0, 0
-    )
+        stock, transito, sistema = float(row[0] or 0), float(row[1] or 0), float(row[2] or 0)
+        en_sugerido = True
+    else:
+        # Fuera del sugerido: el stock igual se conoce por bodega y el sistema no pide nada.
+        stock, transito, sistema = _stock_en_sucursal(db, producto, sucursal_id), 0.0, 0.0
+        en_sugerido = False
+    return {
+        "objetivo": objetivo,
+        "stock": stock,
+        "transito": transito,
+        "sugerido_sistema": sistema,
+        "cubierto": stock + transito + sistema,
+        "faltante": _faltante_para_objetivo(objetivo, stock, transito, sistema),
+        "en_sugerido": en_sugerido,
+        # En que bodegas esta ese stock. Sin esto el usuario lee "hay 3" y no
+        # tiene como comprobarlo: el producto puede no aparecer en la grilla
+        # (pedir=No) y las columnas de stock por bodega vienen ocultas.
+        "bodegas": _bodegas_de(db, producto, sucursal_id),
+    }
+
+
+def _bodegas_de(db: Session, producto: str, sucursal_id: str) -> list[dict]:
+    """Desglose por bodega del stock de ese producto en la sucursal."""
+    try:
+        filas = db.execute(
+            select(StockUnificado.bodega, StockUnificado.stock, StockUnificado.origen)
+            .where(
+                StockUnificado.producto == producto,
+                StockUnificado.sucursal_id == sucursal_id,
+                StockUnificado.stock != 0,
+            )
+            .order_by(StockUnificado.stock.desc())
+        ).all()
+        return [
+            {"bodega": b or "(sin bodega)", "stock": float(s or 0), "origen": o}
+            for b, s, o in filas
+        ]
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        return []
 
 
 def _stock_en_sucursal(db: Session, producto: str, sucursal_id: str) -> float:
