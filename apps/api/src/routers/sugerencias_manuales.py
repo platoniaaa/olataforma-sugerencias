@@ -58,6 +58,45 @@ router = APIRouter(prefix="/api/sugerencias-manuales", tags=["sugerencias manual
 settings = get_settings()
 
 
+def _n(x: float) -> str:
+    """Numero corto: sin decimales cuando es entero (5 y no 5.0)."""
+    return f"{x:.0f}" if float(x).is_integer() else f"{x:.1f}"
+
+
+def _desglose(d: dict) -> str:
+    """Texto con las partes que cubren el nivel, omitiendo las que estan en cero.
+
+    Nombra las bodegas: decir "hay 3" sin decir donde deja al usuario sin forma de
+    comprobarlo (el producto puede ni siquiera aparecer en la grilla)."""
+    bodegas = d.get("bodegas") or []
+    detalle_bodegas = (
+        " (" + ", ".join(f"{b['bodega']}: {_n(b['stock'])}" for b in bodegas[:4]) + ")"
+        if bodegas
+        else ""
+    )
+    partes = [f"{_n(d['stock'])} en stock{detalle_bodegas}"]
+    if d["transito"]:
+        partes.append(f"{_n(d['transito'])} en transito")
+    if d["sugerido_sistema"]:
+        partes.append(f"{_n(d['sugerido_sistema'])} que ya sugiere el sistema")
+    return " + ".join(partes) + f" = {_n(d['cubierto'])} u"
+
+
+@router.get("/previsualizar-objetivo")
+def previsualizar_objetivo(
+    producto: str = Query(...),
+    sucursal_id: str = Query(...),
+    stock_objetivo: int = Query(..., gt=0),
+    db: Session = Depends(get_db),
+):
+    """Que pasaria si se pide mantener ese nivel, ANTES de guardar.
+
+    Devuelve el desglose para que la pantalla explique de donde sale el numero en
+    vez de mostrar un total que el usuario tiene que creer."""
+    d = sugerido_service.detalle_objetivo(db, producto, sucursal_id, stock_objetivo)
+    return {**d, "desglose": _desglose(d)}
+
+
 @router.get("", response_model=list[SugerenciaManualOut])
 def listar(
     producto: str | None = Query(None),
@@ -100,15 +139,18 @@ def crear(
     elif payload.stock_objetivo:
         # Funciona aunque el producto no este en el sugerido de esa sucursal: ahi
         # el stock sale de las bodegas y se pide el nivel completo si no hay nada.
-        unidades = sugerido_service.unidades_para_objetivo(
+        d = sugerido_service.detalle_objetivo(
             db, payload.producto, payload.sucursal_id, payload.stock_objetivo
         )
+        unidades = d["faltante"]
         if unidades == 0:
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    f"El nivel de {payload.stock_objetivo} unidades ya esta cubierto entre el "
-                    "stock, el transito y lo que el sistema ya sugiere. No hay nada que pedir."
+                    f"El nivel de {payload.stock_objetivo} u ya esta cubierto: "
+                    f"{_desglose(d)}. Hoy no hay nada que pedir. Marca "
+                    "'Repetir periodicamente' para dejarlo como regla y que se "
+                    "reponga solo cuando el stock baje."
                 ),
             )
     elif payload.unidades:

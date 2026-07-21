@@ -170,6 +170,21 @@ export interface SugerenciaManual {
   recurrente_id?: string | null;
 }
 
+/** Vista previa del modo "mantener stock": de dónde sale el número. */
+export interface PreviewObjetivo {
+  objetivo: number;
+  stock: number;
+  transito: number;
+  sugerido_sistema: number;
+  cubierto: number;
+  faltante: number;
+  /** Si el producto está en el sugerido de esa sucursal (si no, el stock sale de bodega). */
+  en_sugerido: boolean;
+  desglose: string;
+  /** En qué bodegas está ese stock, para poder comprobarlo. */
+  bodegas: { bodega: string; stock: number; origen: string | null }[];
+}
+
 export interface LineaCarro {
   producto: string;
   descripcion: string | null;

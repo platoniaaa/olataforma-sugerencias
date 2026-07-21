@@ -236,6 +236,20 @@ export const api = {
     return res.json();
   },
 
+  /** Que pasaria al pedir ese nivel de stock, antes de guardar. */
+  async previsualizarObjetivo(
+    producto: string,
+    sucursalId: string,
+    stockObjetivo: number
+  ): Promise<import("./types").PreviewObjetivo> {
+    const p = new URLSearchParams({
+      producto,
+      sucursal_id: sucursalId,
+      stock_objetivo: String(stockObjetivo),
+    });
+    return getJSON(`/api/sugerencias-manuales/previsualizar-objetivo?${p.toString()}`);
+  },
+
   async crearSugerenciaMasiva(
     filtros: SugeridoFiltros,
     cantidad: { unidades?: number; dias_inventario?: number; stock_objetivo?: number },
