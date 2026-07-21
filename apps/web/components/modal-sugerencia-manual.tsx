@@ -488,7 +488,8 @@ export function ModalSugerenciaManual({
             <p className="mt-1 text-[11px] text-slate-500">
               Nivel que quieres tener en bodega. Se pide <b>solo lo que falta</b> para llegar
               a ese nivel: descuenta el stock actual, lo que viene en tránsito y lo que el
-              sistema ya está sugiriendo. Lo que ya está en nivel se omite.
+              sistema ya está sugiriendo. Lo que ya está en nivel se omite. Sirve también
+              para productos que el sistema no sugiere: ahí se mira el stock de bodega.
               {!recurrente && (
                 <>
                   {" "}

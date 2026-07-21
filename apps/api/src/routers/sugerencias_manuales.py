@@ -98,14 +98,11 @@ def crear(
                 detail="Sin demanda diaria para este producto/sucursal. Usa modo 'unidades'.",
             )
     elif payload.stock_objetivo:
+        # Funciona aunque el producto no este en el sugerido de esa sucursal: ahi
+        # el stock sale de las bodegas y se pide el nivel completo si no hay nada.
         unidades = sugerido_service.unidades_para_objetivo(
             db, payload.producto, payload.sucursal_id, payload.stock_objetivo
         )
-        if unidades is None:
-            raise HTTPException(
-                status_code=400,
-                detail="Ese producto no esta en la sucursal elegida. Usa modo 'unidades'.",
-            )
         if unidades == 0:
             raise HTTPException(
                 status_code=409,

@@ -9,7 +9,13 @@ from datetime import datetime, timezone
 from sqlalchemy import Float, Integer, Numeric, String, distinct, false, func, or_, select
 from sqlalchemy.orm import Session
 
-from ..models import ProductoCatalogo, Sugerido, SugerenciaManual, VentaMensual
+from ..models import (
+    ProductoCatalogo,
+    StockUnificado,
+    Sugerido,
+    SugerenciaManual,
+    VentaMensual,
+)
 from ..schemas import SugeridoFiltros
 from . import stock_service
 
@@ -442,13 +448,19 @@ def listar(
         items.append(d)
 
     # Filas sinteticas para pares (producto, sucursal) que estan SOLO en manuales
-    # (no estan en sugerido del BI). Solo cuando hay busqueda, para no inflar la
-    # vista por defecto.
+    # (no estan en el sugerido del BI). Son las que alguien cargo a mano sobre un
+    # producto que el modelo no pide; si no se mostraran, se compraria a ciegas.
+    # En la vista sin busqueda van solo en la pagina 1: se agregan despues de
+    # paginar, asi que repetirlas en cada pagina seria mostrarlas N veces.
     total_manuales_solas = 0
-    if q_text:
+    if q_text or page == 1:
         manuales_solas = [
             (p, s, u) for (p, s), u in manuales.items() if (p, s) not in pares_en_sugerido
         ]
+        # El acceso por sucursal manda tambien sobre estas filas.
+        if f.sucursales_permitidas is not None:
+            permitidas = set(f.sucursales_permitidas)
+            manuales_solas = [(p, s, u) for p, s, u in manuales_solas if s in permitidas]
         if manuales_solas:
             productos_m = {p for p, _, _ in manuales_solas}
             cat_map = {
@@ -638,10 +650,16 @@ def _faltante_para_objetivo(
 def unidades_para_objetivo(
     db: Session, producto: str, sucursal_id: str, objetivo: int
 ) -> int | None:
-    """Unidades que faltan para mantener `objetivo` en stock. None si el par no existe.
+    """Unidades que faltan para mantener `objetivo` en stock.
 
-    A diferencia de los otros modos, aca 0 es una respuesta valida y significa
-    "el nivel ya esta cubierto": el caller no debe crear una sugerencia.
+    Funciona aunque el producto NO este en el sugerido de esa sucursal, que es
+    justo el caso donde mas se usa: un repuesto que el modelo no pide (sin
+    demanda registrada) pero del que igual se quiere tener siempre unas unidades
+    (campanas, VOR, pedidos especiales). Ahi el stock real sale de
+    `stock_unificado` y el sugerido del sistema es 0, porque no lo esta pidiendo.
+
+    Si no hay ningun registro de stock se asume 0 y se pide el nivel completo.
+    Devuelve 0 cuando el nivel ya esta cubierto; None solo si el objetivo es invalido.
     """
     if objetivo <= 0:
         return None
@@ -652,9 +670,30 @@ def unidades_para_objetivo(
             Sugerido.total_sugerido_suc,
         ).where(Sugerido.producto == producto, Sugerido.sucursal_id == sucursal_id)
     ).first()
-    if not row:
-        return None
-    return _faltante_para_objetivo(objetivo, row[0], row[1], row[2])
+    if row:
+        return _faltante_para_objetivo(objetivo, row[0], row[1], row[2])
+    # Fuera del sugerido: el stock igual se conoce por bodega.
+    return _faltante_para_objetivo(
+        objetivo, _stock_en_sucursal(db, producto, sucursal_id), 0, 0
+    )
+
+
+def _stock_en_sucursal(db: Session, producto: str, sucursal_id: str) -> float:
+    """Stock real del producto en esa sucursal segun `stock_unificado`.
+
+    Tolerante: si la tabla no existe todavia, devuelve 0, que es el supuesto
+    conservador (se pide el nivel completo)."""
+    try:
+        total = db.execute(
+            select(func.coalesce(func.sum(StockUnificado.stock), 0)).where(
+                StockUnificado.producto == producto,
+                StockUnificado.sucursal_id == sucursal_id,
+            )
+        ).scalar()
+        return float(total or 0)
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        return 0.0
 
 
 def unidades_objetivo_por_par(
