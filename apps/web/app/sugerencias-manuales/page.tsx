@@ -19,6 +19,19 @@ function fechaLimite(expiraEn: string): string {
   return formatoFecha(new Date(d.getTime() - 60000).toISOString());
 }
 
+/** Con qué criterio se pidió: unidades directas, días de cobertura o nivel a mantener. */
+function EtiquetaTipo({ m }: { m: SugerenciaManual }) {
+  if (m.stock_objetivo)
+    return (
+      <Badge className="bg-emerald-50 text-emerald-700">
+        mantener {formatoNumero(m.stock_objetivo)} u
+      </Badge>
+    );
+  if (m.dias_inventario)
+    return <Badge className="bg-blue-50 text-blue-700">{m.dias_inventario} días de inv.</Badge>;
+  return <Badge className="bg-slate-100 text-slate-600">unidades directas</Badge>;
+}
+
 function BadgeVencimiento({ expiraEn }: { expiraEn: string }) {
   const vencida = new Date(expiraEn).getTime() <= Date.now();
   return vencida ? (
@@ -217,6 +230,7 @@ function SeccionUnicas({
                 <Badge className="bg-emerald-50 text-emerald-700">
                   +{formatoNumero(s.unidades)} u
                 </Badge>
+                <EtiquetaTipo m={s} />
                 {s.expira_en && <BadgeVencimiento expiraEn={s.expira_en} />}
               </div>
               <p className="mt-1 text-[12px] text-slate-500">
@@ -279,6 +293,7 @@ function LoteCard({
                 <Badge className="bg-emerald-50 text-emerald-700">
                   +{formatoNumero(totalUnidades)} u en total
                 </Badge>
+                {primera && <EtiquetaTipo m={primera} />}
                 {primera?.expira_en && <BadgeVencimiento expiraEn={primera.expira_en} />}
               </div>
               <p className="mt-1 text-[12px] text-slate-500">
