@@ -443,6 +443,17 @@ export const api = {
     return res.json();
   },
 
+  /** Salud del inventario: inmovilizado, sobre-stock, quiebres. */
+  async inventarioSalud(
+    opts: { sucursales?: string[]; marcas?: string[]; diasSobreStock?: number } = {}
+  ): Promise<import("./types").InventarioSalud> {
+    const p = new URLSearchParams();
+    (opts.sucursales ?? []).forEach((s) => p.append("sucursal", s));
+    (opts.marcas ?? []).forEach((m) => p.append("filtro1", m));
+    if (opts.diasSobreStock) p.set("dias_sobre_stock", String(opts.diasSobreStock));
+    return getJSON(`/api/inventario/salud?${p.toString()}`);
+  },
+
   /** Enlaces a documentos de SharePoint (ventas historicas, etc.). */
   async documentos(incluirInactivos = false): Promise<Documento[]> {
     return getJSON(`/api/documentos?incluir_inactivos=${incluirInactivos}`);

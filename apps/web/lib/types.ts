@@ -409,3 +409,56 @@ export interface DocumentoCreate {
   categoria?: string;
   orden?: number;
 }
+
+/** Salud del inventario: donde esta la plata detenida y donde falta. */
+export interface InventarioResumen {
+  valor_inventario_clp: number;
+  unidades: number;
+  n_filas: number;
+  inmovilizado_clp: number;
+  inmovilizado_n: number;
+  inmovilizado_pct: number;
+  sobre_stock_clp: number;
+  sobre_stock_n: number;
+  sobre_stock_pct: number;
+  quiebre_con_demanda_n: number;
+  bajo_punto_pedido_n: number;
+  sin_costo_n: number;
+  cobertura_dias_mediana: number | null;
+}
+
+export interface InventarioSucursal {
+  sucursal_id: string;
+  nombre_sucursal: string;
+  valor_clp: number;
+  unidades: number;
+  inmovilizado_clp: number;
+  sobre_stock_clp: number;
+  quiebre_con_demanda_n: number;
+  bajo_punto_pedido_n: number;
+  n_productos: number;
+}
+
+export interface InventarioMarca {
+  marca: string;
+  valor_clp: number;
+  inmovilizado_clp: number;
+  n_productos: number;
+}
+
+export interface InventarioInmovilizado {
+  producto: string;
+  descripcion: string | null;
+  sucursal_id: string;
+  nombre_sucursal: string;
+  unidades: number;
+  valor_clp: number;
+}
+
+export interface InventarioSalud {
+  resumen: InventarioResumen;
+  por_sucursal: InventarioSucursal[];
+  por_marca: InventarioMarca[];
+  top_inmovilizado: InventarioInmovilizado[];
+  dias_sobre_stock: number;
+}
