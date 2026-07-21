@@ -48,6 +48,7 @@ def _recurrente_out(rec) -> RecurrenteOut:
     return RecurrenteOut(
         id=rec.id, modo=rec.modo, resumen=recurrentes_service.resumen(rec),
         unidades=rec.unidades, dias_inventario=rec.dias_inventario,
+        stock_objetivo=rec.stock_objetivo,
         motivo=rec.motivo, cada_dias=rec.cada_dias,
         proxima_ejecucion=rec.proxima_ejecucion, fecha_fin=rec.fecha_fin,
         activa=rec.activa, ultima_ejecucion=rec.ultima_ejecucion,
@@ -96,10 +97,29 @@ def crear(
                 status_code=400,
                 detail="Sin demanda diaria para este producto/sucursal. Usa modo 'unidades'.",
             )
+    elif payload.stock_objetivo:
+        unidades = sugerido_service.unidades_para_objetivo(
+            db, payload.producto, payload.sucursal_id, payload.stock_objetivo
+        )
+        if unidades is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Ese producto no esta en la sucursal elegida. Usa modo 'unidades'.",
+            )
+        if unidades == 0:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"El nivel de {payload.stock_objetivo} unidades ya esta cubierto entre el "
+                    "stock, el transito y lo que el sistema ya sugiere. No hay nada que pedir."
+                ),
+            )
     elif payload.unidades:
         unidades = payload.unidades
     else:
-        raise HTTPException(status_code=400, detail="Falta unidades o dias_inventario.")
+        raise HTTPException(
+            status_code=400, detail="Falta unidades, dias_inventario o stock_objetivo."
+        )
     s = SugerenciaManual(
         producto=payload.producto,
         sucursal_id=payload.sucursal_id,
@@ -115,6 +135,9 @@ def crear(
         db, accion="creada", entidad="sugerencia_manual", entidad_id=s.id,
         usuario_email=email, producto=s.producto, sucursal_id=s.sucursal_id,
         unidades=unidades, dias_inventario=payload.dias_inventario, motivo=payload.motivo,
+        detalle=(
+            f"Mantener {payload.stock_objetivo} u en stock" if payload.stock_objetivo else None
+        ),
     )
     auditoria_service.notificar(
         db, tipo="sugerencia_creada",
@@ -149,8 +172,12 @@ def crear_masiva(
     nuevas: list[SugerenciaManual] = []
     lote_id = str(_uuid_mod.uuid4())
     expira_en = _expira_en(payload.expira_en)
-    if payload.dias_inventario:
-        mapa = sugerido_service.unidades_por_par(db, pares, payload.dias_inventario)
+    if payload.dias_inventario or payload.stock_objetivo:
+        if payload.stock_objetivo:
+            # Omitidos aca = productos que YA estan en el nivel pedido (no falta nada).
+            mapa = sugerido_service.unidades_objetivo_por_par(db, pares, payload.stock_objetivo)
+        else:
+            mapa = sugerido_service.unidades_por_par(db, pares, payload.dias_inventario)
         for par in pares:
             u = mapa.get(par)
             if u is None:
@@ -175,26 +202,31 @@ def crear_masiva(
             for p, s in pares
         ]
     else:
-        raise HTTPException(status_code=400, detail="Falta unidades o dias_inventario.")
+        raise HTTPException(
+            status_code=400, detail="Falta unidades, dias_inventario o stock_objetivo."
+        )
     db.add_all(nuevas)
     db.flush()
+    # Ya trae el signo: el modo objetivo no "suma N", mantiene un nivel.
     cantidad_str = (
-        f"{payload.dias_inventario} dias" if payload.dias_inventario
-        else f"{payload.unidades} u"
+        f"+{payload.dias_inventario} dias" if payload.dias_inventario
+        else f"mantener {payload.stock_objetivo} u en stock" if payload.stock_objetivo
+        else f"+{payload.unidades} u"
     )
     auditoria_service.registrar(
         db, accion="masiva_creada", entidad="sugerencia_manual",
         entidad_id=lote_id,
         usuario_email=email, unidades=payload.unidades,
         dias_inventario=payload.dias_inventario, motivo=payload.motivo,
-        detalle=f"Masiva: {len(nuevas)} pares, {omitidas} omitidos, +{cantidad_str} (lote {lote_id[:8]})",
+        detalle=f"Masiva: {len(nuevas)} pares, {omitidas} omitidos, {cantidad_str} (lote {lote_id[:8]})",
     )
+    razon_omitidas = "ya estaban en nivel" if payload.stock_objetivo else "sin demanda"
     auditoria_service.notificar(
         db, tipo="masiva_creada",
         titulo=f"{email.split('@')[0]} cargo {len(nuevas)} sugerencias",
-        mensaje=f"+{cantidad_str} por producto"
+        mensaje=f"{cantidad_str} por producto"
         + (f". Motivo: {payload.motivo}" if payload.motivo else "")
-        + (f". {omitidas} omitidos sin demanda." if omitidas else ""),
+        + (f". {omitidas} omitidos ({razon_omitidas})." if omitidas else ""),
         creado_por_email=email,
     )
     db.commit()
@@ -214,8 +246,10 @@ def crear_recurrente(
     """Crea una regla recurrente y la aplica de inmediato (primera instancia)."""
     if payload.modo == "individual" and not (payload.producto and payload.sucursal_id):
         raise HTTPException(status_code=400, detail="Falta producto o sucursal.")
-    if not payload.unidades and not payload.dias_inventario:
-        raise HTTPException(status_code=400, detail="Falta unidades o dias_inventario.")
+    if not payload.unidades and not payload.dias_inventario and not payload.stock_objetivo:
+        raise HTTPException(
+            status_code=400, detail="Falta unidades, dias_inventario o stock_objetivo."
+        )
     rec = recurrentes_service.crear(db, payload, usuario_email=email)
     return _recurrente_out(rec)
 

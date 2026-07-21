@@ -105,6 +105,8 @@ def create_all() -> None:
         "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS precio_urgente_vor_ford INTEGER",
         "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS precio_promociones_ford INTEGER",
         "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS precio_urgente_recargo15_ford INTEGER",
+        # 2026-07: sugerencias que mantienen un nivel de stock (modo objetivo).
+        "ALTER TABLE sugerencia_recurrente ADD COLUMN IF NOT EXISTS stock_objetivo INTEGER",
     ]
     # SQLite NO soporta "ADD COLUMN IF NOT EXISTS" (error de sintaxis que se
     # tragaba el try, dejando bases locales viejas sin las columnas nuevas):

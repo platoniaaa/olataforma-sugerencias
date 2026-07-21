@@ -36,6 +36,9 @@ class SugerenciaRecurrente(Base):
     # Si es por dias de inventario, lo guardamos para recalcular en cada ejecucion
     # (la demanda diaria del BI puede cambiar entre disparos).
     dias_inventario: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Nivel de stock a mantener. Es el modo que hace automatica la mantencion: en
+    # cada disparo se compara contra el stock del momento y se pide solo la brecha.
+    stock_objetivo: Mapped[int | None] = mapped_column(Integer, nullable=True)
     motivo: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     cada_dias: Mapped[int] = mapped_column(Integer, nullable=False)

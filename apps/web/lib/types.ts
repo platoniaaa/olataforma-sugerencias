@@ -195,6 +195,8 @@ export interface RecurrenteCreate {
   filtros?: SugeridoFiltros | null;
   unidades?: number | null;
   dias_inventario?: number | null;
+  /** Nivel de stock a mantener: cada ejecución repone solo la brecha que falte. */
+  stock_objetivo?: number | null;
   motivo?: string | null;
   cada_dias: number;
   fecha_fin?: string | null; // YYYY-MM-DD
@@ -206,6 +208,7 @@ export interface Recurrente {
   resumen: string;
   unidades: number;
   dias_inventario: number | null;
+  stock_objetivo: number | null;
   motivo: string | null;
   cada_dias: number;
   proxima_ejecucion: string;

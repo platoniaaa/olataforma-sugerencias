@@ -154,8 +154,12 @@ function TablaActividad({ items, cargando }: { items: AuditoriaLog[]; cargando: 
                 icon: PlusCircle,
               };
               const Icon = meta.icon;
-              const cant =
-                it.dias_inventario != null
+              // El modo "mantener stock" registra su nivel en el detalle; las
+              // unidades de la fila son solo la brecha que se pidio esa vez.
+              const nivel = it.detalle?.match(/^Mantener (\d+) u en stock$/);
+              const cant = nivel
+                ? `→ ${formatoNumero(Number(nivel[1]))} u`
+                : it.dias_inventario != null
                   ? `+${it.dias_inventario} dias`
                   : it.unidades != null
                     ? `+${formatoNumero(it.unidades)} u`

@@ -12,6 +12,11 @@ class SugerenciaManualCreate(BaseModel):
     sucursal_id: str
     unidades: int | None = Field(default=None, gt=0, description="Unidades adicionales (si modo='unidades')")
     dias_inventario: int | None = Field(default=None, gt=0, description="Dias de inventario adicional (si modo='dias')")
+    stock_objetivo: int | None = Field(
+        default=None, gt=0,
+        description="Nivel de stock a mantener (si modo='objetivo'). Se pide solo lo que falta "
+        "para llegar a ese nivel, descontando stock, transito y lo que ya sugiere el sistema.",
+    )
     expira_en: date | None = Field(
         default=None,
         description="Fecha limite (inclusive) hasta la que la sugerencia sigue vigente; al pasar se archiva. None = no vence.",
@@ -25,6 +30,9 @@ class SugerenciaManualMasiva(BaseModel):
     filtros: SugeridoFiltros = Field(default_factory=SugeridoFiltros)
     unidades: int | None = Field(default=None, gt=0)
     dias_inventario: int | None = Field(default=None, gt=0)
+    stock_objetivo: int | None = Field(
+        default=None, gt=0, description="Nivel de stock a mantener en cada producto/sucursal."
+    )
     expira_en: date | None = Field(
         default=None,
         description="Fecha limite (inclusive) hasta la que las sugerencias siguen vigentes; al pasar se archivan. None = no vencen.",
@@ -71,6 +79,11 @@ class RecurrenteCreate(BaseModel):
     filtros: SugeridoFiltros | None = None  # modo grupo
     unidades: int | None = Field(default=None, gt=0)
     dias_inventario: int | None = Field(default=None, gt=0)
+    stock_objetivo: int | None = Field(
+        default=None, gt=0,
+        description="Nivel de stock a mantener. En cada ejecucion se recalcula contra el "
+        "stock del momento, que es lo que hace automatica la mantencion del nivel.",
+    )
     motivo: str | None = None
     cada_dias: int = Field(gt=0, le=365, description="Repetir cada N días")
     fecha_fin: date | None = None
@@ -82,6 +95,7 @@ class RecurrenteOut(BaseModel):
     resumen: str
     unidades: int
     dias_inventario: int | None = None
+    stock_objetivo: int | None = None
     motivo: str | None = None
     cada_dias: int
     proxima_ejecucion: date

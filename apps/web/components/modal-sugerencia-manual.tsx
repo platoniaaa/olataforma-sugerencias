@@ -12,7 +12,9 @@ import { formatoNumero } from "@/lib/formato";
 import type { Producto, Sucursal, SugeridoFiltros } from "@/lib/types";
 
 type Modo = "individual" | "grupo" | "todos";
-type TipoCantidad = "dias" | "unidades";
+// "objetivo" no suma sobre el sugerido como los otros dos: fija un nivel de stock
+// a mantener y pide solo la brecha que falta para llegar a el.
+type TipoCantidad = "dias" | "unidades" | "objetivo";
 
 interface Props {
   open: boolean;
@@ -161,12 +163,18 @@ export function ModalSugerenciaManual({
       setError(
         tipoCantidad === "dias"
           ? "Ingresa los días de inventario (entero positivo)."
-          : "Ingresa una cantidad de unidades (entero positivo)."
+          : tipoCantidad === "objetivo"
+            ? "Ingresa el nivel de stock a mantener (entero positivo)."
+            : "Ingresa una cantidad de unidades (entero positivo)."
       );
       return;
     }
     const cantidadPayload =
-      tipoCantidad === "dias" ? { dias_inventario: n } : { unidades: n };
+      tipoCantidad === "dias"
+        ? { dias_inventario: n }
+        : tipoCantidad === "objetivo"
+          ? { stock_objetivo: n }
+          : { unidades: n };
     // Fecha límite de vigencia. Solo aplica a sugerencias no recurrentes: las
     // recurrencias controlan su fin con "Hasta (fecha)".
     const expiraEn = !recurrente && fechaLimite ? fechaLimite : undefined;
@@ -226,7 +234,9 @@ export function ModalSugerenciaManual({
           // Avisa pero igual cerramos: las creadas ya se aplicaron.
           alert(
             `Se aplicaron ${r.creadas} sugerencias. ` +
-              `${r.omitidas} producto/sucursal sin demanda diaria se omitieron.`
+              (tipoCantidad === "objetivo"
+                ? `${r.omitidas} producto/sucursal ya estaban en el nivel pedido.`
+                : `${r.omitidas} producto/sucursal sin demanda diaria se omitieron.`)
           );
         }
       }
@@ -261,7 +271,11 @@ export function ModalSugerenciaManual({
       open={open}
       onClose={onClose}
       title="Agregar sugerencia manual"
-      description="Suma unidades por sobre lo que sugiere el sistema."
+      description={
+        tipoCantidad === "objetivo"
+          ? "Mantiene un nivel de stock: pide solo lo que falta para llegar a él."
+          : "Suma unidades por sobre lo que sugiere el sistema."
+      }
     >
       <div className="space-y-4">
         {/* Selector de modo */}
@@ -418,41 +432,42 @@ export function ModalSugerenciaManual({
 
         {/* Cantidad (dias o unidades) + motivo (comunes) */}
         <div>
-          <div className="mb-1.5 flex items-center justify-between">
+          <div className="mb-1.5 flex items-center justify-between gap-2">
             <Label htmlFor="uni" className="!mb-0">
               {tipoCantidad === "dias"
                 ? modo === "individual"
                   ? "Días de inventario adicional"
                   : "Días de inventario adicional para cada producto"
-                : modo === "individual"
-                  ? "Unidades adicionales"
-                  : "Unidades para cada producto"}
+                : tipoCantidad === "objetivo"
+                  ? modo === "individual"
+                    ? "Stock a mantener (unidades)"
+                    : "Stock a mantener en cada producto"
+                  : modo === "individual"
+                    ? "Unidades adicionales"
+                    : "Unidades para cada producto"}
             </Label>
-            <div className="inline-flex rounded-md border border-slate-200 bg-white p-0.5 text-[11px] font-medium">
-              <button
-                type="button"
-                onClick={() => setTipoCantidad("dias")}
-                className={cn(
-                  "rounded px-2 py-0.5 transition-colors",
-                  tipoCantidad === "dias"
-                    ? "bg-brand text-white"
-                    : "text-slate-500 hover:text-slate-800"
-                )}
-              >
-                Días
-              </button>
-              <button
-                type="button"
-                onClick={() => setTipoCantidad("unidades")}
-                className={cn(
-                  "rounded px-2 py-0.5 transition-colors",
-                  tipoCantidad === "unidades"
-                    ? "bg-brand text-white"
-                    : "text-slate-500 hover:text-slate-800"
-                )}
-              >
-                Unidades
-              </button>
+            <div className="inline-flex shrink-0 rounded-md border border-slate-200 bg-white p-0.5 text-[11px] font-medium">
+              {(
+                [
+                  { id: "dias", label: "Días" },
+                  { id: "unidades", label: "Unidades" },
+                  { id: "objetivo", label: "Mantener stock" },
+                ] as const
+              ).map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setTipoCantidad(t.id)}
+                  className={cn(
+                    "rounded px-2 py-0.5 transition-colors",
+                    tipoCantidad === t.id
+                      ? "bg-brand text-white"
+                      : "text-slate-500 hover:text-slate-800"
+                  )}
+                >
+                  {t.label}
+                </button>
+              ))}
             </div>
           </div>
           <Input
@@ -467,6 +482,19 @@ export function ModalSugerenciaManual({
             <p className="mt-1 text-[11px] text-slate-500">
               Se convierte a unidades por cada producto/sucursal segun su demanda
               diaria (redondeo hacia arriba). Los productos sin demanda registrada se omiten.
+            </p>
+          )}
+          {tipoCantidad === "objetivo" && (
+            <p className="mt-1 text-[11px] text-slate-500">
+              Nivel que quieres tener en bodega. Se pide <b>solo lo que falta</b> para llegar
+              a ese nivel: descuenta el stock actual, lo que viene en tránsito y lo que el
+              sistema ya está sugiriendo. Lo que ya está en nivel se omite.
+              {!recurrente && (
+                <>
+                  {" "}
+                  Marca <b>Repetir periódicamente</b> para que el nivel se mantenga solo.
+                </>
+              )}
             </p>
           )}
         </div>
@@ -535,9 +563,20 @@ export function ModalSugerenciaManual({
                 />
               </div>
               <p className="col-span-2 text-[12px] text-slate-500">
-                Se aplica ahora y se vuelve a aplicar cada {parseInt(cadaDias, 10) || "—"} días
-                {fechaFin ? ` hasta el ${fechaFin}` : " hasta que la elimines"}. Cada repetición
-                reemplaza la anterior (no se acumulan).
+                {tipoCantidad === "objetivo" ? (
+                  <>
+                    Cada {parseInt(cadaDias, 10) || "—"} días se revisa el stock y se repone
+                    <b> solo lo que falte</b> para volver a {cantidad || "—"} unidades
+                    {fechaFin ? `, hasta el ${fechaFin}` : ", hasta que elimines la regla"}. Si
+                    el nivel ya está cubierto, esa vez no pide nada.
+                  </>
+                ) : (
+                  <>
+                    Se aplica ahora y se vuelve a aplicar cada {parseInt(cadaDias, 10) || "—"} días
+                    {fechaFin ? ` hasta el ${fechaFin}` : " hasta que la elimines"}. Cada repetición
+                    reemplaza la anterior (no se acumulan).
+                  </>
+                )}
               </p>
             </div>
           )}
