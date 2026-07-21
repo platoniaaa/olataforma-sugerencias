@@ -220,6 +220,7 @@ export const api = {
     sucursal_id: string;
     unidades?: number;
     dias_inventario?: number;
+    stock_objetivo?: number; // nivel de stock a mantener
     expira_en?: string; // fecha límite YYYY-MM-DD; vacío = no vence
     motivo?: string;
   }): Promise<SugerenciaManual> {
@@ -237,7 +238,7 @@ export const api = {
 
   async crearSugerenciaMasiva(
     filtros: SugeridoFiltros,
-    cantidad: { unidades?: number; dias_inventario?: number },
+    cantidad: { unidades?: number; dias_inventario?: number; stock_objetivo?: number },
     motivo?: string,
     expiraEn?: string
   ): Promise<{ creadas: number; omitidas: number; lote_id: string | null }> {

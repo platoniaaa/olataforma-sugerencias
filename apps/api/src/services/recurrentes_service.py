@@ -15,7 +15,13 @@ from ..config import get_settings
 from ..models import SugerenciaManual, SugerenciaRecurrente
 from ..schemas import SugeridoFiltros
 from . import auditoria_service
-from .sugerido_service import pares_filtrados, unidades_desde_dias, unidades_por_par
+from .sugerido_service import (
+    pares_filtrados,
+    unidades_desde_dias,
+    unidades_objetivo_por_par,
+    unidades_para_objetivo,
+    unidades_por_par,
+)
 
 settings = get_settings()
 
@@ -31,8 +37,12 @@ def _archivar_instancias(db: Session, rec_id: str) -> None:
 def _crear_instancias(db: Session, rec: SugerenciaRecurrente) -> int:
     """Archiva la instancia anterior de esta regla y crea la nueva. Devuelve cuántas creó.
 
-    Si la regla esta en modo 'dias de inventario', recalcula unidades en cada ejecucion
-    usando la demanda diaria actualizada del BI. Pares sin demanda se omiten.
+    Segun el modo, la cantidad se recalcula en cada ejecucion:
+    - 'dias de inventario': con la demanda diaria actualizada del BI.
+    - 'stock objetivo': con el stock del momento, pidiendo solo la brecha que falta
+      para llegar al nivel. Esto es lo que mantiene el nivel de forma automatica:
+      si en el ciclo anterior se repuso y el stock quedo arriba, esta vez no pide
+      nada; si se vendio, pide la diferencia.
     """
     _archivar_instancias(db, rec.id)
     tenant = rec.tenant_id
@@ -40,6 +50,8 @@ def _crear_instancias(db: Session, rec: SugerenciaRecurrente) -> int:
     if rec.modo == "individual":
         if rec.dias_inventario:
             u = unidades_desde_dias(db, rec.producto, rec.sucursal_id, rec.dias_inventario)
+        elif rec.stock_objetivo:
+            u = unidades_para_objetivo(db, rec.producto, rec.sucursal_id, rec.stock_objetivo)
         else:
             u = rec.unidades
         if u and u > 0:
@@ -53,8 +65,12 @@ def _crear_instancias(db: Session, rec: SugerenciaRecurrente) -> int:
     else:  # grupo
         f = SugeridoFiltros(**json.loads(rec.filtros or "{}"))
         pares = pares_filtrados(db, f)
-        if rec.dias_inventario:
-            mapa = unidades_por_par(db, pares, rec.dias_inventario)
+        if rec.dias_inventario or rec.stock_objetivo:
+            mapa = (
+                unidades_objetivo_por_par(db, pares, rec.stock_objetivo)
+                if rec.stock_objetivo
+                else unidades_por_par(db, pares, rec.dias_inventario)
+            )
             for par in pares:
                 u = mapa.get(par)
                 if not u:
@@ -103,6 +119,7 @@ def crear(db: Session, payload, usuario_email: str | None = None) -> SugerenciaR
         filtros=filtros_json,
         unidades=unidades_inicial,
         dias_inventario=payload.dias_inventario,
+        stock_objetivo=payload.stock_objetivo,
         motivo=payload.motivo,
         cada_dias=payload.cada_dias,
         fecha_fin=payload.fecha_fin,
@@ -114,16 +131,18 @@ def crear(db: Session, payload, usuario_email: str | None = None) -> SugerenciaR
     # Aplica de inmediato (primera instancia) y agenda la próxima.
     n_creadas = _crear_instancias(db, rec)
     _avanzar(rec, hoy)
+    # Ya trae el signo: el modo objetivo no "suma N", mantiene un nivel.
     cantidad_str = (
-        f"{payload.dias_inventario} dias" if payload.dias_inventario
-        else f"{payload.unidades} u"
+        f"+{payload.dias_inventario} dias" if payload.dias_inventario
+        else f"mantener {payload.stock_objetivo} u en stock" if payload.stock_objetivo
+        else f"+{payload.unidades} u"
     )
     auditoria_service.registrar(
         db, accion="recurrente_creada", entidad="sugerencia_recurrente", entidad_id=rec.id,
         usuario_email=usuario_email, producto=rec.producto, sucursal_id=rec.sucursal_id,
         unidades=payload.unidades, dias_inventario=payload.dias_inventario,
         motivo=rec.motivo,
-        detalle=f"Recurrente {rec.modo}, +{cantidad_str} cada {rec.cada_dias} dias, "
+        detalle=f"Recurrente {rec.modo}, {cantidad_str} cada {rec.cada_dias} dias, "
         f"{n_creadas} instancia(s) creada(s)",
     )
     if usuario_email:
@@ -135,7 +154,7 @@ def crear(db: Session, payload, usuario_email: str | None = None) -> SugerenciaR
         )
         auditoria_service.notificar(
             db, tipo="recurrente_creada", titulo=titulo,
-            mensaje=f"+{cantidad_str} cada {rec.cada_dias} dias",
+            mensaje=f"{cantidad_str} cada {rec.cada_dias} dias",
             creado_por_email=usuario_email,
             producto=rec.producto, sucursal_id=rec.sucursal_id,
         )

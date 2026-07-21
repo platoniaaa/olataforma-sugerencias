@@ -361,9 +361,11 @@ function SeccionRecurrentes({
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-semibold text-slate-900">{r.resumen}</span>
                 <Badge className="bg-brand-50 text-brand">
-                  {r.dias_inventario
-                    ? `+${r.dias_inventario} días`
-                    : `+${formatoNumero(r.unidades)} u`}
+                  {r.stock_objetivo
+                    ? `mantener ${formatoNumero(r.stock_objetivo)} u`
+                    : r.dias_inventario
+                      ? `+${r.dias_inventario} días`
+                      : `+${formatoNumero(r.unidades)} u`}
                 </Badge>
                 <Badge className="bg-slate-100 text-slate-600">
                   cada {r.cada_dias} días

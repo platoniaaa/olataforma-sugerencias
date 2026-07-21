@@ -620,6 +620,76 @@ def unidades_por_par(
     return out
 
 
+def _faltante_para_objetivo(
+    objetivo: int, stock: float | None, transito: float | None, sugerido_sistema: float | None
+) -> int:
+    """Cuanto falta comprar para dejar el inventario en `objetivo` unidades.
+
+    Descuenta TRES cosas: lo que hay, lo que viene en camino y lo que el sistema
+    ya esta sugiriendo. Si no se descontara el sugerido del sistema, la manual se
+    sumaria encima y se compraria dos veces para el mismo nivel.
+
+    Devuelve 0 cuando el nivel ya esta cubierto (no hay nada que pedir).
+    """
+    cubierto = (stock or 0) + (transito or 0) + (sugerido_sistema or 0)
+    return max(0, math.ceil(objetivo - cubierto))
+
+
+def unidades_para_objetivo(
+    db: Session, producto: str, sucursal_id: str, objetivo: int
+) -> int | None:
+    """Unidades que faltan para mantener `objetivo` en stock. None si el par no existe.
+
+    A diferencia de los otros modos, aca 0 es una respuesta valida y significa
+    "el nivel ya esta cubierto": el caller no debe crear una sugerencia.
+    """
+    if objetivo <= 0:
+        return None
+    row = db.execute(
+        select(
+            Sugerido.stock_activo_suc,
+            Sugerido.stock_en_transito_suc,
+            Sugerido.total_sugerido_suc,
+        ).where(Sugerido.producto == producto, Sugerido.sucursal_id == sucursal_id)
+    ).first()
+    if not row:
+        return None
+    return _faltante_para_objetivo(objetivo, row[0], row[1], row[2])
+
+
+def unidades_objetivo_por_par(
+    db: Session, pares: list[tuple[str, str]], objetivo: int
+) -> dict[tuple[str, str], int]:
+    """Igual que `unidades_para_objetivo` para muchos pares, en una sola query.
+
+    Solo devuelve los pares donde falta algo; los que ya estan en nivel quedan
+    fuera del dict (el caller los reporta como omitidos).
+    """
+    if not pares or objetivo <= 0:
+        return {}
+    productos = {p for p, _ in pares}
+    sucursales = {s for _, s in pares}
+    rows = db.execute(
+        select(
+            Sugerido.producto,
+            Sugerido.sucursal_id,
+            Sugerido.stock_activo_suc,
+            Sugerido.stock_en_transito_suc,
+            Sugerido.total_sugerido_suc,
+        ).where(Sugerido.producto.in_(productos), Sugerido.sucursal_id.in_(sucursales))
+    ).all()
+    datos = {(p, s): (st, tr, sug) for p, s, st, tr, sug in rows}
+    out: dict[tuple[str, str], int] = {}
+    for par in pares:
+        d = datos.get(par)
+        if d is None:
+            continue
+        falta = _faltante_para_objetivo(objetivo, *d)
+        if falta > 0:
+            out[par] = falta
+    return out
+
+
 def listar_por_ids(
     db: Session, ids: list[int], sucursales_permitidas: list[str] | None = None
 ) -> list[dict]:
