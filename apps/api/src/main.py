@@ -27,6 +27,7 @@ from .routers import (
     sugerencias_manuales,
     sugerido,
     ventas,
+    ventas_historicas,
 )
 from .services.auth import requiere_admin, requiere_auth
 
@@ -82,6 +83,7 @@ app.include_router(post_venta.router, dependencies=_protegido)
 app.include_router(catalogo.router, dependencies=_protegido)
 app.include_router(auditoria.router, dependencies=_protegido)
 app.include_router(ventas.router, dependencies=_protegido)
+app.include_router(ventas_historicas.router, dependencies=_protegido)
 # Documentos: todos leen; crear/editar/borrar exige admin en cada endpoint.
 app.include_router(documentos.router, dependencies=_protegido)
 app.include_router(inventario.router, dependencies=_protegido)

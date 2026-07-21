@@ -600,3 +600,35 @@ export interface SimulacionResultado {
   por_sucursal: SimulacionSucursal[];
   mayores_cambios: SimulacionCambio[];
 }
+
+/** Histórico de ventas (desde 2018), para consulta sin bajar planillas. */
+export interface VentasHistoricasMeta {
+  periodo_min: string | null;
+  periodo_max: string | null;
+  filas: number;
+  sucursales: string[];
+}
+
+export interface VentasHistoricasFiltros {
+  producto?: string;
+  sucursal?: string;
+  periodo_desde?: string; // YYYYMM
+  periodo_hasta?: string; // YYYYMM
+  /** Incluir conceptos internos (D&P, insumos, incentivos). */
+  incluir_internos?: boolean;
+}
+
+export interface VentaHistoricaFila {
+  periodo: string;
+  producto: string;
+  sucursal: string | null;
+  cantidad: number;
+  neto: number | null;
+  n_lineas: number | null;
+}
+
+export interface VentasHistoricasResp {
+  detalle: { items: VentaHistoricaFila[]; total: number; truncado: boolean };
+  por_periodo: { periodo: string; cantidad: number; neto: number }[];
+  por_sucursal: { sucursal: string; cantidad: number; neto: number }[];
+}

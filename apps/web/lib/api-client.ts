@@ -526,6 +526,42 @@ export const api = {
     );
   },
 
+  /** Historico de ventas (desde 2018): que hay cargado. */
+  async ventasHistoricasMeta(): Promise<import("./types").VentasHistoricasMeta> {
+    return getJSON("/api/ventas-historicas/meta");
+  },
+
+  async ventasHistoricas(
+    f: import("./types").VentasHistoricasFiltros
+  ): Promise<import("./types").VentasHistoricasResp> {
+    const p = new URLSearchParams();
+    if (f.producto) p.set("producto", f.producto);
+    if (f.sucursal) p.set("sucursal", f.sucursal);
+    if (f.periodo_desde) p.set("periodo_desde", f.periodo_desde);
+    if (f.periodo_hasta) p.set("periodo_hasta", f.periodo_hasta);
+    if (f.incluir_internos) p.set("incluir_internos", "true");
+    return getJSON(`/api/ventas-historicas?${p.toString()}`);
+  },
+
+  async exportarVentasHistoricas(
+    f: import("./types").VentasHistoricasFiltros
+  ): Promise<void> {
+    const p = new URLSearchParams();
+    if (f.producto) p.set("producto", f.producto);
+    if (f.sucursal) p.set("sucursal", f.sucursal);
+    if (f.periodo_desde) p.set("periodo_desde", f.periodo_desde);
+    if (f.periodo_hasta) p.set("periodo_hasta", f.periodo_hasta);
+    const res = await req(`/api/ventas-historicas/export-csv?${p.toString()}`);
+    if (!res.ok) throw new Error("No se pudo generar el archivo");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "ventas_historicas.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+
   /** Mesa de incidencias: reportes de errores de la plataforma. */
   async incidencias(estado?: string): Promise<import("./types").IncidenciasResponse> {
     const q = estado ? `?estado=${encodeURIComponent(estado)}` : "";

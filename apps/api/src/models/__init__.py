@@ -17,6 +17,7 @@ from .incidencia import Incidencia
 from .sugerido_snapshot import SugeridoSnapshot
 from .comparacion_motor import ComparacionMotor
 from .linea_pedida import LineaPedida
+from .venta_historica import VentaHistorica
 
 __all__ = [
     "Sugerido",
@@ -38,4 +39,5 @@ __all__ = [
     "SugeridoSnapshot",
     "ComparacionMotor",
     "LineaPedida",
+    "VentaHistorica",
 ]
