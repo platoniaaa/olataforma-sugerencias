@@ -60,11 +60,14 @@ def test_nivel_ya_cubierto_no_crea_nada(client, db_session):
     assert "ya esta cubierto" in r.json()["detail"]
 
 
-def test_producto_inexistente_avisa(client):
+def test_producto_fuera_del_sugerido_se_acepta(client):
+    """Antes se rechazaba; es justo el caso donde mas se usa el modo (productos
+    que el sistema no pide). Detalle completo en test_objetivo_sin_sugerido.py."""
     r = client.post("/api/sugerencias-manuales", json={
-        "producto": "NO-EXISTE", "sucursal_id": "LINDEROS", "stock_objetivo": 20,
+        "producto": "NO-ESTA-EN-SUGERIDO", "sucursal_id": "LINDEROS", "stock_objetivo": 20,
     })
-    assert r.status_code == 400
+    assert r.status_code == 201
+    assert r.json()["unidades"] == 20  # sin stock conocido, se pide todo el nivel
 
 
 def test_masiva_omite_los_que_ya_estan_en_nivel(client, db_session):
@@ -151,5 +154,8 @@ def test_calculo_directo_del_helper(db_session):
     assert sugerido_service.unidades_para_objetivo(db_session, "H-1", "LINDEROS", 10) == 4
     # Nivel cubierto -> 0 (no None: el par existe).
     assert sugerido_service.unidades_para_objetivo(db_session, "H-1", "LINDEROS", 5) == 0
-    # Par inexistente -> None.
-    assert sugerido_service.unidades_para_objetivo(db_session, "H-1", "TALCA", 10) is None
+    # Sucursal donde el producto no esta en el sugerido: se mira el stock de bodega
+    # (aca no hay ninguno) y se pide el nivel completo.
+    assert sugerido_service.unidades_para_objetivo(db_session, "H-1", "TALCA", 10) == 10
+    # Objetivo invalido -> None.
+    assert sugerido_service.unidades_para_objetivo(db_session, "H-1", "LINDEROS", 0) is None
