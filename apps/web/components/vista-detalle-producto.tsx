@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import { AlertCircle, ArrowLeft, Plus, Trash2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, colorABC } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ModalSugerenciaManual } from "@/components/modal-sugerencia-manual";
+import { ModalIncidencia } from "@/components/modal-incidencia";
 import { GraficoStock } from "@/components/grafico-stock";
 import { GraficoComposicion } from "@/components/grafico-composicion";
 import { GraficoVentas } from "@/components/grafico-ventas";
@@ -47,6 +48,7 @@ export function VistaDetalleProducto({
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState(false);
+  const [modalIncidencia, setModalIncidencia] = useState(false);
   const [soloLectura, setSoloLectura] = useState(false);
 
   useEffect(() => {
@@ -120,6 +122,14 @@ export function VistaDetalleProducto({
         {d.nombre_sucursal && (
           <Badge className="bg-brand-50 text-brand">{d.nombre_sucursal}</Badge>
         )}
+        {/* Reportar desde aca: el producto y la sucursal viajan con el reporte. */}
+        <button
+          onClick={() => setModalIncidencia(true)}
+          title="Reportar un problema con este producto"
+          className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1 text-[12px] text-slate-500 transition-colors hover:border-accent-500 hover:text-accent-700"
+        >
+          <AlertCircle size={13} /> Reportar problema
+        </button>
       </div>
       {d.descripcion && <p className="-mt-3 text-slate-500">{d.descripcion}</p>}
 
@@ -376,6 +386,13 @@ export function VistaDetalleProducto({
         productoInicial={producto}
         sucursalInicial={sucursalId}
         soloIndividual
+      />
+
+      <ModalIncidencia
+        abierto={modalIncidencia}
+        onCerrar={() => setModalIncidencia(false)}
+        producto={producto}
+        sucursalId={sucursalId}
       />
     </div>
   );

@@ -462,3 +462,34 @@ export interface InventarioSalud {
   top_inmovilizado: InventarioInmovilizado[];
   dias_sobre_stock: number;
 }
+
+/** Incidencia: reporte de un error de la plataforma. */
+export type EstadoIncidencia = "abierta" | "en_revision" | "resuelta" | "descartada";
+
+export interface Incidencia {
+  id: string;
+  titulo: string;
+  descripcion: string | null;
+  pantalla: string | null;
+  producto: string | null;
+  sucursal_id: string | null;
+  estado: EstadoIncidencia;
+  respuesta: string | null;
+  reportado_por: string | null;
+  resuelto_por: string | null;
+  creado_en: string;
+  actualizado_en: string | null;
+}
+
+export interface IncidenciasResponse {
+  items: Incidencia[];
+  abiertas: number;
+}
+
+export interface IncidenciaCreate {
+  titulo: string;
+  descripcion?: string | null;
+  pantalla?: string | null;
+  producto?: string | null;
+  sucursal_id?: string | null;
+}

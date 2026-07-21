@@ -443,6 +443,37 @@ export const api = {
     return res.json();
   },
 
+  /** Mesa de incidencias: reportes de errores de la plataforma. */
+  async incidencias(estado?: string): Promise<import("./types").IncidenciasResponse> {
+    const q = estado ? `?estado=${encodeURIComponent(estado)}` : "";
+    return getJSON(`/api/incidencias${q}`);
+  },
+
+  async crearIncidencia(
+    payload: import("./types").IncidenciaCreate
+  ): Promise<import("./types").Incidencia> {
+    const res = await req("/api/incidencias", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo enviar el reporte"));
+    return res.json();
+  },
+
+  async actualizarIncidencia(
+    id: string,
+    payload: { estado?: string; respuesta?: string }
+  ): Promise<import("./types").Incidencia> {
+    const res = await req(`/api/incidencias/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo actualizar la incidencia"));
+    return res.json();
+  },
+
   /** Salud del inventario: inmovilizado, sobre-stock, quiebres. */
   async inventarioSalud(
     opts: { sucursales?: string[]; marcas?: string[]; diasSobreStock?: number } = {}

@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  AlertCircle,
   BarChart3,
   Bell,
   BookOpen,
@@ -36,6 +37,7 @@ const NAV: NavItem[] = [
   { href: "/ventas", label: "Ventas", icon: LineChart },
   { href: "/inventario", label: "Inventario", icon: Boxes },
   { href: "/documentos", label: "Documentos", icon: FolderOpen },
+  { href: "/incidencias", label: "Incidencias", icon: AlertCircle },
   { href: "/auditoria", label: "Auditoría", icon: FileText },
   { href: "/modelo", label: "Modelo", icon: Sigma },
   { href: "/cargar", label: "Cargar datos", icon: Database, soloAdmin: true },

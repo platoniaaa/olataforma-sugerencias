@@ -13,6 +13,7 @@ from .stock_unificado import StockUnificado
 from .auditoria import AuditoriaLog
 from .notificacion import Notificacion
 from .enlace_documento import EnlaceDocumento
+from .incidencia import Incidencia
 
 __all__ = [
     "Sugerido",
@@ -30,4 +31,5 @@ __all__ = [
     "AuditoriaLog",
     "Notificacion",
     "EnlaceDocumento",
+    "Incidencia",
 ]

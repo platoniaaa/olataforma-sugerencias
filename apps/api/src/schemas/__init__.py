@@ -42,6 +42,12 @@ from .auditoria import (
     MarcarLeidasRequest,
 )
 from .documento import DocumentoOut, DocumentoCreate, DocumentoUpdate
+from .incidencia import (
+    IncidenciaOut,
+    IncidenciaCreate,
+    IncidenciaUpdate,
+    IncidenciasResponse,
+)
 
 __all__ = [
     "SugeridoRow",
@@ -82,4 +88,8 @@ __all__ = [
     "DocumentoOut",
     "DocumentoCreate",
     "DocumentoUpdate",
+    "IncidenciaOut",
+    "IncidenciaCreate",
+    "IncidenciaUpdate",
+    "IncidenciasResponse",
 ]
