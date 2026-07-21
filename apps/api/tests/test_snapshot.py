@@ -1,6 +1,8 @@
 """Tests de la historia del sugerido (snapshots) y las alertas post-carga."""
 from datetime import date, timedelta
 
+import pytest
+
 from src.models import Sugerido, SugeridoSnapshot
 from src.services import snapshot_service
 
@@ -9,6 +11,13 @@ def _sug(**kw):
     base = dict(tenant_id="curifor", sucursal_id="LINDEROS", nombre_sucursal="Linderos")
     base.update(kw)
     return Sugerido(**base)
+
+
+@pytest.fixture
+def alertas_on(monkeypatch):
+    """Las alertas vienen APAGADAS por defecto (el umbral no esta calibrado); los
+    tests que prueban su logica las encienden a proposito."""
+    monkeypatch.setattr(snapshot_service.settings, "alertas_habilitadas", True)
 
 
 def test_guarda_solo_las_filas_con_actividad(db_session):
@@ -62,7 +71,7 @@ def test_serie_devuelve_la_evolucion_ordenada(db_session):
     assert serie[0]["stock"] == 2
 
 
-def test_alerta_agrupa_por_sucursal(db_session):
+def test_alerta_agrupa_por_sucursal(db_session, alertas_on):
     """Una notificacion por sucursal, no una por producto: si no, nadie las lee."""
     for i in range(3):
         db_session.add(_sug(producto=f"QUIEBRE-{i}", stock_activo_suc=0, demanda_mensual=10))

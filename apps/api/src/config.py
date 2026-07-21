@@ -56,7 +56,11 @@ class Settings(BaseSettings):
     # llenar la base (son ~8k filas por dia).
     snapshot_retencion_dias: int = 60
     # Notificacion por sucursal con quiebres y productos bajo el punto de pedido.
-    alertas_habilitadas: bool = True
+    # APAGADA por defecto: la primera corrida real dio "Linderos: 2.535 en quiebre
+    # con demanda", que es ruido y no una alerta accionable (la definicion actual
+    # entra cualquier producto sin stock que alguna vez se vendio). Encender recien
+    # cuando el criterio este acotado (p. ej. clase A/B, o top N por valor).
+    alertas_habilitadas: bool = False
 
     # --- Power BI (ingesta automatica via API executeQueries) ---
     # Credenciales de un "service principal" (app registrada en Entra ID) con acceso
