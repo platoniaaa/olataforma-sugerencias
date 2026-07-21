@@ -51,7 +51,12 @@ def _igual(a: Any, b: Any) -> bool:
     if a is None and b is None:
         return True
     if a is None or b is None:
-        return False
+        # "Sin dato" y "cero" son el MISMO hecho de negocio: el modelo deja la
+        # medida en blanco cuando no hay nada y el motor emite 0. Tratarlos como
+        # distintos inflaba las diferencias al 100% en columnas como el transito
+        # (18.910 filas en blanco contra 25.205 ceros) y tapaba las reales.
+        otro = b if a is None else a
+        return isinstance(otro, (int, float)) and not isinstance(otro, bool) and float(otro) == 0
     if isinstance(a, (int, float)) and isinstance(b, (int, float)):
         return abs(float(a) - float(b)) <= TOLERANCIA
     return str(a).strip().lower() == str(b).strip().lower()

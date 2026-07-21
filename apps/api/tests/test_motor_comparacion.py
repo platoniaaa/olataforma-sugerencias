@@ -63,6 +63,32 @@ def test_columna_que_el_motor_no_emite_cuenta_como_divergencia(client, db_sessio
     assert r["por_columna"]["demanda_diaria"]["distintas"] == 1
 
 
+def test_blanco_y_cero_son_lo_mismo(client, db_session):
+    """El modelo deja la medida en blanco cuando no hay nada; el motor emite 0.
+
+    Contarlos como distintos daba 0% de paridad por una diferencia que no existe.
+    """
+    db_session.add(_sug(producto="P1", total_sugerido_suc=10, stock_en_transito_suc=None))
+    db_session.commit()
+    r = client.post(
+        "/api/admin/motor/comparar",
+        files={"file": ("motor.csv", _csv(["P1,LINDEROS,10,,,"]), "text/csv")},
+    ).json()
+    assert r["paridad_pct"] == 100.0
+
+
+def test_pero_un_valor_real_contra_blanco_si_es_diferencia(client, db_session):
+    """Equiparar blanco y cero no puede tapar que a un lado le falte el dato."""
+    db_session.add(_sug(producto="P1", total_sugerido_suc=10, stock_activo_suc=None))
+    db_session.commit()
+    r = client.post(
+        "/api/admin/motor/comparar",
+        files={"file": ("motor.csv", _csv(["P1,LINDEROS,10,7,,"]), "text/csv")},
+    ).json()
+    assert r["paridad_pct"] == 0.0
+    assert r["por_columna"]["stock_activo_suc"]["distintas"] == 1
+
+
 def test_reporta_filas_que_solo_estan_en_un_lado(client, db_session):
     db_session.add(_sug(producto="SOLO-BI", total_sugerido_suc=1))
     db_session.commit()
