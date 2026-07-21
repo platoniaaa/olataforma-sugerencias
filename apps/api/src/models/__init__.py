@@ -12,6 +12,7 @@ from .producto_catalogo import ProductoCatalogo
 from .stock_unificado import StockUnificado
 from .auditoria import AuditoriaLog
 from .notificacion import Notificacion
+from .enlace_documento import EnlaceDocumento
 
 __all__ = [
     "Sugerido",
@@ -28,4 +29,5 @@ __all__ = [
     "StockUnificado",
     "AuditoriaLog",
     "Notificacion",
+    "EnlaceDocumento",
 ]

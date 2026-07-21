@@ -382,3 +382,24 @@ export interface VentasLineasFiltros {
   sucursal?: string;
   q?: string;
 }
+
+/** Enlace a un archivo que vive en SharePoint (no lo almacena la plataforma). */
+export interface Documento {
+  id: string;
+  titulo: string;
+  descripcion: string | null;
+  url: string;
+  categoria: string;
+  orden: number;
+  activo: boolean;
+  creado_por_email: string | null;
+  actualizado_en: string | null;
+}
+
+export interface DocumentoCreate {
+  titulo: string;
+  url: string;
+  descripcion?: string | null;
+  categoria?: string;
+  orden?: number;
+}

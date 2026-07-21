@@ -18,6 +18,7 @@ from .routers import (
     chat,
     compras,
     cron,
+    documentos,
     health,
     post_venta,
     productos,
@@ -79,6 +80,8 @@ app.include_router(post_venta.router, dependencies=_protegido)
 app.include_router(catalogo.router, dependencies=_protegido)
 app.include_router(auditoria.router, dependencies=_protegido)
 app.include_router(ventas.router, dependencies=_protegido)
+# Documentos: todos leen; crear/editar/borrar exige admin en cada endpoint.
+app.include_router(documentos.router, dependencies=_protegido)
 # Admin: requiere flag es_admin (no solo estar logueado).
 app.include_router(admin.router, dependencies=[Depends(requiere_admin)])
 # Chatbot: disponible para todo usuario autenticado.

@@ -10,6 +10,8 @@ import type {
   CatalogoOpciones,
   CatalogoPage,
   DimensionAgrupado,
+  Documento,
+  DocumentoCreate,
   NotificacionesResponse,
   Producto,
   Sucursal,
@@ -68,6 +70,18 @@ function filtrosToParams(f: SugeridoFiltros): URLSearchParams {
   if (f.solo_nacionales) p.set("solo_nacionales", "true");
   if (f.vista && f.vista !== "todas") p.set("vista", f.vista);
   return p;
+}
+
+/** Mensaje legible del error del backend (FastAPI manda `detail` string o array). */
+async function mensajeError(res: Response, fallback: string): Promise<string> {
+  const err = await res.json().catch(() => ({}));
+  const d = (err as { detail?: unknown })?.detail;
+  if (typeof d === "string") return d;
+  if (Array.isArray(d) && d.length) {
+    const msg = (d[0] as { msg?: string })?.msg;
+    if (msg) return msg.replace(/^Value error, /, "");
+  }
+  return fallback;
 }
 
 async function descargar(path: string, body: unknown, fallbackNombre: string): Promise<void> {
@@ -427,6 +441,41 @@ export const api = {
       throw new Error(err.detail ?? "No se pudo cargar el archivo");
     }
     return res.json();
+  },
+
+  /** Enlaces a documentos de SharePoint (ventas historicas, etc.). */
+  async documentos(incluirInactivos = false): Promise<Documento[]> {
+    return getJSON(`/api/documentos?incluir_inactivos=${incluirInactivos}`);
+  },
+
+  async crearDocumento(payload: DocumentoCreate): Promise<Documento> {
+    const res = await req("/api/documentos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo crear el enlace"));
+    return res.json();
+  },
+
+  async editarDocumento(id: string, payload: Partial<DocumentoCreate> & { activo?: boolean }): Promise<Documento> {
+    const res = await req(`/api/documentos/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo editar el enlace"));
+    return res.json();
+  },
+
+  async eliminarDocumento(id: string): Promise<void> {
+    const res = await req(`/api/documentos/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!res.ok && res.status !== 204) throw new Error("No se pudo eliminar el enlace");
+  },
+
+  /** Registra la apertura (auditoria). Fire-and-forget: no bloquea el clic. */
+  registrarAperturaDocumento(id: string): void {
+    req(`/api/documentos/${encodeURIComponent(id)}/apertura`, { method: "POST" }).catch(() => {});
   },
 
   async chat(

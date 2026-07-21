@@ -26,6 +26,10 @@ const ACCIONES: Record<
   recurrente_creada: { label: "Recurrencia +", color: "text-brand bg-brand-50", icon: Repeat },
   recurrente_eliminada: { label: "Recurrencia -", color: "text-red-700 bg-red-50", icon: Trash2 },
   recurrente_aplicada: { label: "Recurrente auto", color: "text-slate-600 bg-slate-100", icon: RefreshCw },
+  documento_creado: { label: "Documento +", color: "text-emerald-700 bg-emerald-50", icon: PlusCircle },
+  documento_editado: { label: "Documento ~", color: "text-amber-700 bg-amber-50", icon: Pencil },
+  documento_eliminado: { label: "Documento -", color: "text-red-700 bg-red-50", icon: Trash2 },
+  documento_abierto: { label: "Abrio documento", color: "text-slate-600 bg-slate-100", icon: LogIn },
 };
 
 type Tab = "actividad" | "accesos";

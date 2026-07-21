@@ -41,6 +41,7 @@ from .auditoria import (
     NotificacionesResponse,
     MarcarLeidasRequest,
 )
+from .documento import DocumentoOut, DocumentoCreate, DocumentoUpdate
 
 __all__ = [
     "SugeridoRow",
@@ -78,4 +79,7 @@ __all__ = [
     "NotificacionOut",
     "NotificacionesResponse",
     "MarcarLeidasRequest",
+    "DocumentoOut",
+    "DocumentoCreate",
+    "DocumentoUpdate",
 ]
