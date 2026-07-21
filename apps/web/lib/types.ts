@@ -63,6 +63,14 @@ export interface SugeridoRow {
   precio_urgente_vor_ford: number | null;
   precio_promociones_ford: number | null;
   precio_urgente_recargo15_ford: number | null;
+  // Margen calculado en el backend (services/margen.py).
+  margen_unitario_clp: number | null;
+  margen_pct: number | null;
+  margen_flota_pct: number | null;
+  margen_sugerido_clp: number | null;
+  sobrecosto_vs_dealer_pct: number | null;
+  /** Unidades ya marcadas como pedidas (services/pedidos_service.py). */
+  unidades_pedidas: number | null;
 }
 
 export interface SugeridoPage {
@@ -426,4 +434,201 @@ export interface DocumentoCreate {
   descripcion?: string | null;
   categoria?: string;
   orden?: number;
+}
+
+/** Salud del inventario: donde esta la plata detenida y donde falta. */
+export interface InventarioResumen {
+  valor_inventario_clp: number;
+  unidades: number;
+  n_filas: number;
+  inmovilizado_clp: number;
+  inmovilizado_n: number;
+  inmovilizado_pct: number;
+  sobre_stock_clp: number;
+  sobre_stock_n: number;
+  sobre_stock_pct: number;
+  quiebre_con_demanda_n: number;
+  bajo_punto_pedido_n: number;
+  sin_costo_n: number;
+  cobertura_dias_mediana: number | null;
+}
+
+export interface InventarioSucursal {
+  sucursal_id: string;
+  nombre_sucursal: string;
+  valor_clp: number;
+  unidades: number;
+  inmovilizado_clp: number;
+  sobre_stock_clp: number;
+  quiebre_con_demanda_n: number;
+  bajo_punto_pedido_n: number;
+  n_productos: number;
+}
+
+export interface InventarioMarca {
+  marca: string;
+  valor_clp: number;
+  inmovilizado_clp: number;
+  n_productos: number;
+}
+
+export interface InventarioInmovilizado {
+  producto: string;
+  descripcion: string | null;
+  sucursal_id: string;
+  nombre_sucursal: string;
+  unidades: number;
+  valor_clp: number;
+}
+
+export interface InventarioSalud {
+  resumen: InventarioResumen;
+  por_sucursal: InventarioSucursal[];
+  por_marca: InventarioMarca[];
+  top_inmovilizado: InventarioInmovilizado[];
+  dias_sobre_stock: number;
+}
+
+/** Incidencia: reporte de un error de la plataforma. */
+export type EstadoIncidencia = "abierta" | "en_revision" | "resuelta" | "descartada";
+
+export interface Incidencia {
+  id: string;
+  titulo: string;
+  descripcion: string | null;
+  pantalla: string | null;
+  producto: string | null;
+  sucursal_id: string | null;
+  estado: EstadoIncidencia;
+  respuesta: string | null;
+  reportado_por: string | null;
+  resuelto_por: string | null;
+  creado_en: string;
+  actualizado_en: string | null;
+}
+
+export interface IncidenciasResponse {
+  items: Incidencia[];
+  abiertas: number;
+}
+
+export interface IncidenciaCreate {
+  titulo: string;
+  descripcion?: string | null;
+  pantalla?: string | null;
+  producto?: string | null;
+  sucursal_id?: string | null;
+}
+
+/** Comparacion motor propio vs Power BI (modo sombra). */
+export interface DivergenciaMotor {
+  producto: string;
+  sucursal_id: string;
+  diferencias: Record<string, { motor: string | number | null; bi: string | number | null }>;
+}
+
+export interface ComparacionMotor {
+  id: string;
+  creado_en: string;
+  filas_motor: number;
+  filas_bi: number;
+  filas_comunes: number;
+  filas_solo_motor: number;
+  filas_solo_bi: number;
+  paridad_pct: number;
+  ejecutado_por: string | null;
+  detalle: {
+    por_columna: Record<string, { iguales: number; distintas: number }>;
+    ejemplos: DivergenciaMotor[];
+    ejemplos_solo_motor: string[];
+    ejemplos_solo_bi: string[];
+  } | null;
+}
+
+/** Linea del sugerido que ya se pidio (cierre del loop con la OC). */
+export interface LineaPedida {
+  id: string;
+  producto: string;
+  sucursal_id: string;
+  unidades: number;
+  n_oc: string | null;
+  proveedor: string | null;
+  recibido: boolean;
+  fecha_recepcion: string | null;
+  creado_por: string | null;
+  creado_en: string;
+}
+
+/** Resultado del simulador what-if. */
+export interface SimulacionSucursal {
+  sucursal_id: string;
+  nombre_sucursal: string;
+  actual_u: number;
+  simulado_u: number;
+  actual_clp: number;
+  simulado_clp: number;
+  delta_u: number;
+  delta_clp: number;
+}
+
+export interface SimulacionCambio {
+  producto: string;
+  sucursal_id: string;
+  actual: number;
+  simulado: number;
+  delta: number;
+  delta_clp: number;
+}
+
+export interface SimulacionResultado {
+  parametros: {
+    ciclo_orden_dias: number;
+    ciclo_orden_dias_cd: number;
+    z_por_clase: Record<string, number>;
+    factor_lead_time: number;
+  };
+  resumen: {
+    actual_unidades: number;
+    simulado_unidades: number;
+    delta_unidades: number;
+    actual_clp: number;
+    simulado_clp: number;
+    delta_clp: number;
+    lineas_que_cambian: number;
+    n_filas: number;
+  };
+  por_sucursal: SimulacionSucursal[];
+  mayores_cambios: SimulacionCambio[];
+}
+
+/** Histórico de ventas (desde 2018), para consulta sin bajar planillas. */
+export interface VentasHistoricasMeta {
+  periodo_min: string | null;
+  periodo_max: string | null;
+  filas: number;
+  sucursales: string[];
+}
+
+export interface VentasHistoricasFiltros {
+  producto?: string;
+  sucursal?: string;
+  periodo_desde?: string; // YYYYMM
+  periodo_hasta?: string; // YYYYMM
+  /** Incluir conceptos internos (D&P, insumos, incentivos). */
+  incluir_internos?: boolean;
+}
+
+export interface VentaHistoricaFila {
+  periodo: string;
+  producto: string;
+  sucursal: string | null;
+  cantidad: number;
+  neto: number | null;
+  n_lineas: number | null;
+}
+
+export interface VentasHistoricasResp {
+  detalle: { items: VentaHistoricaFila[]; total: number; truncado: boolean };
+  por_periodo: { periodo: string; cantidad: number; neto: number }[];
+  por_sucursal: { sucursal: string; cantidad: number; neto: number }[];
 }

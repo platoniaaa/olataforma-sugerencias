@@ -2,15 +2,18 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import { AlertCircle, ArrowLeft, Plus, Trash2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge, colorABC } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ModalSugerenciaManual } from "@/components/modal-sugerencia-manual";
+import { ModalIncidencia } from "@/components/modal-incidencia";
 import { EtiquetaSugerencia } from "@/components/etiqueta-sugerencia";
 import { GraficoStock } from "@/components/grafico-stock";
 import { GraficoComposicion } from "@/components/grafico-composicion";
 import { GraficoVentas } from "@/components/grafico-ventas";
+import { GraficoHistoria } from "@/components/grafico-historia";
+import { BloquePedidos } from "@/components/bloque-pedidos";
 import { api } from "@/lib/api-client";
 import { getSoloLectura } from "@/lib/auth";
 import { formatoCLP, formatoFechaHora, formatoNumero } from "@/lib/formato";
@@ -48,6 +51,7 @@ export function VistaDetalleProducto({
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState(false);
+  const [modalIncidencia, setModalIncidencia] = useState(false);
   const [soloLectura, setSoloLectura] = useState(false);
 
   useEffect(() => {
@@ -121,6 +125,14 @@ export function VistaDetalleProducto({
         {d.nombre_sucursal && (
           <Badge className="bg-brand-50 text-brand">{d.nombre_sucursal}</Badge>
         )}
+        {/* Reportar desde aca: el producto y la sucursal viajan con el reporte. */}
+        <button
+          onClick={() => setModalIncidencia(true)}
+          title="Reportar un problema con este producto"
+          className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1 text-[12px] text-slate-500 transition-colors hover:border-accent-500 hover:text-accent-700"
+        >
+          <AlertCircle size={13} /> Reportar problema
+        </button>
       </div>
       {d.descripcion && <p className="-mt-3 text-slate-500">{d.descripcion}</p>}
 
@@ -195,6 +207,63 @@ export function VistaDetalleProducto({
         </Card>
       </div>
 
+      {/* Margen: solo para los productos que estan en la lista de precios FORD. */}
+      {d.margen_pct != null && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Margen FORD</CardTitle>
+          </CardHeader>
+          <CardContent className="py-2">
+            <div className="flex flex-wrap items-baseline gap-x-8 gap-y-2">
+              <div>
+                <p className="text-[12px] text-slate-500">Margen sobre precio público</p>
+                <p
+                  className={`text-2xl font-semibold tabular ${
+                    d.margen_pct >= 0 ? "text-emerald-700" : "text-red-700"
+                  }`}
+                >
+                  {formatoNumero(d.margen_pct, 1)}%
+                </p>
+              </div>
+              <div>
+                <p className="text-[12px] text-slate-500">Por unidad</p>
+                <p className="text-lg font-medium tabular">
+                  {formatoCLP(d.margen_unitario_clp)}
+                </p>
+              </div>
+              {d.margen_sugerido_clp != null && (
+                <div>
+                  <p className="text-[12px] text-slate-500">Margen del sugerido</p>
+                  <p className="text-lg font-medium tabular">
+                    {formatoCLP(d.margen_sugerido_clp)}
+                  </p>
+                </div>
+              )}
+            </div>
+            <div className="mt-3 border-t border-slate-100 pt-2">
+              <Dato label="Precio Público FORD" valor={formatoCLP(d.precio_publico_ford)} />
+              <Dato label="Precio Flota FORD" valor={formatoCLP(d.precio_flota_ford)} />
+              {d.margen_flota_pct != null && (
+                <Dato
+                  label="Margen a precio flota"
+                  valor={`${formatoNumero(d.margen_flota_pct, 1)}%`}
+                />
+              )}
+              {d.sobrecosto_vs_dealer_pct != null && (
+                <Dato
+                  label="Costo vs precio dealer"
+                  valor={`${d.sobrecosto_vs_dealer_pct > 0 ? "+" : ""}${formatoNumero(
+                    d.sobrecosto_vs_dealer_pct,
+                    1
+                  )}%`}
+                  tooltip="Cuánto está el costo unitario por encima (o debajo) del precio dealer de FORD."
+                />
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Banner sugerido */}
       <Card className="border-brand/20 bg-gradient-to-br from-brand-50 to-white">
         <CardContent className="flex flex-wrap items-center justify-between gap-4">
@@ -219,6 +288,14 @@ export function VistaDetalleProducto({
           />
         </CardContent>
       </Card>
+
+      {/* Cierre del loop: qué de esta línea ya se pidió de verdad. */}
+      <BloquePedidos
+        producto={d.producto}
+        sucursalId={d.sucursal_id}
+        sugerido={(d.total_sugerido_suc ?? 0) + manualTotal}
+        proveedor={d.proveedor}
+      />
 
       {/* Compra centralizada: a qué sucursales abastece este pedido del CD */}
       {sucursalesOrigen.length > 0 && (
@@ -248,6 +325,9 @@ export function VistaDetalleProducto({
         sucursalId={d.sucursal_id}
         sucursalNombre={d.nombre_sucursal}
       />
+
+      {/* Evolución diaria: la tarjeta aparece sola cuando hay al menos dos snapshots. */}
+      <GraficoHistoria producto={d.producto} sucursalId={d.sucursal_id} />
 
       {reemplazos.length > 0 && (
         <Card>
@@ -326,6 +406,13 @@ export function VistaDetalleProducto({
         productoInicial={producto}
         sucursalInicial={sucursalId}
         soloIndividual
+      />
+
+      <ModalIncidencia
+        abierto={modalIncidencia}
+        onCerrar={() => setModalIncidencia(false)}
+        producto={producto}
+        sucursalId={sucursalId}
       />
     </div>
   );

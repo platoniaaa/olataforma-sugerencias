@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from ..db import get_db
+from ..models import Sugerido
 from ..schemas import (
     AgrupadoRow,
     ColumnaFiltro,
@@ -16,7 +17,7 @@ from ..schemas import (
     SugeridoRow,
     VentasResponse,
 )
-from ..services import excel_export, sugerido_service
+from ..services import excel_export, margen, snapshot_service, sugerido_service
 from ..services.auth import sucursales_permitidas
 from ..services.sugerido_service import SUCURSALES_OCULTAS
 
@@ -119,6 +120,19 @@ def ventas(
     return VentasResponse(**sugerido_service.ventas_12m(db, producto, sucursal_id))
 
 
+@router.get("/{producto}/{sucursal_id}/historia")
+def historia(
+    producto: str, sucursal_id: str,
+    dias: int = Query(90, ge=7, le=365),
+    db: Session = Depends(get_db),
+    permitidas: list[str] | None = Depends(sucursales_permitidas),
+):
+    """Evolucion del sugerido y el stock segun los snapshots diarios guardados."""
+    if _sin_acceso(sucursal_id, permitidas):
+        raise HTTPException(status_code=404, detail="No existe sugerido para ese producto/sucursal")
+    return {"items": snapshot_service.serie(db, producto, sucursal_id, dias=dias)}
+
+
 @router.get("/{producto}/{sucursal_id}", response_model=SugeridoRow)
 def detalle(
     producto: str, sucursal_id: str, db: Session = Depends(get_db),
@@ -129,7 +143,11 @@ def detalle(
     row = sugerido_service.detalle(db, producto, sucursal_id)
     if not row:
         raise HTTPException(status_code=404, detail="No existe sugerido para ese producto/sucursal")
-    return row
+    # El detalle no pasa por listar(): el margen se calcula aca para que la ficha
+    # del producto muestre lo mismo que las columnas de la tabla.
+    fila = {c.name: getattr(row, c.name) for c in Sugerido.__table__.columns}
+    margen.calcular_margen(fila)
+    return SugeridoRow.model_validate(fila)
 
 
 @router.post("/export-excel")

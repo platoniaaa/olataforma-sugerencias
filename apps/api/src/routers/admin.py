@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..db import get_db
-from ..services import excel_loader, powerbi_desktop_loader, powerbi_loader
+from ..services import excel_loader, motor_comparacion, powerbi_desktop_loader, powerbi_loader
+from ..services.auth import requiere_admin
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 settings = get_settings()
@@ -24,6 +25,37 @@ async def cargar_sugerido(file: UploadFile = File(...), db: Session = Depends(ge
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return resumen
+
+
+@router.post("/motor/comparar")
+async def comparar_motor(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    email: str = Depends(requiere_admin),
+):
+    """Contrasta el sugerido que produjo el motor propio contra el vivo (Power BI).
+
+    NO escribe en `sugerido`: solo compara y guarda el reporte. Asi se puede
+    validar el motor todos los dias sin exponer a los compradores a sus datos."""
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="El archivo esta vacio")
+    try:
+        resultado = motor_comparacion.comparar(db, content, file.filename or "motor.csv")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    motor_comparacion.guardar(db, resultado, usuario_email=email)
+    return resultado
+
+
+@router.get("/motor/comparaciones")
+def comparaciones_motor(
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    _email: str = Depends(requiere_admin),
+):
+    """Historial de comparaciones motor vs Power BI (la mas reciente primero)."""
+    return {"items": motor_comparacion.ultimas(db, limit=limit)}
 
 
 @router.get("/powerbi/estado")

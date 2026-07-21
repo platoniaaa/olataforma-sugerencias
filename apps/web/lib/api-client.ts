@@ -458,6 +458,152 @@ export const api = {
     return res.json();
   },
 
+  /** Simulador what-if: recalcula el sugerido con otros parametros. No guarda nada. */
+  async simular(payload: {
+    sucursales?: string[];
+    marcas?: string[];
+    ciclo_orden_dias?: number;
+    ciclo_orden_dias_cd?: number;
+    z_por_clase?: Record<string, number>;
+    factor_lead_time?: number;
+  }): Promise<import("./types").SimulacionResultado> {
+    const res = await req("/api/inventario/simular", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo simular"));
+    return res.json();
+  },
+
+  /** Marcar una linea del sugerido como ya pedida (cierra el loop con la OC). */
+  async marcarPedido(payload: {
+    producto: string;
+    sucursal_id: string;
+    unidades: number;
+    n_oc?: string | null;
+    proveedor?: string | null;
+  }): Promise<{ id: string }> {
+    const res = await req("/api/compras/pedidos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo registrar el pedido"));
+    return res.json();
+  },
+
+  async pedidos(
+    producto?: string,
+    sucursalId?: string
+  ): Promise<{ items: import("./types").LineaPedida[] }> {
+    const p = new URLSearchParams();
+    if (producto) p.set("producto", producto);
+    if (sucursalId) p.set("sucursal_id", sucursalId);
+    return getJSON(`/api/compras/pedidos?${p.toString()}`);
+  },
+
+  async eliminarPedido(id: string): Promise<void> {
+    const res = await req(`/api/compras/pedidos/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!res.ok && res.status !== 204) throw new Error("No se pudo eliminar el pedido");
+  },
+
+  /** Comparaciones del motor propio contra el Power BI (modo sombra). */
+  async comparacionesMotor(
+    limit = 10
+  ): Promise<{ items: import("./types").ComparacionMotor[] }> {
+    return getJSON(`/api/admin/motor/comparaciones?limit=${limit}`);
+  },
+
+  /** Evolucion diaria del producto (snapshots guardados tras cada sync). */
+  async historiaProducto(
+    producto: string,
+    sucursalId: string,
+    dias = 90
+  ): Promise<{ items: { fecha: string; sugerido: number; stock: number; punto_pedido: number }[] }> {
+    return getJSON(
+      `/api/sugerido/${encodeURIComponent(producto)}/${encodeURIComponent(sucursalId)}/historia?dias=${dias}`
+    );
+  },
+
+  /** Historico de ventas (desde 2018): que hay cargado. */
+  async ventasHistoricasMeta(): Promise<import("./types").VentasHistoricasMeta> {
+    return getJSON("/api/ventas-historicas/meta");
+  },
+
+  async ventasHistoricas(
+    f: import("./types").VentasHistoricasFiltros
+  ): Promise<import("./types").VentasHistoricasResp> {
+    const p = new URLSearchParams();
+    if (f.producto) p.set("producto", f.producto);
+    if (f.sucursal) p.set("sucursal", f.sucursal);
+    if (f.periodo_desde) p.set("periodo_desde", f.periodo_desde);
+    if (f.periodo_hasta) p.set("periodo_hasta", f.periodo_hasta);
+    if (f.incluir_internos) p.set("incluir_internos", "true");
+    return getJSON(`/api/ventas-historicas?${p.toString()}`);
+  },
+
+  async exportarVentasHistoricas(
+    f: import("./types").VentasHistoricasFiltros
+  ): Promise<void> {
+    const p = new URLSearchParams();
+    if (f.producto) p.set("producto", f.producto);
+    if (f.sucursal) p.set("sucursal", f.sucursal);
+    if (f.periodo_desde) p.set("periodo_desde", f.periodo_desde);
+    if (f.periodo_hasta) p.set("periodo_hasta", f.periodo_hasta);
+    const res = await req(`/api/ventas-historicas/export-csv?${p.toString()}`);
+    if (!res.ok) throw new Error("No se pudo generar el archivo");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "ventas_historicas.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+
+  /** Mesa de incidencias: reportes de errores de la plataforma. */
+  async incidencias(estado?: string): Promise<import("./types").IncidenciasResponse> {
+    const q = estado ? `?estado=${encodeURIComponent(estado)}` : "";
+    return getJSON(`/api/incidencias${q}`);
+  },
+
+  async crearIncidencia(
+    payload: import("./types").IncidenciaCreate
+  ): Promise<import("./types").Incidencia> {
+    const res = await req("/api/incidencias", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo enviar el reporte"));
+    return res.json();
+  },
+
+  async actualizarIncidencia(
+    id: string,
+    payload: { estado?: string; respuesta?: string }
+  ): Promise<import("./types").Incidencia> {
+    const res = await req(`/api/incidencias/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo actualizar la incidencia"));
+    return res.json();
+  },
+
+  /** Salud del inventario: inmovilizado, sobre-stock, quiebres. */
+  async inventarioSalud(
+    opts: { sucursales?: string[]; marcas?: string[]; diasSobreStock?: number } = {}
+  ): Promise<import("./types").InventarioSalud> {
+    const p = new URLSearchParams();
+    (opts.sucursales ?? []).forEach((s) => p.append("sucursal", s));
+    (opts.marcas ?? []).forEach((m) => p.append("filtro1", m));
+    if (opts.diasSobreStock) p.set("dias_sobre_stock", String(opts.diasSobreStock));
+    return getJSON(`/api/inventario/salud?${p.toString()}`);
+  },
+
   /** Enlaces a documentos de SharePoint (ventas historicas, etc.). */
   async documentos(incluirInactivos = false): Promise<Documento[]> {
     return getJSON(`/api/documentos?incluir_inactivos=${incluirInactivos}`);

@@ -17,7 +17,7 @@ from ..models import (
     VentaMensual,
 )
 from ..schemas import SugeridoFiltros
-from . import stock_service
+from . import margen, pedidos_service, stock_service
 
 # Columnas por las que se permite ordenar (whitelist para evitar inyeccion).
 SORTABLE = {c.name for c in Sugerido.__table__.columns}
@@ -506,6 +506,8 @@ def listar(
     # el modelo Sugerido. Las filas que ya vienen del catalogo o sinteticas no
     # se tocan: el helper salta cuando ya hay 'reemplazos' en la fila.
     _enriquecer_con_catalogo(items, db)
+    margen.agregar_margen(items)
+    pedidos_service.agregar_a_filas(items, db)
 
     # Regla de negocio (jun-2026): si tiene stock para su demanda mensual y no
     # tuvo venta el mes anterior, no se sugiere comprar.
@@ -828,6 +830,8 @@ def listar_por_ids(
         items.append(d)
 
     _enriquecer_con_catalogo(items, db)
+    margen.agregar_margen(items)
+    pedidos_service.agregar_a_filas(items, db)
     # Misma regla de negocio que aplica `listar`: stock cubre el mes + sin venta
     # el mes anterior -> pedir = No. Asi el export Excel respeta lo mismo que ve
     # la grilla.

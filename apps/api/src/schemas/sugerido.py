@@ -75,6 +75,14 @@ class SugeridoRow(BaseModel):
     precio_urgente_vor_ford: int | None = None
     precio_promociones_ford: int | None = None
     precio_urgente_recargo15_ford: int | None = None
+    # Margen calculado (services/margen.py): None si falta el precio o el costo.
+    margen_unitario_clp: float | None = None
+    margen_pct: float | None = None
+    margen_flota_pct: float | None = None
+    margen_sugerido_clp: float | None = None
+    sobrecosto_vs_dealer_pct: float | None = None
+    # Unidades ya pedidas de esta linea (services/pedidos_service.py).
+    unidades_pedidas: float | None = None
 
 
 class SugeridoPage(BaseModel):
