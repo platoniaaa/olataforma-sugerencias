@@ -162,6 +162,12 @@ export interface SugerenciaManual {
   lote_id?: string | null;
   /** Fecha (ISO) en que se archiva automáticamente. null = no vence. */
   expira_en?: string | null;
+  archivada?: boolean;
+  /** Cómo se pidió (null los dos = unidades directas). */
+  dias_inventario?: number | null;
+  stock_objetivo?: number | null;
+  /** Si vino de una regla que se repite sola. */
+  recurrente_id?: string | null;
 }
 
 export interface LineaCarro {

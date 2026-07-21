@@ -70,6 +70,11 @@ class SugerenciaManualOut(BaseModel):
     archivada: bool = False
     lote_id: str | None = None  # UUID compartido por las filas de una misma carga masiva
     expira_en: datetime | None = None  # Fecha en que se archiva; None = no vence
+    # Como se pidio: permite explicar de donde salio el numero de unidades.
+    dias_inventario: int | None = None
+    stock_objetivo: int | None = None
+    # Si vino de una regla que se repite (para distinguirla de una carga puntual).
+    recurrente_id: str | None = None
 
 
 class RecurrenteCreate(BaseModel):

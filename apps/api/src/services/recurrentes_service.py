@@ -60,6 +60,8 @@ def _crear_instancias(db: Session, rec: SugerenciaRecurrente) -> int:
                     producto=rec.producto, sucursal_id=rec.sucursal_id, unidades=u,
                     motivo=rec.motivo, creado_por="recurrente", tenant_id=tenant,
                     recurrente_id=rec.id,
+                    dias_inventario=rec.dias_inventario,
+                    stock_objetivo=rec.stock_objetivo,
                 )
             )
     else:  # grupo
@@ -79,6 +81,8 @@ def _crear_instancias(db: Session, rec: SugerenciaRecurrente) -> int:
                     SugerenciaManual(
                         producto=par[0], sucursal_id=par[1], unidades=u, motivo=rec.motivo,
                         creado_por="recurrente", tenant_id=tenant, recurrente_id=rec.id,
+                        dias_inventario=rec.dias_inventario,
+                        stock_objetivo=rec.stock_objetivo,
                     )
                 )
         else:

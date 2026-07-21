@@ -128,6 +128,8 @@ def crear(
         creado_por=email,
         tenant_id=settings.default_tenant_id,
         expira_en=_expira_en(payload.expira_en),
+        dias_inventario=payload.dias_inventario,
+        stock_objetivo=payload.stock_objetivo,
     )
     db.add(s)
     db.flush()
@@ -189,6 +191,8 @@ def crear_masiva(
                     motivo=payload.motivo, creado_por=email,
                     tenant_id=settings.default_tenant_id,
                     lote_id=lote_id, expira_en=expira_en,
+                    dias_inventario=payload.dias_inventario,
+                    stock_objetivo=payload.stock_objetivo,
                 )
             )
     elif payload.unidades:

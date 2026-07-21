@@ -28,6 +28,19 @@ class SugerenciaManual(Base):
     unidades: Mapped[int] = mapped_column(Integer, nullable=False)
     motivo: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Como se pidio la sugerencia. `unidades` guarda siempre el RESULTADO en
+    # unidades; estos dos campos guardan la intencion original, que es lo que
+    # permite explicar despues de donde salio ese numero:
+    #   - dias_inventario: se pidieron N dias de cobertura (se convirtio con la
+    #     demanda diaria del momento).
+    #   - stock_objetivo: se pidio mantener N unidades en bodega (se guardo la
+    #     brecha que faltaba para llegar a ese nivel).
+    #   - ambos en NULL: se pidieron unidades directas.
+    # NULL en filas viejas (creadas antes de este cambio): la UI lo muestra como
+    # unidades directas, que es lo que eran en la practica.
+    dias_inventario: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stock_objetivo: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     creado_por: Mapped[str | None] = mapped_column(String, nullable=True)
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     # Fecha en que la sugerencia deja de tener efecto. NULL = no vence (vive hasta que
