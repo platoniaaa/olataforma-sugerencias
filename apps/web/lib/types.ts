@@ -493,3 +493,28 @@ export interface IncidenciaCreate {
   producto?: string | null;
   sucursal_id?: string | null;
 }
+
+/** Comparacion motor propio vs Power BI (modo sombra). */
+export interface DivergenciaMotor {
+  producto: string;
+  sucursal_id: string;
+  diferencias: Record<string, { motor: string | number | null; bi: string | number | null }>;
+}
+
+export interface ComparacionMotor {
+  id: string;
+  creado_en: string;
+  filas_motor: number;
+  filas_bi: number;
+  filas_comunes: number;
+  filas_solo_motor: number;
+  filas_solo_bi: number;
+  paridad_pct: number;
+  ejecutado_por: string | null;
+  detalle: {
+    por_columna: Record<string, { iguales: number; distintas: number }>;
+    ejemplos: DivergenciaMotor[];
+    ejemplos_solo_motor: string[];
+    ejemplos_solo_bi: string[];
+  } | null;
+}

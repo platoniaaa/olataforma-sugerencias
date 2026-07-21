@@ -10,6 +10,7 @@ import { api } from "@/lib/api-client";
 import { getEsAdmin } from "@/lib/auth";
 import { formatoNumero } from "@/lib/formato";
 import { SincronizacionManual } from "@/components/sincronizacion-manual";
+import { PanelMotorSombra } from "@/components/panel-motor-sombra";
 import type { CargaResultado } from "@/lib/types";
 
 export default function CargarPage() {
@@ -235,6 +236,9 @@ export default function CargarPage() {
         </CardContent>
       </Card>
       )}
+
+      {/* Aparece solo si ya se corrio alguna comparacion del motor propio. */}
+      <PanelMotorSombra />
 
       {resultado && (
         <Card className="border-emerald-200">

@@ -15,6 +15,7 @@ from .notificacion import Notificacion
 from .enlace_documento import EnlaceDocumento
 from .incidencia import Incidencia
 from .sugerido_snapshot import SugeridoSnapshot
+from .comparacion_motor import ComparacionMotor
 
 __all__ = [
     "Sugerido",
@@ -34,4 +35,5 @@ __all__ = [
     "EnlaceDocumento",
     "Incidencia",
     "SugeridoSnapshot",
+    "ComparacionMotor",
 ]

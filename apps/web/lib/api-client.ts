@@ -443,6 +443,13 @@ export const api = {
     return res.json();
   },
 
+  /** Comparaciones del motor propio contra el Power BI (modo sombra). */
+  async comparacionesMotor(
+    limit = 10
+  ): Promise<{ items: import("./types").ComparacionMotor[] }> {
+    return getJSON(`/api/admin/motor/comparaciones?limit=${limit}`);
+  },
+
   /** Evolucion diaria del producto (snapshots guardados tras cada sync). */
   async historiaProducto(
     producto: string,
