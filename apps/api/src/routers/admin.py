@@ -7,7 +7,13 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..db import get_db
-from ..services import excel_loader, motor_comparacion, powerbi_desktop_loader, powerbi_loader
+from ..services import (
+    auditoria_service,
+    excel_loader,
+    motor_comparacion,
+    powerbi_desktop_loader,
+    powerbi_loader,
+)
 from ..services.auth import requiere_admin
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -24,6 +30,16 @@ async def cargar_sugerido(file: UploadFile = File(...), db: Session = Depends(ge
         resumen = excel_loader.cargar_sugerido(db, file.filename or "", content)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    # Sello de "datos actualizados": lo lee la etiqueta de la web. Antes solo lo
+    # dejaba el job del Power BI, asi que con el motor la fecha quedaba congelada
+    # en la ultima corrida del BI aunque los datos fueran de hoy.
+    auditoria_service.registrar(
+        db,
+        accion="datos_sincronizados",
+        entidad="sistema",
+        detalle=f"Sugerido cargado: {resumen.get('filas_cargadas')} filas",
+    )
+    db.commit()
     return resumen
 
 

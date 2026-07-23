@@ -22,12 +22,17 @@ settings = get_settings()
 
 @router.get("/api/ultima-sincronizacion")
 def ultima_sync(db: Session = Depends(get_db)):
-    """Devuelve el timestamp de la ultima carga desde Power BI Desktop."""
+    """Timestamp de la ultima carga del sugerido, sea cual sea su origen.
+
+    Acepta el sello nuevo del motor (`datos_sincronizados`) y el historico del
+    Power BI (`powerbi_sincronizado`), y devuelve el mas reciente. Asi la etiqueta
+    "Datos actualizados" refleja la carga real y no queda pegada en la ultima
+    corrida del BI."""
     log = db.scalars(
         select(AuditoriaLog)
         .where(
             AuditoriaLog.tenant_id == settings.default_tenant_id,
-            AuditoriaLog.accion == "powerbi_sincronizado",
+            AuditoriaLog.accion.in_(("datos_sincronizados", "powerbi_sincronizado")),
         )
         .order_by(desc(AuditoriaLog.creado_en))
         .limit(1)

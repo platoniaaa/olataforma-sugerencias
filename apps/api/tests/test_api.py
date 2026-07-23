@@ -904,3 +904,24 @@ def test_manual_vencida_no_suma_en_chatbot_tool(db_session):
     db_session.commit()
     out = _tool_obtener_sugerido(db_session, "20 BXO5W30AA", "LINDEROS")
     assert out["ajuste_manual_vigente"] == 0
+
+
+def test_carga_actualiza_la_fecha_de_ultima_sincronizacion(client):
+    """La etiqueta 'Datos actualizados' debe reflejar CUALQUIER carga del sugerido.
+
+    Regresion: antes solo el job del Power BI dejaba el sello 'powerbi_sincronizado',
+    asi que con el motor la fecha quedaba congelada en la ultima corrida del BI
+    aunque los datos fueran de hoy. Ahora la carga deja 'datos_sincronizados' y el
+    endpoint devuelve el mas reciente de ambos."""
+    antes = client.get("/api/ultima-sincronizacion").json()["creado_en"]
+
+    buf = _xlsx_sugerido([
+        ["producto", "sucursal_id", "pedir", "total_sugerido_suc"],
+        ["SYNC-1", "RANCAGUA", "Si", 1],
+    ])
+    r = client.post("/api/admin/cargar-sugerido", files={"file": ("s.xlsx", buf, MIME_XLSX)})
+    assert r.status_code == 200
+
+    despues = client.get("/api/ultima-sincronizacion").json()["creado_en"]
+    assert despues is not None
+    assert despues != antes  # la carga movio la fecha
