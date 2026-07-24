@@ -1,7 +1,14 @@
 """Configuracion central de la app, leida desde variables de entorno (.env)."""
+import secrets
+import sys
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Valor placeholder que trae el repo (publico). Nunca debe usarse para firmar en
+# produccion: cualquiera que lea el repo podria fabricar un token de admin.
+_AUTH_SECRET_INSEGURO = "cambiar-en-produccion-AUTH_SECRET"
 
 
 class Settings(BaseSettings):
@@ -24,8 +31,9 @@ class Settings(BaseSettings):
 
     # --- Login ---
     # Clave para firmar los tokens de sesion. DEBE configurarse en produccion
-    # (variable AUTH_SECRET en Render/Vercel). El default no es seguro.
-    auth_secret: str = "cambiar-en-produccion-AUTH_SECRET"
+    # (variable AUTH_SECRET en Render). Si queda en el placeholder, un validador la
+    # reemplaza por una aleatoria por proceso (ver _blindar_auth_secret).
+    auth_secret: str = _AUTH_SECRET_INSEGURO
     token_horas: int = 12  # duracion de la sesion
 
     # Clave para el cron de sugerencias recurrentes (GitHub Actions -> endpoint publico).
@@ -129,6 +137,27 @@ SUMMARIZECOLUMNS(
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def _blindar_auth_secret(self) -> "Settings":
+        """Nunca firmar con la clave publica del repo.
+
+        Si AUTH_SECRET no se configuro (queda en el placeholder o vacio), se genera
+        una clave aleatoria por proceso. Eso CIERRA el agujero de inmediato -los
+        tokens forjados con el valor publico dejan de validar-, a costa de que las
+        sesiones caigan en cada reinicio del servidor. Para que las sesiones
+        persistan entre despliegues, hay que definir un AUTH_SECRET estable en
+        Render (una vez).
+        """
+        if self.auth_secret.strip() in ("", _AUTH_SECRET_INSEGURO):
+            self.auth_secret = secrets.token_urlsafe(48)
+            print(
+                "ADVERTENCIA seguridad: AUTH_SECRET no esta configurado. Se uso una "
+                "clave aleatoria por proceso (las sesiones se pierden en cada "
+                "reinicio). Define AUTH_SECRET en Render para sesiones estables.",
+                file=sys.stderr,
+            )
+        return self
 
     @property
     def cors_origins_list(self) -> list[str]:
