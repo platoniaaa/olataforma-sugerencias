@@ -95,10 +95,11 @@ export function VistaDetalleProducto({
 
   if (!d) return <p className="text-slate-500">Cargando…</p>;
 
-  // Ciclo de orden: 3 dias cuando la sucursal se abastece del CD, 5 si compra directo
-  // al proveedor (igual que el modelo: CICLO_ORDEN_DIAS_CD=3 vs CICLO_ORDEN_DIAS=5). Sin
-  // esto la barra "Stock Optimo" no cuadraba con el sugerido en productos abastecidos del CD.
-  const cicloOrden = ["si", "sí"].includes((d.abastece_cd ?? "").toLowerCase()) ? 3 : 5;
+  // Ciclo de orden: 5 dias en ambos casos (compra directa y abastecido del CD), igual
+  // que el modelo (CICLO_ORDEN_DIAS = CICLO_ORDEN_DIAS_CD = 5). Unificado el 24-jul-2026
+  // por decision de Abastecimiento; antes era 3 via CD. La barra "Stock Optimo" usa este
+  // mismo valor para cuadrar con el sugerido.
+  const cicloOrden = 5;
   const stockOptimo =
     (d.demanda_diaria ?? 0) * (cicloOrden + (d.lt_efectivo ?? 0)) + (d.stock_seguridad ?? 0);
   const pctStock = stockOptimo > 0 ? Math.min(100, ((d.stock_activo_suc ?? 0) / stockOptimo) * 100) : 0;

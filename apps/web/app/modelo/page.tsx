@@ -236,19 +236,33 @@ export default function ModeloPage() {
               la venta:
             </P>
             <Formula>Stock de seguridad = Z × desviación × √(meses de protección)</Formula>
-            <Tabla
-              headers={["Clase", "Z (normal)", "Z (importado por CD)"]}
-              rows={[
-                ["A", "1,645", "1,282"],
-                ["B", "1,282", "1,036"],
-                ["C", "0,842", "—"],
-                ["D", "0", "—"],
-              ]}
-            />
             <ul className="max-w-3xl space-y-2 text-[14px] text-ink-700">
               <Bullet><strong>Z (nivel de servicio) según la clase:</strong> cuanto más importante el producto, más colchón.</Bullet>
               <Bullet><strong>Desviación:</strong> cuánto varía la venta mes a mes (de la misma serie ya winsorizada).</Bullet>
-              <Bullet><strong>Meses de protección = (lead time efectivo + ciclo de orden) ÷ 22.</strong> El ciclo de orden es 5 días directo y 3 vía CD.</Bullet>
+              <Bullet><strong>Meses de protección = (lead time efectivo + ciclo de orden) ÷ 22.</strong> El ciclo de orden es 5 días, tanto en compra directa como vía CD.</Bullet>
+            </ul>
+
+            <p className="kicker mt-5 mb-2">Niveles de servicio</p>
+            <P className="text-[13px] text-ink-600">
+              El <strong>nivel de servicio</strong> es la probabilidad de <strong>no</strong> quebrar
+              stock durante la ventana de protección. El factor Z lo traduce a un colchón: un Z más
+              alto cubre más escenarios de venta (menos riesgo de quiebre) a costa de más inventario.
+              Por eso las clases más importantes llevan un nivel de servicio más alto.
+            </P>
+            <Tabla
+              headers={["Clase", "Z (normal)", "Nivel de servicio", "Z (importado por CD)", "Nivel (imp. CD)"]}
+              rows={[
+                ["A", "1,645", "95 %", "1,282", "90 %"],
+                ["B", "1,282", "90 %", "1,036", "85 %"],
+                ["C", "0,842", "80 %", "—", "—"],
+                ["D", "0", "Sin colchón", "—", "—"],
+              ]}
+            />
+            <ul className="max-w-3xl space-y-2 text-[14px] text-ink-700">
+              <Bullet><strong>Clase A — 95 %:</strong> los productos más críticos; casi nunca deben quebrar.</Bullet>
+              <Bullet><strong>Clase B — 90 %</strong> y <strong>Clase C — 80 %:</strong> colchón intermedio, proporcional a su rotación.</Bullet>
+              <Bullet><strong>Clase D — sin colchón (Z = 0):</strong> venta esporádica; no se reserva stock de seguridad.</Bullet>
+              <Bullet><strong>Importado por CD:</strong> usa un nivel de servicio reducido (A 90 %, B 85 %) porque el CD consolida la variabilidad de varias sucursales y no necesita tanto colchón por cada una.</Bullet>
             </ul>
             <P className="text-[13px] text-ink-600">
               En criollo: productos importantes y de venta irregular llevan más colchón; los parejos o
@@ -314,11 +328,11 @@ export default function ModeloPage() {
               rows={[
                 ["Escalar winsorización (k)", "3", "Qué tan estricto es el recorte de meses pico (antes 1)."],
                 ["Días hábiles por mes", "22", "Divisor para pasar de demanda mensual a diaria."],
-                ["Ciclo de orden", "5 directo / 3 vía CD", "Días de cobertura extra que se agregan al pedir."],
+                ["Ciclo de orden", "5 días (directo y vía CD)", "Días de cobertura extra que se agregan al pedir."],
                 ["Lead time por defecto", "8 días", "Cuando no hay proveedor ni historial de OC."],
                 ["Lead time CD → sucursal", "1 (RM) / 2 (resto)", "Días de traslado del CD a la sucursal."],
                 ["Vigencia de tránsito", "30 d nacional / 180 d importado", "Ventana para contar una OC como “en camino”."],
-                ["Nivel de servicio Z", "A 1,645 · B 1,282 · C 0,842 · D 0", "Colchón por clase (más alto = más stock de seguridad)."],
+                ["Nivel de servicio Z", "A 95 % · B 90 % · C 80 % · D 0", "Probabilidad de no quebrar por clase (Z: 1,645 / 1,282 / 0,842 / 0)."],
               ]}
             />
           </Section>

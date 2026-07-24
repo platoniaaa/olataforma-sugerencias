@@ -20,7 +20,7 @@ const Z_ACTUAL: Record<string, number> = { A: 1.645, B: 1.282, C: 0.842, D: 0 };
 
 export default function SimuladorPage() {
   const [co, setCo] = useState(5);
-  const [coCd, setCoCd] = useState(3);
+  const [coCd, setCoCd] = useState(5);
   const [z, setZ] = useState<Record<string, number>>({ ...Z_ACTUAL });
   const [factorLt, setFactorLt] = useState(1);
   const [r, setR] = useState<SimulacionResultado | null>(null);
@@ -94,7 +94,7 @@ export default function SimuladorPage() {
               onChange={(e) => setCoCd(Number(e.target.value))}
               className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-[13px]"
             />
-            <span className="mt-1 block text-[11px] text-slate-400">Hoy: 3 días</span>
+            <span className="mt-1 block text-[11px] text-slate-400">Hoy: 5 días</span>
           </label>
           <label className="block">
             <span className="mb-1 block text-[12px] font-medium text-slate-600">

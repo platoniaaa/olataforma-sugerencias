@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # modelo en el deploy. Mantiene al chatbot util aunque pierda el contexto largo.
 _RESUMEN_FALLBACK = """REGLAS DE NEGOCIO IMPORTANTES (del modelo Power BI):
 - Formula principal: Sugerido Suc = DD * (CO + LT) + SS - SA - ST
-  donde DD=Demanda Diaria, CO=Ciclo de Orden (5 dias directo / 3 via CD),
+  donde DD=Demanda Diaria, CO=Ciclo de Orden (5 dias, directo y via CD),
   LT=Lead Time efectivo, SS=Stock Seguridad, SA=Stock Activo, ST=Stock en Transito.
 - LT efectivo: si el producto se abastece via CD, usa 1-2 dias (CD->sucursal).
   Si no, usa el lead time real del proveedor.

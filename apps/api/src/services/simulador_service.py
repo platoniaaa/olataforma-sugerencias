@@ -27,7 +27,7 @@ from ..schemas import SugeridoFiltros
 # --- Constantes del modelo (espejo de src/motor/parametros.py) ---
 DIAS_HABILES_MES = 22
 CICLO_ORDEN_DIAS = 5          # compra directa al proveedor
-CICLO_ORDEN_DIAS_CD = 3       # cuando la sucursal se abastece del CD
+CICLO_ORDEN_DIAS_CD = 5       # abastecido del CD (antes 3; unificado a 5 el 24-jul-2026)
 Z_POR_CLASE = {"A": 1.645, "B": 1.282, "C": 0.842, "D": 0.0}
 Z_IMPORTADO_CD = {"A": 1.282, "B": 1.036}
 # Solo estas clases generan compra (las C/D locales se consolidan en el CD).

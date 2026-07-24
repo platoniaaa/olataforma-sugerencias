@@ -92,9 +92,9 @@ Es el colchón para no quebrar mientras llega la reposición, frente a la variab
 
 **Stock de seguridad = Z × desviación × √(meses de protección)**
 
-- **Z (nivel de servicio) por clase:** A = 1,645 · B = 1,282 · C = 0,842 · D = 0. (Importado por CD: A = 1,282 · B = 1,036.) Cuanto más importante el producto, más colchón.
+- **Z (nivel de servicio) por clase:** el nivel de servicio es la probabilidad de NO quebrar stock durante la ventana de protección; Z lo traduce a colchón. A = 1,645 (95 %) · B = 1,282 (90 %) · C = 0,842 (80 %) · D = 0 (sin colchón). Importado por CD, con nivel reducido porque el CD consolida la variabilidad de varias sucursales: A = 1,282 (90 %) · B = 1,036 (85 %). Cuanto más importante el producto, más alto el nivel de servicio.
 - **Desviación:** cuánto varía la venta mes a mes (de la misma serie ya winsorizada).
-- **Meses de protección = (lead time efectivo + ciclo de orden) ÷ 22.** El ciclo de orden es **5 días directo y 3 vía CD**.
+- **Meses de protección = (lead time efectivo + ciclo de orden) ÷ 22.** El ciclo de orden es **5 días, tanto en compra directa como vía CD** (unificado el 24-jul-2026; antes era 3 vía CD).
 
 En criollo: productos importantes y de venta irregular llevan más colchón; los parejos o de baja clase, menos o nada.
 
@@ -134,7 +134,7 @@ Sobre el cálculo del modelo, la plataforma aplica algunos ajustes de sentido co
 
 - **Escalar winsorización (k):** 3 — qué tan estricto es el recorte de meses pico (antes 1).
 - **Días hábiles por mes:** 22 — divisor para pasar de demanda mensual a diaria.
-- **Ciclo de orden:** 5 directo / 3 vía CD — días de cobertura extra que se agregan al pedir.
+- **Ciclo de orden:** 5 días (directo y vía CD) — días de cobertura extra que se agregan al pedir.
 - **Lead time por defecto:** 8 días — cuando no hay proveedor ni historial de OC.
 - **Lead time CD → sucursal:** 1 (RM) / 2 (resto) — días de traslado del CD a la sucursal.
 - **Vigencia de tránsito:** 30 d nacional / 180 d importado — ventana para contar una OC como "en camino".
