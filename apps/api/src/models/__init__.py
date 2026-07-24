@@ -18,6 +18,7 @@ from .sugerido_snapshot import SugeridoSnapshot
 from .comparacion_motor import ComparacionMotor
 from .linea_pedida import LineaPedida
 from .venta_historica import VentaHistorica
+from .configuracion_modelo import ConfiguracionModelo
 
 __all__ = [
     "Sugerido",
@@ -40,4 +41,5 @@ __all__ = [
     "ComparacionMotor",
     "LineaPedida",
     "VentaHistorica",
+    "ConfiguracionModelo",
 ]

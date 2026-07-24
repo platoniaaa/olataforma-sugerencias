@@ -48,6 +48,7 @@ from .incidencia import (
     IncidenciaUpdate,
     IncidenciasResponse,
 )
+from .config_modelo import ConfigModeloUpdate
 
 __all__ = [
     "SugeridoRow",
@@ -92,4 +93,5 @@ __all__ = [
     "IncidenciaCreate",
     "IncidenciaUpdate",
     "IncidenciasResponse",
+    "ConfigModeloUpdate",
 ]

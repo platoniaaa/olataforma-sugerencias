@@ -19,6 +19,7 @@ import {
   LogOut,
   ShoppingCart,
   Sigma,
+  SlidersHorizontal,
   X,
 } from "lucide-react";
 import { getEmail, getEsAdmin, getNombre, getSoloLectura, logout } from "@/lib/auth";
@@ -44,6 +45,7 @@ const NAV: NavItem[] = [
   { href: "/incidencias", label: "Incidencias", icon: AlertCircle },
   { href: "/auditoria", label: "Auditoría", icon: FileText },
   { href: "/modelo", label: "Modelo", icon: Sigma },
+  { href: "/calibracion", label: "Calibración", icon: SlidersHorizontal, soloAdmin: true },
   { href: "/cargar", label: "Cargar datos", icon: Database, soloAdmin: true },
 ];
 

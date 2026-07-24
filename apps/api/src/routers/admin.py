@@ -7,8 +7,10 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..db import get_db
+from ..schemas import ConfigModeloUpdate
 from ..services import (
     auditoria_service,
+    config_modelo_service,
     excel_loader,
     motor_comparacion,
     powerbi_desktop_loader,
@@ -18,6 +20,36 @@ from ..services.auth import requiere_admin
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 settings = get_settings()
+
+
+@router.get("/config-modelo")
+def get_config_modelo(db: Session = Depends(get_db)) -> dict:
+    """Parametros calibrables vigentes (o los defaults si nunca se editaron).
+
+    Lo lee el motor antes de cada corrida y la pagina de calibracion de la web.
+    """
+    return config_modelo_service.vigente(db)
+
+
+@router.put("/config-modelo")
+def put_config_modelo(
+    cambios: ConfigModeloUpdate,
+    email: str = Depends(requiere_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Aplica cambios a la configuracion (crea una version nueva). Solo admin."""
+    datos = cambios.model_dump(exclude_none=True)
+    nota = datos.pop("nota", None)
+    try:
+        return config_modelo_service.actualizar(db, datos, usuario=email, nota=nota)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.get("/config-modelo/historial")
+def get_config_modelo_historial(db: Session = Depends(get_db)) -> list[dict]:
+    """Versiones anteriores de la configuracion (para ver el historial y revertir)."""
+    return config_modelo_service.historial(db)
 
 
 @router.post("/cargar-sugerido")

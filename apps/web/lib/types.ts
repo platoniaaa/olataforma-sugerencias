@@ -580,6 +580,34 @@ export interface SimulacionCambio {
   delta_clp: number;
 }
 
+/** Parametros calibrables como los guarda la tabla (nombres planos). */
+export interface ConfigModeloPlano {
+  ciclo_orden_dias: number;
+  ciclo_orden_dias_cd: number;
+  z_a: number;
+  z_b: number;
+  z_c: number;
+  z_d: number;
+  z_imp_cd_a: number;
+  z_imp_cd_b: number;
+  lead_time_fallback_dias: number;
+  winsor_k: number;
+}
+
+/** Configuracion del modelo como la devuelve la API (Z en diccionarios). */
+export interface ConfigModelo {
+  ciclo_orden_dias: number;
+  ciclo_orden_dias_cd: number;
+  z_por_clase: Record<string, number>;
+  z_importado_cd: Record<string, number>;
+  lead_time_fallback_dias: number;
+  winsor_k: number;
+  creado_en: string | null;
+  creado_por: string | null;
+  nota: string | null;
+  es_default: boolean;
+}
+
 export interface SimulacionResultado {
   parametros: {
     ciclo_orden_dias: number;

@@ -476,6 +476,24 @@ export const api = {
     return res.json();
   },
 
+  /** Configuracion calibrable del modelo vigente (o los defaults). */
+  async configModelo(): Promise<import("./types").ConfigModelo> {
+    return getJSON("/api/admin/config-modelo");
+  },
+
+  /** Aplica cambios a la configuracion del modelo (crea una version nueva). Solo admin. */
+  async guardarConfigModelo(
+    cambios: Partial<import("./types").ConfigModeloPlano> & { nota?: string }
+  ): Promise<import("./types").ConfigModelo> {
+    const res = await req("/api/admin/config-modelo", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cambios),
+    });
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo guardar la configuración"));
+    return res.json();
+  },
+
   /** Marcar una linea del sugerido como ya pedida (cierra el loop con la OC). */
   async marcarPedido(payload: {
     producto: string;
