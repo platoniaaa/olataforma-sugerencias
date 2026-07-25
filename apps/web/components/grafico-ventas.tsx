@@ -135,7 +135,13 @@ export function GraficoVentas({
                 tickFormatter={(v: number) => formatoNumero(v)}
               />
               <Tooltip
-                formatter={(v: number, name: string) => [formatoNumero(v), name]}
+                // En la burbuja la serie de la sucursal se prefija con "Vta" para que
+                // se lea como venta y no como stock. La leyenda queda con el nombre
+                // pelado, que ahi solo identifica el color.
+                formatter={(v: number, name: string) => [
+                  formatoNumero(v),
+                  name === tituloSuc ? `Vta ${name}` : name,
+                ]}
                 cursor={{ fill: "#f1f5f9" }}
                 contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
               />
