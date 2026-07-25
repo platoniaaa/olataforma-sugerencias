@@ -5,6 +5,7 @@ const EMAIL = "sugerido_email";
 const NOMBRE = "sugerido_nombre";
 const ES_ADMIN = "sugerido_es_admin";
 const SOLO_LECTURA = "sugerido_solo_lectura";
+const PUEDE_CALIBRAR = "sugerido_puede_calibrar";
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -32,8 +33,22 @@ export function getSoloLectura(): boolean {
   return localStorage.getItem(SOLO_LECTURA) === "1";
 }
 
+/** True si puede entrar a Calibracion (admin o autorizado). Lo decide el BACKEND
+ *  y viaja en el login, para no duplicar la lista de autorizados en el cliente.
+ *  El gate real es el 403 del servidor; esto solo decide si mostrar la seccion. */
+export function getPuedeCalibrar(): boolean {
+  if (typeof window === "undefined") return false;
+  const v = localStorage.getItem(PUEDE_CALIBRAR);
+  // Sesion abierta ANTES de que existiera este flag: la clave no esta. Se cae a
+  // es_admin para no quitarle Calibracion a un admin que ya estaba dentro; al
+  // volver a entrar queda el valor real que manda el backend.
+  if (v === null) return getEsAdmin();
+  return v === "1";
+}
+
 export function setSession(
-  token: string, email: string, nombre: string | null, esAdmin = false, soloLectura = false
+  token: string, email: string, nombre: string | null, esAdmin = false, soloLectura = false,
+  puedeCalibrar = false
 ) {
   localStorage.setItem(TOKEN, token);
   localStorage.setItem(EMAIL, email);
@@ -41,6 +56,7 @@ export function setSession(
   else localStorage.removeItem(NOMBRE);
   localStorage.setItem(ES_ADMIN, esAdmin ? "1" : "0");
   localStorage.setItem(SOLO_LECTURA, soloLectura ? "1" : "0");
+  localStorage.setItem(PUEDE_CALIBRAR, puedeCalibrar ? "1" : "0");
 }
 
 export function clearSession() {
@@ -49,6 +65,7 @@ export function clearSession() {
   localStorage.removeItem(NOMBRE);
   localStorage.removeItem(ES_ADMIN);
   localStorage.removeItem(SOLO_LECTURA);
+  localStorage.removeItem(PUEDE_CALIBRAR);
 }
 
 export function estaAutenticado(): boolean {

@@ -101,7 +101,14 @@ export default function CalibracionPage() {
       setVigente(c);
       setEd(aPlano(c));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo cargar la configuración");
+      const msg = e instanceof Error ? e.message : "";
+      // El backend es el gate real: si no tiene permiso responde 403. El menu ya
+      // oculta la seccion, pero se puede llegar escribiendo la URL.
+      setError(
+        msg.includes("403")
+          ? "No tienes permiso para calibrar el modelo. Pídeselo a un administrador."
+          : msg || "No se pudo cargar la configuración"
+      );
     }
   };
 

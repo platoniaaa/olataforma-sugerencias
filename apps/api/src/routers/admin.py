@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..db import get_db
-from ..schemas import ConfigModeloUpdate
 from ..services import (
     auditoria_service,
     config_modelo_service,
@@ -25,45 +24,12 @@ settings = get_settings()
 
 @router.get("/config-modelo")
 def get_config_modelo(db: Session = Depends(get_db)) -> dict:
-    """Parametros calibrables vigentes (o los defaults si nunca se editaron).
+    """Parametros calibrables vigentes. Lo usa EL MOTOR (que entra como admin).
 
-    Lo lee el motor antes de cada corrida y la pagina de calibracion de la web.
+    La web usa /api/calibracion/config-modelo, que ademas admite a Abastecimiento.
+    Se mantiene esta ruta para no obligar a desplegar los dos repos a la vez.
     """
     return config_modelo_service.vigente(db)
-
-
-@router.put("/config-modelo")
-def put_config_modelo(
-    cambios: ConfigModeloUpdate,
-    email: str = Depends(requiere_admin),
-    db: Session = Depends(get_db),
-) -> dict:
-    """Aplica cambios a la configuracion (crea una version nueva). Solo admin."""
-    datos = cambios.model_dump(exclude_none=True)
-    nota = datos.pop("nota", None)
-    try:
-        return config_modelo_service.actualizar(db, datos, usuario=email, nota=nota)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
-
-@router.get("/config-modelo/historial")
-def get_config_modelo_historial(db: Session = Depends(get_db)) -> list[dict]:
-    """Versiones anteriores de la configuracion (para ver el historial y revertir)."""
-    return config_modelo_service.historial(db)
-
-
-@router.post("/config-modelo/revertir/{version_id}")
-def revertir_config_modelo(
-    version_id: str,
-    email: str = Depends(requiere_admin),
-    db: Session = Depends(get_db),
-) -> dict:
-    """Vuelve a una version anterior insertando una copia (no borra historial)."""
-    try:
-        return config_modelo_service.revertir(db, version_id, usuario=email)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @router.post("/lead-time-proveedor")
@@ -71,7 +37,7 @@ def publicar_lead_time(
     payload: dict,
     db: Session = Depends(get_db),
 ) -> dict:
-    """El motor publica el lead time que calculo (reemplaza la foto vigente).
+    """El motor publica el lead time que calculo (reemplaza la foto vigente). Admin.
 
     payload: {"filas": [{proveedor, sucursal_id|None, lead_time_dias, n_muestras}]}
     """
@@ -79,19 +45,6 @@ def publicar_lead_time(
     if not isinstance(filas, list):
         raise HTTPException(status_code=400, detail="Falta la lista 'filas'")
     return lead_time_service.reemplazar(db, filas)
-
-
-@router.get("/lead-time-proveedor")
-def get_lead_time(
-    buscar: str | None = None,
-    solo_global: bool = False,
-    limite: int = 200,
-    db: Session = Depends(get_db),
-) -> dict:
-    """Lead time calculado por el motor, con buscador (proveedor o sucursal)."""
-    return lead_time_service.listar(
-        db, buscar=buscar, solo_global=solo_global, limite=min(limite, 500)
-    )
 
 
 @router.post("/cargar-sugerido")

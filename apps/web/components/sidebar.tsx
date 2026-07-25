@@ -22,13 +22,15 @@ import {
   SlidersHorizontal,
   X,
 } from "lucide-react";
-import { getEmail, getEsAdmin, getNombre, getSoloLectura, logout } from "@/lib/auth";
+import { getEmail, getEsAdmin, getNombre, getPuedeCalibrar, getSoloLectura, logout } from "@/lib/auth";
 
 type NavItem = {
   href: string;
   label: string;
   icon: typeof BarChart3;
   soloAdmin?: boolean;
+  /** Requiere permiso de calibracion (admin o autorizado de Abastecimiento). */
+  soloCalibracion?: boolean;
   ocultarSoloLectura?: boolean;
 };
 
@@ -45,7 +47,7 @@ const NAV: NavItem[] = [
   { href: "/incidencias", label: "Incidencias", icon: AlertCircle },
   { href: "/auditoria", label: "Auditoría", icon: FileText },
   { href: "/modelo", label: "Modelo", icon: Sigma },
-  { href: "/calibracion", label: "Calibración", icon: SlidersHorizontal, soloAdmin: true },
+  { href: "/calibracion", label: "Calibración", icon: SlidersHorizontal, soloCalibracion: true },
   { href: "/cargar", label: "Cargar datos", icon: Database, soloAdmin: true },
 ];
 
@@ -60,8 +62,12 @@ export function Sidebar({ open, onClose }: Props) {
   const nombre = getNombre();
   const esAdmin = getEsAdmin();
   const soloLectura = getSoloLectura();
+  const puedeCalibrar = getPuedeCalibrar();
   const items = NAV.filter(
-    (n) => (!n.soloAdmin || esAdmin) && (!n.ocultarSoloLectura || !soloLectura)
+    (n) =>
+      (!n.soloAdmin || esAdmin) &&
+      (!n.soloCalibracion || puedeCalibrar) &&
+      (!n.ocultarSoloLectura || !soloLectura)
   );
 
   // Cerrar con ESC.

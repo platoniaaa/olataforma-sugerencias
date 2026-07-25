@@ -138,3 +138,23 @@ def requiere_ver_accesos(email: str = Depends(requiere_auth), db=Depends(get_db)
     if email.lower() in settings.emails_ver_accesos_set:
         return email
     raise HTTPException(status_code=403, detail="No autorizado para ver accesos")
+
+
+def puede_calibrar(email: str, db) -> bool:
+    """True si el email puede entrar a Calibracion: admin o en EMAILS_CALIBRACION.
+
+    Se usa tanto para el gate real (`requiere_calibracion`) como para informarle al
+    frontend si mostrar la seccion, y asi la lista no se duplica en el cliente."""
+    from ..models import Usuario  # import local para evitar ciclo
+
+    user = db.get(Usuario, email)
+    if user and user.es_admin:
+        return True
+    return (email or "").lower() in settings.emails_calibracion_set
+
+
+def requiere_calibracion(email: str = Depends(requiere_auth), db=Depends(get_db)) -> str:
+    """Autoriza Calibracion: admin o email en EMAILS_CALIBRACION."""
+    if puede_calibrar(email, db):
+        return email
+    raise HTTPException(status_code=403, detail="No autorizado para calibrar el modelo")

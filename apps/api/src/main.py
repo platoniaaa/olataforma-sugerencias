@@ -14,6 +14,7 @@ from .routers import (
     admin,
     auditoria,
     auth,
+    calibracion,
     catalogo,
     chat,
     compras,
@@ -29,7 +30,7 @@ from .routers import (
     ventas,
     ventas_historicas,
 )
-from .services.auth import requiere_admin, requiere_auth
+from .services.auth import requiere_admin, requiere_auth, requiere_calibracion
 
 settings = get_settings()
 
@@ -91,6 +92,8 @@ app.include_router(inventario.router, dependencies=_protegido)
 app.include_router(incidencias.router, dependencies=_protegido)
 # Admin: requiere flag es_admin (no solo estar logueado).
 app.include_router(admin.router, dependencies=[Depends(requiere_admin)])
+# Calibracion NO va bajo /api/admin: su permiso es admin O autorizado (Abastecimiento).
+app.include_router(calibracion.router, dependencies=[Depends(requiere_calibracion)])
 # Chatbot: disponible para todo usuario autenticado.
 app.include_router(chat.router, dependencies=_protegido)
 

@@ -118,7 +118,10 @@ export const api = {
       throw new Error(err.detail ?? "No se pudo iniciar sesión");
     }
     const data = await res.json();
-    setSession(data.token, data.email, data.nombre ?? null, Boolean(data.es_admin), Boolean(data.solo_lectura));
+    setSession(data.token, data.email, data.nombre ?? null, Boolean(data.es_admin), Boolean(data.solo_lectura),
+      // Si la API todavia no manda el campo (ventana de despliegue), no degradar a
+      // un admin: se cae a es_admin en vez de escribir un false que persiste.
+      Boolean(data.puede_calibrar ?? data.es_admin));
   },
 
   async health(): Promise<{ status: string }> {
@@ -478,14 +481,14 @@ export const api = {
 
   /** Configuracion calibrable del modelo vigente (o los defaults). */
   async configModelo(): Promise<import("./types").ConfigModelo> {
-    return getJSON("/api/admin/config-modelo");
+    return getJSON("/api/calibracion/config-modelo");
   },
 
   /** Aplica cambios a la configuracion del modelo (crea una version nueva). Solo admin. */
   async guardarConfigModelo(
     cambios: Partial<import("./types").ConfigModeloPlano> & { nota?: string }
   ): Promise<import("./types").ConfigModelo> {
-    const res = await req("/api/admin/config-modelo", {
+    const res = await req("/api/calibracion/config-modelo", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(cambios),
@@ -496,12 +499,12 @@ export const api = {
 
   /** Versiones anteriores de la configuracion del modelo. */
   async configModeloHistorial(): Promise<import("./types").ConfigModelo[]> {
-    return getJSON("/api/admin/config-modelo/historial");
+    return getJSON("/api/calibracion/config-modelo/historial");
   },
 
   /** Vuelve a una version anterior de la configuracion. Solo admin. */
   async revertirConfigModelo(versionId: string): Promise<import("./types").ConfigModelo> {
-    const res = await req(`/api/admin/config-modelo/revertir/${versionId}`, { method: "POST" });
+    const res = await req(`/api/calibracion/config-modelo/revertir/${versionId}`, { method: "POST" });
     if (!res.ok) throw new Error(await mensajeError(res, "No se pudo revertir"));
     return res.json();
   },
@@ -513,7 +516,7 @@ export const api = {
     if (params.solo_global) q.set("solo_global", "true");
     const qs = q.toString();
     return getJSON<import("./types").LeadTimeResponse>(
-      `/api/admin/lead-time-proveedor${qs ? `?${qs}` : ""}`
+      `/api/calibracion/lead-time-proveedor${qs ? `?${qs}` : ""}`
     );
   },
 

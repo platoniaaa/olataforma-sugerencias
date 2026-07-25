@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     # y a que hora). Los admin siempre pueden. Separados por coma.
     emails_ver_accesos: str = "mramos@curifor.com"
 
+    # Emails no-admin que pueden entrar a Calibracion (ver y aplicar los parametros
+    # del modelo). Pensado para Abastecimiento, que es dueno del modelo aunque no
+    # administre la plataforma. Los admin siempre pueden. Separados por coma.
+    emails_calibracion: str = "mramos@curifor.com"
+
     # --- Historia del sugerido y alertas (post-sincronizacion) ---
     # Guarda una foto diaria del sugerido (solo filas con actividad) para ver la
     # evolucion y, mas adelante, medir la precision del modelo.
@@ -166,6 +171,10 @@ SUMMARIZECOLUMNS(
     @property
     def emails_ver_accesos_set(self) -> set[str]:
         return {e.strip().lower() for e in self.emails_ver_accesos.split(",") if e.strip()}
+
+    @property
+    def emails_calibracion_set(self) -> set[str]:
+        return {e.strip().lower() for e in self.emails_calibracion.split(",") if e.strip()}
 
     @property
     def powerbi_configurado(self) -> bool:

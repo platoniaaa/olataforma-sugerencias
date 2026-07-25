@@ -21,6 +21,7 @@ class LoginResponse(BaseModel):
     nombre: str | None = None
     es_admin: bool = False
     solo_lectura: bool = False
+    puede_calibrar: bool = False
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -38,6 +39,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     return LoginResponse(
         token=auth.crear_token(email), email=email, nombre=usuario.nombre,
         es_admin=usuario.es_admin, solo_lectura=usuario.solo_lectura,
+        puede_calibrar=auth.puede_calibrar(email, db),
     )
 
 
@@ -49,4 +51,5 @@ def me(email: str = Depends(auth.requiere_auth), db: Session = Depends(get_db)):
         "nombre": usuario.nombre if usuario else None,
         "es_admin": bool(usuario and usuario.es_admin),
         "solo_lectura": bool(usuario and usuario.solo_lectura),
+        "puede_calibrar": auth.puede_calibrar(email, db),
     }
