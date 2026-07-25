@@ -10,6 +10,7 @@ import { ModalSugerenciaManual } from "@/components/modal-sugerencia-manual";
 import { ModalIncidencia } from "@/components/modal-incidencia";
 import { EtiquetaSugerencia } from "@/components/etiqueta-sugerencia";
 import { GraficoStock } from "@/components/grafico-stock";
+import { GraficoReposicion } from "@/components/grafico-reposicion";
 import { GraficoComposicion } from "@/components/grafico-composicion";
 import { GraficoVentas } from "@/components/grafico-ventas";
 import { GraficoHistoria } from "@/components/grafico-historia";
@@ -207,6 +208,17 @@ export function VistaDetalleProducto({
           </CardContent>
         </Card>
       </div>
+
+      {/* Ciclo de reposicion: el "diente de sierra" con los parametros de esta fila. */}
+      <GraficoReposicion
+        demandaDiaria={d.demanda_diaria ?? 0}
+        leadTime={d.lt_efectivo ?? 0}
+        cicloOrden={cicloOrden}
+        stockSeguridad={d.stock_seguridad ?? 0}
+        puntoPedido={d.punto_de_pedido ?? 0}
+        stockOptimo={stockOptimo}
+        disponibleHoy={(d.stock_activo_suc ?? 0) + (d.stock_en_transito_suc ?? 0)}
+      />
 
       {/* Margen: solo para los productos que estan en la lista de precios FORD. */}
       {d.margen_pct != null && (
