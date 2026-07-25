@@ -29,6 +29,36 @@ function nivelServicio(z: number): string {
   return `≈ ${Math.round(50 * (1 + erf(z / Math.SQRT2)))} %`;
 }
 
+/** Avisos de configuraciones que "compilan" pero casi seguro son un error.
+ *  No bloquean: puede haber una razon de negocio, pero conviene verlo antes. */
+function avisosCoherencia(e: ConfigModeloPlano): string[] {
+  const a: string[] = [];
+  if (!(e.z_a >= e.z_b && e.z_b >= e.z_c && e.z_c >= e.z_d)) {
+    a.push(
+      "El nivel de servicio deberia bajar de A a D (A ≥ B ≥ C ≥ D). Asi como esta, una clase menos importante lleva mas colchon que una mas importante."
+    );
+  }
+  if (e.z_imp_cd_a > e.z_a || e.z_imp_cd_b > e.z_b) {
+    a.push(
+      "El importado por CD usa un nivel de servicio MAYOR que el normal. Suele ser al reves: el CD consolida la variabilidad de varias sucursales y necesita menos colchon."
+    );
+  }
+  if (!(e.abc_umbral_a_m6 > e.abc_umbral_b_m6 && e.abc_umbral_b_m6 > e.abc_umbral_c_m6)) {
+    a.push(
+      "Los umbrales ABC deberian ir de mayor a menor (A > B > C). Con estos valores hay clases que nunca se van a asignar."
+    );
+  }
+  if (e.transito_importado_dias < e.transito_nacional_dias) {
+    a.push(
+      "La ventana de transito del importado es menor que la del nacional. El importado suele tardar mas, no menos."
+    );
+  }
+  if (e.lt_cd_rm_dias > e.lt_cd_resto_dias) {
+    a.push("El envio del CD a la Region Metropolitana tarda mas que al resto del pais.");
+  }
+  return a;
+}
+
 function aPlano(c: ConfigModelo): ConfigModeloPlano {
   return {
     ciclo_orden_dias: c.ciclo_orden_dias,
@@ -146,6 +176,7 @@ export default function CalibracionPage() {
     }
   };
 
+  const avisos = avisosCoherencia(ed);
   const delta = impacto?.resumen.delta_clp ?? 0;
 
   return (
@@ -287,6 +318,14 @@ export default function CalibracionPage() {
           </button>
           {!hayCambios && <span className="text-[12px] text-slate-400">Sin cambios pendientes.</span>}
         </div>
+        {avisos.length > 0 && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
+            <p className="mb-1 text-[12px] font-medium text-amber-900">Revisa antes de aplicar:</p>
+            <ul className="list-disc space-y-1 pl-4 text-[12px] text-amber-800">
+              {avisos.map((a, i) => <li key={i}>{a}</li>)}
+            </ul>
+          </div>
+        )}
         {msg && <p className="rounded-md bg-emerald-50 px-3 py-2 text-[13px] text-emerald-700">{msg}</p>}
         {error && <p className="rounded-md bg-red-50 px-3 py-2 text-[13px] text-red-700">{error}</p>}
       </section>
