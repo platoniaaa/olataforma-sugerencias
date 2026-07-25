@@ -53,3 +53,13 @@ class ConfiguracionModelo(Base):
     # --- Otros parametros de reposicion ---
     lead_time_fallback_dias: Mapped[int] = mapped_column(Integer, nullable=False, default=8)
     winsor_k: Mapped[float] = mapped_column(Float, nullable=False, default=3.0)
+
+    # --- Modulo Lead time / transito ---
+    lt_cd_rm_dias: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    lt_cd_resto_dias: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    lt_tope_dias: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    transito_nacional_dias: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    transito_importado_dias: Mapped[int] = mapped_column(Integer, nullable=False, default=180)
+
+    # --- Modulo Demanda ---
+    dias_habiles_mes: Mapped[int] = mapped_column(Integer, nullable=False, default=22)

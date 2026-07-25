@@ -110,6 +110,13 @@ def create_all() -> None:
         # 2026-07: como se pidio cada sugerencia manual (para poder explicarla).
         "ALTER TABLE sugerencia_manual ADD COLUMN IF NOT EXISTS dias_inventario INTEGER",
         "ALTER TABLE sugerencia_manual ADD COLUMN IF NOT EXISTS stock_objetivo INTEGER",
+        # 2026-07: mas perillas calibrables (modulos Lead time y Demanda).
+        "ALTER TABLE configuracion_modelo ADD COLUMN IF NOT EXISTS dias_habiles_mes INTEGER NOT NULL DEFAULT 22",
+        "ALTER TABLE configuracion_modelo ADD COLUMN IF NOT EXISTS lt_cd_rm_dias INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE configuracion_modelo ADD COLUMN IF NOT EXISTS lt_cd_resto_dias INTEGER NOT NULL DEFAULT 2",
+        "ALTER TABLE configuracion_modelo ADD COLUMN IF NOT EXISTS lt_tope_dias INTEGER NOT NULL DEFAULT 30",
+        "ALTER TABLE configuracion_modelo ADD COLUMN IF NOT EXISTS transito_nacional_dias INTEGER NOT NULL DEFAULT 30",
+        "ALTER TABLE configuracion_modelo ADD COLUMN IF NOT EXISTS transito_importado_dias INTEGER NOT NULL DEFAULT 180",
     ]
     # SQLite NO soporta "ADD COLUMN IF NOT EXISTS" (error de sintaxis que se
     # tragaba el try, dejando bases locales viejas sin las columnas nuevas):

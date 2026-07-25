@@ -1,11 +1,10 @@
 "use client";
 
-// Calibracion del modelo: edita los parametros del sugerido (ciclo de orden,
-// niveles de servicio, etc.) y APLICALOS. A diferencia del simulador (que solo
-// muestra el impacto), esto guarda una version nueva que el motor usa en su
-// proxima corrida. Solo admin.
+// Calibracion del modelo, por modulos: cada seccion cubre un aspecto del modelo
+// (lead time, stock de seguridad, demanda) con sus perillas. Edita, mira el
+// impacto y aplica; el motor usa los valores en su proxima corrida. Solo admin.
 import { useEffect, useState } from "react";
-import { SlidersHorizontal, Play, Save, RotateCcw } from "lucide-react";
+import { SlidersHorizontal, Play, Save, RotateCcw, Truck, Shield, TrendingUp } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { formatoCLPCorto, formatoNumero } from "@/lib/formato";
 import type { ConfigModelo, ConfigModeloPlano, SimulacionResultado } from "@/lib/types";
@@ -38,6 +37,12 @@ function aPlano(c: ConfigModelo): ConfigModeloPlano {
     z_imp_cd_b: c.z_importado_cd.B,
     lead_time_fallback_dias: c.lead_time_fallback_dias,
     winsor_k: c.winsor_k,
+    lt_cd_rm_dias: c.lt_cd_rm_dias,
+    lt_cd_resto_dias: c.lt_cd_resto_dias,
+    lt_tope_dias: c.lt_tope_dias,
+    transito_nacional_dias: c.transito_nacional_dias,
+    transito_importado_dias: c.transito_importado_dias,
+    dias_habiles_mes: c.dias_habiles_mes,
   };
 }
 
@@ -75,7 +80,6 @@ export default function CalibracionPage() {
     setMsg(null);
   };
 
-  // Solo los campos que cambiaron respecto de la vigente.
   const cambios = (): Partial<ConfigModeloPlano> => {
     const base = aPlano(vigente);
     const out: Partial<ConfigModeloPlano> = {};
@@ -142,7 +146,8 @@ export default function CalibracionPage() {
           <SlidersHorizontal size={20} /> Calibración del modelo
         </h1>
         <p className="text-[13px] text-slate-500">
-          Ajusta los parámetros del sugerido. Los cambios se aplican en la próxima corrida del motor.
+          Ajusta los parámetros del sugerido, por módulo. Los cambios se aplican en la próxima
+          corrida del motor.
         </p>
       </div>
 
@@ -154,66 +159,78 @@ export default function CalibracionPage() {
             }${vigente.nota ? ` · “${vigente.nota}”` : ""}.`}
       </div>
 
-      <section className="space-y-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div>
-          <p className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-slate-500">
-            Ciclo de orden (días)
-          </p>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Campo label="Compra directa" min={1} max={60} value={ed.ciclo_orden_dias}
-              onChange={(v) => set("ciclo_orden_dias", v)} />
-            <Campo label="Abastecido del CD" min={1} max={60} value={ed.ciclo_orden_dias_cd}
-              onChange={(v) => set("ciclo_orden_dias_cd", v)} />
-          </div>
-        </div>
+      {/* MÓDULO · Stock de seguridad */}
+      <Modulo icon={Shield} titulo="Stock de seguridad" subtitulo="El colchón para no quebrar mientras llega la reposición.">
+        <Grupo titulo="Ciclo de orden (días de cobertura extra)">
+          <Campo label="Compra directa" min={1} max={60} value={ed.ciclo_orden_dias}
+            onChange={(v) => set("ciclo_orden_dias", v)} />
+          <Campo label="Abastecido del CD" min={1} max={60} value={ed.ciclo_orden_dias_cd}
+            onChange={(v) => set("ciclo_orden_dias_cd", v)} />
+        </Grupo>
+        <Grupo titulo="Nivel de servicio (Z) por clase" cols={4}>
+          <Campo label="Clase A" min={0} max={3.5} step={0.001} value={ed.z_a}
+            onChange={(v) => set("z_a", v)} hint={nivelServicio(ed.z_a)} />
+          <Campo label="Clase B" min={0} max={3.5} step={0.001} value={ed.z_b}
+            onChange={(v) => set("z_b", v)} hint={nivelServicio(ed.z_b)} />
+          <Campo label="Clase C" min={0} max={3.5} step={0.001} value={ed.z_c}
+            onChange={(v) => set("z_c", v)} hint={nivelServicio(ed.z_c)} />
+          <Campo label="Clase D" min={0} max={3.5} step={0.001} value={ed.z_d}
+            onChange={(v) => set("z_d", v)} hint={nivelServicio(ed.z_d)} />
+        </Grupo>
+        <Grupo titulo="Nivel de servicio para importado por CD">
+          <Campo label="Clase A" min={0} max={3.5} step={0.001} value={ed.z_imp_cd_a}
+            onChange={(v) => set("z_imp_cd_a", v)} hint={nivelServicio(ed.z_imp_cd_a)} />
+          <Campo label="Clase B" min={0} max={3.5} step={0.001} value={ed.z_imp_cd_b}
+            onChange={(v) => set("z_imp_cd_b", v)} hint={nivelServicio(ed.z_imp_cd_b)} />
+        </Grupo>
+      </Modulo>
 
-        <div>
-          <p className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-slate-500">
-            Nivel de servicio (Z) por clase
-          </p>
-          <div className="grid gap-4 sm:grid-cols-4">
-            <Campo label="Clase A" min={0} max={3.5} step={0.001} value={ed.z_a}
-              onChange={(v) => set("z_a", v)} hint={nivelServicio(ed.z_a)} />
-            <Campo label="Clase B" min={0} max={3.5} step={0.001} value={ed.z_b}
-              onChange={(v) => set("z_b", v)} hint={nivelServicio(ed.z_b)} />
-            <Campo label="Clase C" min={0} max={3.5} step={0.001} value={ed.z_c}
-              onChange={(v) => set("z_c", v)} hint={nivelServicio(ed.z_c)} />
-            <Campo label="Clase D" min={0} max={3.5} step={0.001} value={ed.z_d}
-              onChange={(v) => set("z_d", v)} hint={nivelServicio(ed.z_d)} />
-          </div>
-          <div className="mt-3 grid gap-4 sm:grid-cols-2">
-            <Campo label="Importado por CD — Clase A" min={0} max={3.5} step={0.001} value={ed.z_imp_cd_a}
-              onChange={(v) => set("z_imp_cd_a", v)} hint={nivelServicio(ed.z_imp_cd_a)} />
-            <Campo label="Importado por CD — Clase B" min={0} max={3.5} step={0.001} value={ed.z_imp_cd_b}
-              onChange={(v) => set("z_imp_cd_b", v)} hint={nivelServicio(ed.z_imp_cd_b)} />
-          </div>
-        </div>
+      {/* MÓDULO · Lead time */}
+      <Modulo icon={Truck} titulo="Lead time y tránsito" subtitulo="Cuánto tarda la reposición y qué OC cuentan como en camino.">
+        <Grupo titulo="Del CD a la sucursal (días)">
+          <Campo label="Región Metropolitana" min={0} max={30} value={ed.lt_cd_rm_dias}
+            onChange={(v) => set("lt_cd_rm_dias", v)} />
+          <Campo label="Resto de regiones" min={0} max={30} value={ed.lt_cd_resto_dias}
+            onChange={(v) => set("lt_cd_resto_dias", v)} />
+        </Grupo>
+        <Grupo titulo="Lead time del proveedor">
+          <Campo label="Por defecto (sin historial de OC)" min={1} max={90} value={ed.lead_time_fallback_dias}
+            onChange={(v) => set("lead_time_fallback_dias", v)}
+            hint="Cuando no hay proveedor ni OCs para calcularlo." />
+          <Campo label="Tope de días (descarta outliers)" min={1} max={365} value={ed.lt_tope_dias}
+            onChange={(v) => set("lt_tope_dias", v)}
+            hint="Las OC con LT sobre esto no cuentan al promediar." />
+        </Grupo>
+        <Grupo titulo="Ventana de tránsito (una OC pendiente cuenta como en camino si es más nueva que…)">
+          <Campo label="Nacional (días)" min={1} max={365} value={ed.transito_nacional_dias}
+            onChange={(v) => set("transito_nacional_dias", v)} />
+          <Campo label="Importado (días)" min={1} max={730} value={ed.transito_importado_dias}
+            onChange={(v) => set("transito_importado_dias", v)} />
+        </Grupo>
+      </Modulo>
 
-        <div>
-          <p className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-slate-500">
-            Otros
-          </p>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Campo label="Lead time por defecto (días)" min={1} max={90} value={ed.lead_time_fallback_dias}
-              onChange={(v) => set("lead_time_fallback_dias", v)}
-              hint="Cuando no hay proveedor ni historial de OC." />
-            <Campo label="Winsor k (recorte de picos)" min={0.5} max={6} step={0.1} value={ed.winsor_k}
-              onChange={(v) => set("winsor_k", v)} hint="Más alto = recorta menos los meses pico." />
-          </div>
-        </div>
+      {/* MÓDULO · Demanda */}
+      <Modulo icon={TrendingUp} titulo="Demanda" subtitulo="Cómo se estima la venta esperada.">
+        <Grupo titulo="Parámetros">
+          <Campo label="Winsor k (recorte de picos)" min={0.5} max={6} step={0.1} value={ed.winsor_k}
+            onChange={(v) => set("winsor_k", v)} hint="Más alto = recorta menos los meses pico." />
+          <Campo label="Días hábiles por mes" min={15} max={31} value={ed.dias_habiles_mes}
+            onChange={(v) => set("dias_habiles_mes", v)} hint="Divisor para pasar de demanda mensual a diaria." />
+        </Grupo>
+        <p className="text-[11px] text-slate-400">
+          Estos dos afectan la demanda/clasificación, que solo se recalcula cuando corre el motor: el
+          previsualizador de impacto no los refleja.
+        </p>
+      </Modulo>
 
+      {/* Acciones */}
+      <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <label className="block">
           <span className="mb-1 block text-[12px] font-medium text-slate-600">Nota (por qué del cambio)</span>
-          <input
-            type="text"
-            value={nota}
-            maxLength={500}
-            onChange={(e) => setNota(e.target.value)}
+          <input type="text" value={nota} maxLength={500} onChange={(e) => setNota(e.target.value)}
             placeholder="Opcional — queda en el historial"
-            className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-[13px]"
-          />
+            className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-[13px]" />
         </label>
-
         <div className="flex flex-wrap items-center gap-2">
           <button onClick={verImpacto} disabled={cargando}
             className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-1.5 text-[13px] hover:bg-slate-50 disabled:opacity-50">
@@ -249,10 +266,43 @@ export default function CalibracionPage() {
       )}
 
       <p className="text-[11px] text-slate-400">
-        El impacto es una estimación sobre los datos vigentes (misma base que el Simulador): mueve el
-        ciclo de orden y los niveles de servicio. El winsor y el lead time por defecto afectan la
-        demanda/clasificación, que solo se recalculan cuando corre el motor.
+        El impacto es una estimación sobre los datos vigentes (misma base que el Simulador) y refleja
+        el ciclo de orden y los niveles de servicio. El resto de los parámetros se aplica al correr el motor.
       </p>
+    </div>
+  );
+}
+
+function Modulo({
+  icon: Icon, titulo, subtitulo, children,
+}: {
+  icon: typeof Truck;
+  titulo: string;
+  subtitulo: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex items-center gap-2">
+        <span className="flex h-7 w-7 items-center justify-center rounded-md bg-slate-100 text-slate-600">
+          <Icon size={15} />
+        </span>
+        <div>
+          <h2 className="text-[14px] font-semibold text-slate-900">{titulo}</h2>
+          <p className="text-[11.5px] text-slate-500">{subtitulo}</p>
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function Grupo({ titulo, cols = 2, children }: { titulo: string; cols?: number; children: React.ReactNode }) {
+  const grid = cols === 4 ? "sm:grid-cols-4" : "sm:grid-cols-2";
+  return (
+    <div>
+      <p className="mb-2 text-[12px] font-medium text-slate-600">{titulo}</p>
+      <div className={`grid gap-4 ${grid}`}>{children}</div>
     </div>
   );
 }
@@ -271,15 +321,9 @@ function Campo({
   return (
     <label className="block">
       <span className="mb-1 block text-[12px] font-medium text-slate-600">{label}</span>
-      <input
-        type="number"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
+      <input type="number" min={min} max={max} step={step} value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-[13px]"
-      />
+        className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-[13px]" />
       {hint && <span className="mt-1 block text-[11px] text-slate-400">{hint}</span>}
     </label>
   );

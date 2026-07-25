@@ -24,6 +24,11 @@ DEFAULTS: dict = {
     "z_imp_cd_a": 1.282, "z_imp_cd_b": 1.036,
     "lead_time_fallback_dias": 8,
     "winsor_k": 3.0,
+    # Modulo Lead time / transito
+    "lt_cd_rm_dias": 1, "lt_cd_resto_dias": 2, "lt_tope_dias": 30,
+    "transito_nacional_dias": 30, "transito_importado_dias": 180,
+    # Modulo Demanda
+    "dias_habiles_mes": 22,
 }
 
 # Rangos aceptados por parametro (min, max). Fuera de esto la edicion se rechaza:
@@ -35,6 +40,9 @@ _RANGOS: dict[str, tuple[float, float]] = {
     "z_imp_cd_a": (0, 3.5), "z_imp_cd_b": (0, 3.5),
     "lead_time_fallback_dias": (1, 90),
     "winsor_k": (0.5, 6.0),
+    "lt_cd_rm_dias": (0, 30), "lt_cd_resto_dias": (0, 30), "lt_tope_dias": (1, 365),
+    "transito_nacional_dias": (1, 365), "transito_importado_dias": (1, 730),
+    "dias_habiles_mes": (15, 31),
 }
 
 _CAMPOS = list(DEFAULTS.keys())
@@ -59,6 +67,12 @@ def _a_dict(fila: ConfiguracionModelo | None) -> dict:
         "z_importado_cd": {"A": base["z_imp_cd_a"], "B": base["z_imp_cd_b"]},
         "lead_time_fallback_dias": int(base["lead_time_fallback_dias"]),
         "winsor_k": float(base["winsor_k"]),
+        "lt_cd_rm_dias": int(base["lt_cd_rm_dias"]),
+        "lt_cd_resto_dias": int(base["lt_cd_resto_dias"]),
+        "lt_tope_dias": int(base["lt_tope_dias"]),
+        "transito_nacional_dias": int(base["transito_nacional_dias"]),
+        "transito_importado_dias": int(base["transito_importado_dias"]),
+        "dias_habiles_mes": int(base["dias_habiles_mes"]),
         "creado_en": fila.creado_en if fila else None,
         "creado_por": fila.creado_por if fila else None,
         "nota": fila.nota if fila else None,
