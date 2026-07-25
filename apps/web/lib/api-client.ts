@@ -494,6 +494,29 @@ export const api = {
     return res.json();
   },
 
+  /** Versiones anteriores de la configuracion del modelo. */
+  async configModeloHistorial(): Promise<import("./types").ConfigModelo[]> {
+    return getJSON("/api/admin/config-modelo/historial");
+  },
+
+  /** Vuelve a una version anterior de la configuracion. Solo admin. */
+  async revertirConfigModelo(versionId: string): Promise<import("./types").ConfigModelo> {
+    const res = await req(`/api/admin/config-modelo/revertir/${versionId}`, { method: "POST" });
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo revertir"));
+    return res.json();
+  },
+
+  /** Lead time que calculo el motor, por proveedor y sucursal. */
+  async leadTimeProveedor(params: { buscar?: string; solo_global?: boolean } = {}) {
+    const q = new URLSearchParams();
+    if (params.buscar) q.set("buscar", params.buscar);
+    if (params.solo_global) q.set("solo_global", "true");
+    const qs = q.toString();
+    return getJSON<import("./types").LeadTimeResponse>(
+      `/api/admin/lead-time-proveedor${qs ? `?${qs}` : ""}`
+    );
+  },
+
   /** Marcar una linea del sugerido como ya pedida (cierra el loop con la OC). */
   async marcarPedido(payload: {
     producto: string;

@@ -614,10 +614,25 @@ export interface ConfigModelo {
   transito_nacional_dias: number;
   transito_importado_dias: number;
   dias_habiles_mes: number;
+  id: string | null;
   creado_en: string | null;
   creado_por: string | null;
   nota: string | null;
   es_default: boolean;
+}
+
+/** Lead time que calculo el motor (sucursal_id null = global del proveedor). */
+export interface LeadTimeFila {
+  proveedor: string;
+  sucursal_id: string | null;
+  lead_time_dias: number;
+  n_muestras: number | null;
+}
+
+export interface LeadTimeResponse {
+  total: number;
+  actualizado_en: string | null;
+  items: LeadTimeFila[];
 }
 
 export interface SimulacionResultado {

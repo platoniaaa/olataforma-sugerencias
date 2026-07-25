@@ -73,6 +73,8 @@ def _a_dict(fila: ConfiguracionModelo | None) -> dict:
         "transito_nacional_dias": int(base["transito_nacional_dias"]),
         "transito_importado_dias": int(base["transito_importado_dias"]),
         "dias_habiles_mes": int(base["dias_habiles_mes"]),
+        # Lo necesita la UI para poder revertir a esta version.
+        "id": fila.id if fila else None,
         "creado_en": fila.creado_en if fila else None,
         "creado_por": fila.creado_por if fila else None,
         "nota": fila.nota if fila else None,
@@ -119,6 +121,22 @@ def actualizar(db: Session, cambios: dict, *, usuario: str | None, nota: str | N
     db.commit()
     db.refresh(fila)
     return _a_dict(fila)
+
+
+def revertir(db: Session, version_id: str, *, usuario: str | None) -> dict:
+    """Vuelve a una version anterior insertando una COPIA de sus valores.
+
+    No se borra nada del historial: revertir es avanzar hacia atras, asi queda el
+    rastro de que se revirtio y quien lo hizo.
+    """
+    origen = db.get(ConfiguracionModelo, version_id)
+    if origen is None or origen.tenant_id != settings.default_tenant_id:
+        raise ValueError(f"No existe la version {version_id!r}")
+    valores = {c: getattr(origen, c) for c in _CAMPOS}
+    fecha = origen.creado_en.strftime("%d-%m-%Y %H:%M") if origen.creado_en else "?"
+    return actualizar(
+        db, valores, usuario=usuario, nota=f"Revertido a la version del {fecha}"
+    )
 
 
 def historial(db: Session, limite: int = 50) -> list[dict]:

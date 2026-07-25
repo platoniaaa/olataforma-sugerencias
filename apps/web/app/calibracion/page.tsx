@@ -4,10 +4,14 @@
 // (lead time, stock de seguridad, demanda) con sus perillas. Edita, mira el
 // impacto y aplica; el motor usa los valores en su proxima corrida. Solo admin.
 import { useEffect, useState } from "react";
-import { SlidersHorizontal, Play, Save, RotateCcw, Truck, Shield, TrendingUp } from "lucide-react";
+import {
+  SlidersHorizontal, Play, Save, RotateCcw, Truck, Shield, TrendingUp, History, Search,
+} from "lucide-react";
 import { api } from "@/lib/api-client";
 import { formatoCLPCorto, formatoNumero } from "@/lib/formato";
-import type { ConfigModelo, ConfigModeloPlano, SimulacionResultado } from "@/lib/types";
+import type {
+  ConfigModelo, ConfigModeloPlano, LeadTimeResponse, SimulacionResultado,
+} from "@/lib/types";
 
 // Nivel de servicio (una cola de la normal) a partir de Z, para mostrar "≈ 95%".
 function erf(x: number): number {
@@ -207,6 +211,7 @@ export default function CalibracionPage() {
           <Campo label="Importado (días)" min={1} max={730} value={ed.transito_importado_dias}
             onChange={(v) => set("transito_importado_dias", v)} />
         </Grupo>
+        <DetalleLeadTime />
       </Modulo>
 
       {/* MÓDULO · Demanda */}
@@ -269,7 +274,171 @@ export default function CalibracionPage() {
         El impacto es una estimación sobre los datos vigentes (misma base que el Simulador) y refleja
         el ciclo de orden y los niveles de servicio. El resto de los parámetros se aplica al correr el motor.
       </p>
+
+      <Historial recargar={cargar} />
     </div>
+  );
+}
+
+/** Lead time que calculo el motor: el "por que" detras del numero. */
+function DetalleLeadTime() {
+  const [datos, setDatos] = useState<LeadTimeResponse | null>(null);
+  const [buscar, setBuscar] = useState("");
+  const [abierto, setAbierto] = useState(false);
+
+  useEffect(() => {
+    if (!abierto) return;
+    const t = setTimeout(() => {
+      api.leadTimeProveedor({ buscar: buscar || undefined }).then(setDatos).catch(() => setDatos(null));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [abierto, buscar]);
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50/60 p-3">
+      <button onClick={() => setAbierto(!abierto)}
+        className="text-[12px] font-medium text-slate-700 hover:text-slate-900">
+        {abierto ? "▾" : "▸"} Lead time calculado por el motor (detalle por proveedor y sucursal)
+      </button>
+      {abierto && (
+        <div className="mt-3 space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="relative flex-1">
+              <Search size={13} className="absolute left-2.5 top-2 text-slate-400" />
+              <input value={buscar} onChange={(e) => setBuscar(e.target.value)}
+                placeholder="Buscar proveedor o sucursal…"
+                className="w-full rounded-md border border-slate-300 py-1.5 pl-8 pr-3 text-[13px]" />
+            </span>
+            {datos?.actualizado_en && (
+              <span className="text-[11px] text-slate-400">
+                Calculado el {new Date(datos.actualizado_en).toLocaleString("es-CL")}
+              </span>
+            )}
+          </div>
+          {!datos ? (
+            <p className="text-[12px] text-slate-400">Cargando…</p>
+          ) : datos.total === 0 ? (
+            <p className="text-[12px] text-slate-500">
+              Todavía no hay datos: el motor lo publica en su próxima corrida oficial.
+            </p>
+          ) : (
+            <>
+              <div className="max-h-80 overflow-auto rounded-md border border-slate-200 bg-white">
+                <table className="w-full text-[13px]">
+                  <thead className="sticky top-0 bg-slate-50 text-left text-[11px] uppercase text-slate-500">
+                    <tr>
+                      <th className="px-3 py-1.5">Proveedor</th>
+                      <th className="px-3 py-1.5">Sucursal</th>
+                      <th className="px-3 py-1.5 text-right">Días</th>
+                      <th className="px-3 py-1.5 text-right">Muestras</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {datos.items.map((f, i) => (
+                      <tr key={i} className="border-t border-slate-100">
+                        <td className="px-3 py-1.5">{f.proveedor}</td>
+                        <td className="px-3 py-1.5 text-slate-500">
+                          {f.sucursal_id ?? <em className="text-slate-400">todas (global)</em>}
+                        </td>
+                        <td className="px-3 py-1.5 text-right tabular">{f.lead_time_dias.toFixed(1)}</td>
+                        <td className={`px-3 py-1.5 text-right tabular ${
+                          f.n_muestras !== null && f.n_muestras < 5 ? "text-amber-700" : "text-slate-500"
+                        }`}>
+                          {f.n_muestras ?? "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Mostrando {datos.items.length} de {formatoNumero(datos.total)}. Pocas muestras (menos
+                de 5, en ámbar) = promedio poco confiable. Es resultado del cálculo, no configurable.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Historial de versiones de la configuracion, con reversa. */
+function Historial({ recargar }: { recargar: () => Promise<void> }) {
+  const [versiones, setVersiones] = useState<ConfigModelo[] | null>(null);
+  const [abierto, setAbierto] = useState(false);
+  const [ocupado, setOcupado] = useState(false);
+
+  const cargarHistorial = async () => {
+    try {
+      setVersiones(await api.configModeloHistorial());
+    } catch {
+      setVersiones([]);
+    }
+  };
+
+  useEffect(() => {
+    if (abierto) cargarHistorial();
+  }, [abierto]);
+
+  const revertir = async (v: ConfigModelo) => {
+    const cuando = v.creado_en ? new Date(v.creado_en).toLocaleString("es-CL") : "—";
+    if (!window.confirm(`¿Volver a la configuración del ${cuando}?\n\nSe aplica en la próxima corrida del motor.`)) {
+      return;
+    }
+    setOcupado(true);
+    try {
+      await api.revertirConfigModelo(v.id!);
+      await Promise.all([recargar(), cargarHistorial()]);
+    } finally {
+      setOcupado(false);
+    }
+  };
+
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <button onClick={() => setAbierto(!abierto)}
+        className="flex items-center gap-1.5 text-[13px] font-medium text-slate-700 hover:text-slate-900">
+        <History size={14} /> {abierto ? "▾" : "▸"} Historial de cambios
+      </button>
+      {abierto && (
+        <div className="mt-3">
+          {!versiones ? (
+            <p className="text-[12px] text-slate-400">Cargando…</p>
+          ) : versiones.length === 0 ? (
+            <p className="text-[12px] text-slate-500">Todavía no se ha editado la configuración.</p>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {versiones.map((v, i) => (
+                <li key={v.id} className="flex items-center justify-between gap-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-[13px] text-slate-800">
+                      {v.creado_en ? new Date(v.creado_en).toLocaleString("es-CL") : "—"}
+                      {i === 0 && (
+                        <span className="ml-2 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
+                          vigente
+                        </span>
+                      )}
+                    </p>
+                    <p className="truncate text-[11.5px] text-slate-500">
+                      {v.creado_por ?? "—"}
+                      {v.nota ? ` · “${v.nota}”` : ""}
+                      {` · ciclo ${v.ciclo_orden_dias}/${v.ciclo_orden_dias_cd} · Z(A) ${v.z_por_clase.A}`}
+                    </p>
+                  </div>
+                  {i > 0 && (
+                    <button onClick={() => revertir(v)} disabled={ocupado}
+                      className="shrink-0 rounded-md border border-slate-200 px-2.5 py-1 text-[12px] hover:bg-slate-50 disabled:opacity-40">
+                      Volver a esta
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 

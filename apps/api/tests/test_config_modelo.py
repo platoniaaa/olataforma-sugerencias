@@ -66,3 +66,59 @@ def test_no_admin_no_puede_cambiar(client):
         assert r.status_code == 403
     finally:
         app.dependency_overrides[requiere_auth] = lambda: "test@curifor.com"
+
+
+def test_revertir_vuelve_a_una_version_anterior(client):
+    """Revertir inserta una COPIA de la version elegida: el historial no se pierde."""
+    client.put("/api/admin/config-modelo", json={"ciclo_orden_dias_cd": 6})
+    client.put("/api/admin/config-modelo", json={"ciclo_orden_dias_cd": 9})
+    h = client.get("/api/admin/config-modelo/historial").json()
+    id_vieja = h[1]["id"]  # la del 6
+
+    r = client.post(f"/api/admin/config-modelo/revertir/{id_vieja}")
+    assert r.status_code == 200
+    assert r.json()["ciclo_orden_dias_cd"] == 6
+    assert "Revertido" in (r.json()["nota"] or "")
+    # Quedan 3 versiones: no se borro nada.
+    assert len(client.get("/api/admin/config-modelo/historial").json()) == 3
+
+
+def test_revertir_version_inexistente_da_404(client):
+    assert client.post("/api/admin/config-modelo/revertir/no-existe").status_code == 404
+
+
+def test_lead_time_publicar_y_consultar(client):
+    """El motor publica su lead time y la web lo consulta con buscador."""
+    r = client.post("/api/admin/lead-time-proveedor", json={"filas": [
+        {"proveedor": "FORD MOTOR", "sucursal_id": None, "lead_time_dias": 2.66, "n_muestras": None},
+        {"proveedor": "FORD MOTOR", "sucursal_id": "LINDEROS", "lead_time_dias": 2.1, "n_muestras": 40},
+        {"proveedor": "MAHLE", "sucursal_id": "CURICO", "lead_time_dias": 88.7, "n_muestras": 3},
+        {"proveedor": "", "sucursal_id": "X", "lead_time_dias": 5, "n_muestras": 1},  # se ignora
+    ]})
+    assert r.status_code == 200
+    assert r.json() == {"filas_cargadas": 3, "ignoradas": 1}
+
+    d = client.get("/api/admin/lead-time-proveedor").json()
+    assert d["total"] == 3 and d["actualizado_en"] is not None
+    # La fila global (sin sucursal) va primero dentro de su proveedor.
+    assert d["items"][0] == {
+        "proveedor": "FORD MOTOR", "sucursal_id": None,
+        "lead_time_dias": 2.66, "n_muestras": None,
+    }
+
+    # Buscador por proveedor y por sucursal.
+    assert client.get("/api/admin/lead-time-proveedor?buscar=mahle").json()["total"] == 1
+    assert client.get("/api/admin/lead-time-proveedor?buscar=linderos").json()["total"] == 1
+    assert client.get("/api/admin/lead-time-proveedor?solo_global=true").json()["total"] == 1
+
+
+def test_lead_time_publicar_reemplaza_la_foto(client):
+    """Cada corrida del motor reemplaza la tabla: es una foto, no un historico."""
+    client.post("/api/admin/lead-time-proveedor", json={"filas": [
+        {"proveedor": "VIEJO", "sucursal_id": None, "lead_time_dias": 10},
+    ]})
+    client.post("/api/admin/lead-time-proveedor", json={"filas": [
+        {"proveedor": "NUEVO", "sucursal_id": None, "lead_time_dias": 20},
+    ]})
+    d = client.get("/api/admin/lead-time-proveedor").json()
+    assert d["total"] == 1 and d["items"][0]["proveedor"] == "NUEVO"

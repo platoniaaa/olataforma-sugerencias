@@ -12,6 +12,7 @@ from ..services import (
     auditoria_service,
     config_modelo_service,
     excel_loader,
+    lead_time_service,
     motor_comparacion,
     powerbi_desktop_loader,
     powerbi_loader,
@@ -50,6 +51,47 @@ def put_config_modelo(
 def get_config_modelo_historial(db: Session = Depends(get_db)) -> list[dict]:
     """Versiones anteriores de la configuracion (para ver el historial y revertir)."""
     return config_modelo_service.historial(db)
+
+
+@router.post("/config-modelo/revertir/{version_id}")
+def revertir_config_modelo(
+    version_id: str,
+    email: str = Depends(requiere_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Vuelve a una version anterior insertando una copia (no borra historial)."""
+    try:
+        return config_modelo_service.revertir(db, version_id, usuario=email)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+@router.post("/lead-time-proveedor")
+def publicar_lead_time(
+    payload: dict,
+    db: Session = Depends(get_db),
+) -> dict:
+    """El motor publica el lead time que calculo (reemplaza la foto vigente).
+
+    payload: {"filas": [{proveedor, sucursal_id|None, lead_time_dias, n_muestras}]}
+    """
+    filas = payload.get("filas")
+    if not isinstance(filas, list):
+        raise HTTPException(status_code=400, detail="Falta la lista 'filas'")
+    return lead_time_service.reemplazar(db, filas)
+
+
+@router.get("/lead-time-proveedor")
+def get_lead_time(
+    buscar: str | None = None,
+    solo_global: bool = False,
+    limite: int = 200,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Lead time calculado por el motor, con buscador (proveedor o sucursal)."""
+    return lead_time_service.listar(
+        db, buscar=buscar, solo_global=solo_global, limite=min(limite, 500)
+    )
 
 
 @router.post("/cargar-sugerido")

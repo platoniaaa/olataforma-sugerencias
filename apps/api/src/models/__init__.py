@@ -19,6 +19,7 @@ from .comparacion_motor import ComparacionMotor
 from .linea_pedida import LineaPedida
 from .venta_historica import VentaHistorica
 from .configuracion_modelo import ConfiguracionModelo
+from .lead_time_proveedor import LeadTimeProveedorSucursal
 
 __all__ = [
     "Sugerido",
@@ -42,4 +43,5 @@ __all__ = [
     "LineaPedida",
     "VentaHistorica",
     "ConfiguracionModelo",
+    "LeadTimeProveedorSucursal",
 ]
