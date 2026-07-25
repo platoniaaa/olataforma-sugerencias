@@ -63,3 +63,10 @@ class ConfiguracionModelo(Base):
 
     # --- Modulo Demanda ---
     dias_habiles_mes: Mapped[int] = mapped_column(Integer, nullable=False, default=22)
+
+    # --- Modulo Clasificacion ABC (meses CON venta que definen cada clase) ---
+    abc_umbral_a_m6: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    abc_umbral_b_m6: Mapped[int] = mapped_column(Integer, nullable=False, default=4)
+    abc_umbral_c_m6: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    abc_umbral_c_m3: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    abc_umbral_c_m12: Mapped[int] = mapped_column(Integer, nullable=False, default=6)

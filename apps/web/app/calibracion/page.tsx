@@ -5,7 +5,7 @@
 // impacto y aplica; el motor usa los valores en su proxima corrida. Solo admin.
 import { useEffect, useState } from "react";
 import {
-  SlidersHorizontal, Play, Save, RotateCcw, Truck, Shield, TrendingUp, History, Search,
+  SlidersHorizontal, Play, Save, RotateCcw, Truck, Shield, TrendingUp, History, Search, Tags,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { formatoCLPCorto, formatoNumero } from "@/lib/formato";
@@ -47,6 +47,11 @@ function aPlano(c: ConfigModelo): ConfigModeloPlano {
     transito_nacional_dias: c.transito_nacional_dias,
     transito_importado_dias: c.transito_importado_dias,
     dias_habiles_mes: c.dias_habiles_mes,
+    abc_umbral_a_m6: c.abc_umbral_a_m6,
+    abc_umbral_b_m6: c.abc_umbral_b_m6,
+    abc_umbral_c_m6: c.abc_umbral_c_m6,
+    abc_umbral_c_m3: c.abc_umbral_c_m3,
+    abc_umbral_c_m12: c.abc_umbral_c_m12,
   };
 }
 
@@ -225,6 +230,36 @@ export default function CalibracionPage() {
         <p className="text-[11px] text-slate-400">
           Estos dos afectan la demanda/clasificación, que solo se recalcula cuando corre el motor: el
           previsualizador de impacto no los refleja.
+        </p>
+      </Modulo>
+
+      {/* MÓDULO · Clasificación ABC */}
+      <Modulo icon={Tags} titulo="Clasificación ABC"
+        subtitulo="En cuántos meses tiene que haber venta para que un producto sea A, B, C o D.">
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+          Es la perilla más potente del modelo: mover un umbral cambia de clase a muchos productos y
+          con eso su ventana de demanda, su nivel de servicio y si se compra o no. El efecto solo se
+          ve al correr el motor (el previsualizador de impacto no lo refleja).
+        </div>
+        <Grupo titulo="Meses con venta en los últimos 6 meses">
+          <Campo label="Clase A — desde (≥)" min={1} max={6} value={ed.abc_umbral_a_m6}
+            onChange={(v) => set("abc_umbral_a_m6", v)} hint={`Vende en ${ed.abc_umbral_a_m6} meses o más de 6.`} />
+          <Campo label="Clase B — exactamente" min={0} max={6} value={ed.abc_umbral_b_m6}
+            onChange={(v) => set("abc_umbral_b_m6", v)} hint={`Vende en exactamente ${ed.abc_umbral_b_m6} de 6.`} />
+        </Grupo>
+        <Grupo titulo="Clase C (la cola que el CD consolida)" cols={4}>
+          <Campo label="Meses en 6m (=)" min={0} max={6} value={ed.abc_umbral_c_m6}
+            onChange={(v) => set("abc_umbral_c_m6", v)} />
+          <Campo label="y meses en 3m (≥)" min={0} max={3} value={ed.abc_umbral_c_m3}
+            onChange={(v) => set("abc_umbral_c_m3", v)} />
+          <Campo label="o meses en 12m (>)" min={0} max={12} value={ed.abc_umbral_c_m12}
+            onChange={(v) => set("abc_umbral_c_m12", v)} />
+        </Grupo>
+        <p className="text-[11.5px] text-slate-500">
+          Regla actual: <strong>A</strong> si vende en {ed.abc_umbral_a_m6}+ de los últimos 6 meses ·{" "}
+          <strong>B</strong> si vende en {ed.abc_umbral_b_m6} · <strong>C</strong> si vende en{" "}
+          {ed.abc_umbral_c_m6} y al menos {ed.abc_umbral_c_m3} de los últimos 3 (o más de{" "}
+          {ed.abc_umbral_c_m12} de los últimos 12) · <strong>D</strong> el resto.
         </p>
       </Modulo>
 

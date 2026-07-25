@@ -25,4 +25,10 @@ class ConfigModeloUpdate(BaseModel):
     transito_importado_dias: int | None = Field(default=None, ge=1, le=730)
     # Modulo Demanda
     dias_habiles_mes: int | None = Field(default=None, ge=15, le=31)
+    # Modulo Clasificacion ABC
+    abc_umbral_a_m6: int | None = Field(default=None, ge=1, le=6)
+    abc_umbral_b_m6: int | None = Field(default=None, ge=0, le=6)
+    abc_umbral_c_m6: int | None = Field(default=None, ge=0, le=6)
+    abc_umbral_c_m3: int | None = Field(default=None, ge=0, le=3)
+    abc_umbral_c_m12: int | None = Field(default=None, ge=0, le=12)
     nota: str | None = Field(default=None, max_length=500)

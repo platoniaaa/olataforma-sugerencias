@@ -29,6 +29,9 @@ DEFAULTS: dict = {
     "transito_nacional_dias": 30, "transito_importado_dias": 180,
     # Modulo Demanda
     "dias_habiles_mes": 22,
+    # Modulo Clasificacion ABC
+    "abc_umbral_a_m6": 5, "abc_umbral_b_m6": 4, "abc_umbral_c_m6": 3,
+    "abc_umbral_c_m3": 2, "abc_umbral_c_m12": 6,
 }
 
 # Rangos aceptados por parametro (min, max). Fuera de esto la edicion se rechaza:
@@ -43,6 +46,8 @@ _RANGOS: dict[str, tuple[float, float]] = {
     "lt_cd_rm_dias": (0, 30), "lt_cd_resto_dias": (0, 30), "lt_tope_dias": (1, 365),
     "transito_nacional_dias": (1, 365), "transito_importado_dias": (1, 730),
     "dias_habiles_mes": (15, 31),
+    "abc_umbral_a_m6": (1, 6), "abc_umbral_b_m6": (0, 6), "abc_umbral_c_m6": (0, 6),
+    "abc_umbral_c_m3": (0, 3), "abc_umbral_c_m12": (0, 12),
 }
 
 _CAMPOS = list(DEFAULTS.keys())
@@ -73,6 +78,11 @@ def _a_dict(fila: ConfiguracionModelo | None) -> dict:
         "transito_nacional_dias": int(base["transito_nacional_dias"]),
         "transito_importado_dias": int(base["transito_importado_dias"]),
         "dias_habiles_mes": int(base["dias_habiles_mes"]),
+        "abc_umbral_a_m6": int(base["abc_umbral_a_m6"]),
+        "abc_umbral_b_m6": int(base["abc_umbral_b_m6"]),
+        "abc_umbral_c_m6": int(base["abc_umbral_c_m6"]),
+        "abc_umbral_c_m3": int(base["abc_umbral_c_m3"]),
+        "abc_umbral_c_m12": int(base["abc_umbral_c_m12"]),
         # Lo necesita la UI para poder revertir a esta version.
         "id": fila.id if fila else None,
         "creado_en": fila.creado_en if fila else None,

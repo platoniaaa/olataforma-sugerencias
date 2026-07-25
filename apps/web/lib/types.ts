@@ -598,6 +598,11 @@ export interface ConfigModeloPlano {
   transito_nacional_dias: number;
   transito_importado_dias: number;
   dias_habiles_mes: number;
+  abc_umbral_a_m6: number;
+  abc_umbral_b_m6: number;
+  abc_umbral_c_m6: number;
+  abc_umbral_c_m3: number;
+  abc_umbral_c_m12: number;
 }
 
 /** Configuracion del modelo como la devuelve la API (Z en diccionarios). */
@@ -614,6 +619,11 @@ export interface ConfigModelo {
   transito_nacional_dias: number;
   transito_importado_dias: number;
   dias_habiles_mes: number;
+  abc_umbral_a_m6: number;
+  abc_umbral_b_m6: number;
+  abc_umbral_c_m6: number;
+  abc_umbral_c_m3: number;
+  abc_umbral_c_m12: number;
   id: string | null;
   creado_en: string | null;
   creado_por: string | null;

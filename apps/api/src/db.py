@@ -117,6 +117,11 @@ def create_all() -> None:
         "ALTER TABLE configuracion_modelo ADD COLUMN IF NOT EXISTS lt_tope_dias INTEGER NOT NULL DEFAULT 30",
         "ALTER TABLE configuracion_modelo ADD COLUMN IF NOT EXISTS transito_nacional_dias INTEGER NOT NULL DEFAULT 30",
         "ALTER TABLE configuracion_modelo ADD COLUMN IF NOT EXISTS transito_importado_dias INTEGER NOT NULL DEFAULT 180",
+        "ALTER TABLE configuracion_modelo ADD COLUMN IF NOT EXISTS abc_umbral_a_m6 INTEGER NOT NULL DEFAULT 5",
+        "ALTER TABLE configuracion_modelo ADD COLUMN IF NOT EXISTS abc_umbral_b_m6 INTEGER NOT NULL DEFAULT 4",
+        "ALTER TABLE configuracion_modelo ADD COLUMN IF NOT EXISTS abc_umbral_c_m6 INTEGER NOT NULL DEFAULT 3",
+        "ALTER TABLE configuracion_modelo ADD COLUMN IF NOT EXISTS abc_umbral_c_m3 INTEGER NOT NULL DEFAULT 2",
+        "ALTER TABLE configuracion_modelo ADD COLUMN IF NOT EXISTS abc_umbral_c_m12 INTEGER NOT NULL DEFAULT 6",
     ]
     # SQLite NO soporta "ADD COLUMN IF NOT EXISTS" (error de sintaxis que se
     # tragaba el try, dejando bases locales viejas sin las columnas nuevas):
