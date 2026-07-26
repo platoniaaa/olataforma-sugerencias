@@ -1,5 +1,11 @@
 "use client";
 
+// Boton para correr la actualizacion a mano cuando la tarea automatica no corrio.
+//
+// El motor vive en el PC del administrador (lee los Excel de "Bases de datos"), no
+// en la nube, asi que el servidor no puede lanzarlo. El puente es el protocolo
+// `sugerido://` registrado en Windows, que abre el script del motor. Por eso este
+// boton SOLO hace algo en ese PC; en cualquier otro no pasa nada.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle2, Loader2, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api-client";
@@ -21,6 +27,7 @@ export function SincronizacionManual() {
   const [ultimaSync, setUltimaSync] = useState<string | null>(null);
   const [esperando, setEsperando] = useState(false);
   const [exitoReciente, setExitoReciente] = useState(false);
+  const [expiro, setExpiro] = useState(false);
   const refUltima = useRef<string | null>(null);
 
   const cargar = useCallback(async () => {
@@ -37,10 +44,12 @@ export function SincronizacionManual() {
     cargar();
   }, [cargar]);
 
-  // Tras click, espera hasta 3 minutos polling cada 4s.
+  // Tras el click se espera a que cambie el sello de "datos actualizados". El motor
+  // tarda ~3 min en leer los Excel y calcular, asi que se espera hasta 8.
   const onClickSincronizar = () => {
     setEsperando(true);
     setExitoReciente(false);
+    setExpiro(false);
     const antes = refUltima.current;
     const inicio = Date.now();
 
@@ -48,32 +57,31 @@ export function SincronizacionManual() {
       try {
         const r = await api.ultimaSincronizacion();
         if (r.creado_en && r.creado_en !== antes) {
-          // Cambio el timestamp -> sincronizo OK
           setUltimaSync(r.creado_en);
           refUltima.current = r.creado_en;
           setEsperando(false);
           setExitoReciente(true);
           clearInterval(interval);
-          // Quitar el indicador de exito a los 8 segundos
-          setTimeout(() => setExitoReciente(false), 8000);
+          setTimeout(() => setExitoReciente(false), 10000);
+          return;
         }
       } catch {
         /* silent */
       }
-      // Timeout 3 minutos
-      if (Date.now() - inicio > 180_000) {
+      if (Date.now() - inicio > 480_000) {
         setEsperando(false);
+        setExpiro(true);
         clearInterval(interval);
       }
-    }, 4000);
+    }, 5000);
   };
 
   return (
     <div className="mt-4 rounded-sm border border-accent-700/20 bg-white p-3">
-      <p className="kicker">Sincronización manual</p>
+      <p className="kicker">Actualizar ahora</p>
       <p className="mt-1.5 mb-3 text-[12.5px] text-ink-700">
-        Forzá una actualización inmediata desde el PC del admin. Power BI Desktop debe
-        estar abierto.
+        Si la tarea de las 10:00 no corrió, esto la ejecuta a mano: el motor recalcula
+        con los Excel de <b>Bases de datos</b> y publica. Tarda unos 3 minutos.
       </p>
 
       <a
@@ -83,18 +91,17 @@ export function SincronizacionManual() {
       >
         {esperando ? (
           <>
-            <Loader2 size={14} className="animate-spin" /> Sincronizando…
+            <Loader2 size={14} className="animate-spin" /> Actualizando…
           </>
         ) : (
           <>
-            <RefreshCw size={14} /> Sincronizar ahora
+            <RefreshCw size={14} /> Actualizar ahora
           </>
         )}
       </a>
 
-      {/* Estado actual */}
       <div className="mt-3 flex flex-wrap items-center gap-3 text-[12px]">
-        <span className="kicker">Última sincronización</span>
+        <span className="kicker">Última actualización</span>
         {ultimaSync ? (
           <span className="text-ink-700">
             <b className="font-mono">{formatoFechaHora(ultimaSync)}</b>{" "}
@@ -107,8 +114,8 @@ export function SincronizacionManual() {
 
       {esperando && (
         <p className="mt-2 rounded-sm bg-brand-50 px-3 py-2 text-[12px] text-brand-800">
-          Esperando confirmación de la nube… cuando la consola de PowerShell termine en
-          tu PC, este mensaje cambia a &ldquo;Listo&rdquo; automáticamente.
+          Se abrió una ventana en el PC del administrador: escribe <b>SI</b> para
+          confirmar. Cuando termine, esta tarjeta se actualiza sola.
         </p>
       )}
 
@@ -117,6 +124,17 @@ export function SincronizacionManual() {
           <CheckCircle2 size={14} /> Listo — el equipo ya ve los datos actualizados.
         </p>
       )}
+
+      {expiro && (
+        <p className="mt-2 rounded-sm bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+          No llegó la confirmación en 8 minutos. Revisa la ventana de PowerShell en el
+          PC del administrador (puede haber pedido confirmación o dado un error).
+        </p>
+      )}
+
+      <p className="mt-3 text-[11px] text-ink-500">
+        Solo funciona desde el PC del administrador, que es donde corre el motor.
+      </p>
     </div>
   );
 }

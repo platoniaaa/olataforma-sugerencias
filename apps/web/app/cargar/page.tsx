@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, Cloud, FileSpreadsheet, RefreshCw, Upload } from "lucide-react";
+import { CheckCircle2, FileSpreadsheet, Upload } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api-client";
@@ -24,48 +24,13 @@ export default function CargarPage() {
   const [resultado, setResultado] = useState<CargaResultado | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [drag, setDrag] = useState(false);
-  const [powerbiOk, setPowerbiOk] = useState(false);
-  const [sincronizando, setSincronizando] = useState(false);
-  const [sincDesktop, setSincDesktop] = useState(false);
 
-  // El boton "Actualizar desde Power BI" (Desktop) solo sirve cuando la app corre en
-  // el MISMO PC que Power BI (modo local). En la nube no aplica, asi que se oculta.
+  // La subida de archivo a mano queda SOLO en modo local (desarrollo). En produccion
+  // el sugerido entra por el motor: subir un Excel cualquiera podria pisar los datos
+  // buenos, y para forzar una actualizacion ya esta el boton de arriba.
   const apiEsLocal = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").includes(
     "localhost"
   );
-
-  useEffect(() => {
-    api
-      .powerbiEstado()
-      .then((e) => setPowerbiOk(e.configurado))
-      .catch(() => setPowerbiOk(false));
-  }, []);
-
-  const sincronizar = async () => {
-    setSincronizando(true);
-    setError(null);
-    setResultado(null);
-    try {
-      setResultado(await api.sincronizarPowerBI());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error al sincronizar");
-    } finally {
-      setSincronizando(false);
-    }
-  };
-
-  const sincronizarDesktop = async () => {
-    setSincDesktop(true);
-    setError(null);
-    setResultado(null);
-    try {
-      setResultado(await api.sincronizarPowerBIDesktop());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error al leer Power BI Desktop");
-    } finally {
-      setSincDesktop(false);
-    }
-  };
 
   const subir = async () => {
     if (!file) return;
@@ -86,92 +51,41 @@ export default function CargarPage() {
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-slate-900">Cargar datos</h1>
         <p className="text-[13px] text-slate-500">
-          Sube el Excel o CSV que exportas del Power BI (tabla &ldquo;Sugerido por
-          Sucursal&rdquo;). Reemplaza por completo los datos actuales.
+          El sugerido lo calcula el motor con los Excel de <b>Bases de datos</b> y se
+          publica solo todos los días. Acá puedes ver cuándo fue la última vez y
+          forzarlo si hace falta.
         </p>
       </div>
 
-      {/* Power BI Desktop abierto (solo modo LOCAL; en la nube se oculta) */}
-      {apiEsLocal && (
-        <Card className="border-brand/30 bg-gradient-to-br from-brand-50 to-white">
-          <CardContent className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand text-white">
-                <RefreshCw size={20} />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-slate-900">Actualizar desde Power BI</p>
-                <p className="text-[13px] text-slate-500">
-                  Ten Power BI Desktop <b>abierto</b> con el modelo y haz clic. Lee los datos
-                  directo, sin exportar archivos.
-                </p>
-              </div>
-            </div>
-            <Button onClick={sincronizarDesktop} disabled={sincDesktop}>
-              <RefreshCw size={15} className={sincDesktop ? "animate-spin" : ""} />
-              {sincDesktop ? "Leyendo…" : "Actualizar ahora"}
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Nota para la version en la nube: como actualizar los datos */}
-      {!apiEsLocal && (
-        <Card className="border-brand-200 bg-brand-50/60">
-          <CardContent className="text-[13px] text-ink-700">
-            <p className="font-display text-[15px] font-medium text-ink-900">
-              Sincronización automática diaria
-            </p>
-            <p className="mt-2">
-              Una tarea programada de Windows ejecuta el script{" "}
-              <code className="rounded-sm bg-white px-1 py-px font-mono text-[12px] text-accent-700">
-                push_to_cloud.ps1
-              </code>{" "}
-              en el PC del administrador <b>todos los días a las 10:00 AM</b>. Lee Power BI
-              Desktop, calcula las medidas y publica el sugerido en la nube para todo el equipo.
-            </p>
-            <p className="mt-3">
-              <span className="kicker">Requisito</span>
-              <br />
-              Power BI Desktop debe estar abierto con el modelo del sugerido a esa hora.
-            </p>
-            <SincronizacionManual />
-            <p className="mt-3 text-[11px] text-ink-500">
-              Solo funciona en el PC del administrador (donde está Power BI). El navegador
-              pedirá permiso la primera vez para abrir &ldquo;Sugerido Curifor&rdquo;.
-            </p>
-            <p className="mt-3 text-[11.5px] text-ink-500">
-              Logs de cada ejecución en{" "}
-              <code className="font-mono">logs/sincronizar_diario.log</code> del PC del admin.
-            </p>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Sincronizacion automatica via API (solo si hay service principal configurado) */}
-      {powerbiOk && (
-        <Card className="border-emerald-200 bg-gradient-to-br from-emerald-50 to-white">
-          <CardContent className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-600 text-white">
-                <Cloud size={20} />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-slate-900">
-                  Sincronizar con Power BI (automatico)
-                </p>
-                <p className="text-[13px] text-slate-500">
-                  Trae los datos del Power BI Service. No requiere tener Power BI abierto.
-                </p>
-              </div>
-            </div>
-            <Button onClick={sincronizar} disabled={sincronizando}>
-              <RefreshCw size={15} className={sincronizando ? "animate-spin" : ""} />
-              {sincronizando ? "Sincronizando…" : "Sincronizar ahora"}
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+      {/* Como se actualiza hoy: la tarea corre el motor, sin Power BI. */}
+      <Card className="border-brand-200 bg-brand-50/60">
+        <CardContent className="text-[13px] text-ink-700">
+          <p className="font-display text-[15px] font-medium text-ink-900">
+            Actualización automática diaria
+          </p>
+          <p className="mt-2">
+            Todos los días a las <b>10:00 AM</b>, una tarea programada en el PC del
+            administrador ejecuta el motor: lee los Excel de{" "}
+            <code className="rounded-sm bg-white px-1 py-px font-mono text-[12px] text-accent-700">
+              Bases de datos
+            </code>
+            , calcula el sugerido y lo publica para todo el equipo.{" "}
+            <b>Ya no depende del Power BI.</b>
+          </p>
+          <p className="mt-3">
+            <span className="kicker">Lo único que hay que mantener</span>
+            <br />
+            Los archivos de esa carpeta al día (stock y seguimiento a diario; ventas al
+            cerrar el mes). Si alguno está vencido, el motor <b>no publica</b> y lo avisa,
+            en vez de dejar datos viejos como buenos.
+          </p>
+          <SincronizacionManual />
+          <p className="mt-3 text-[11.5px] text-ink-500">
+            Log de cada corrida en{" "}
+            <code className="font-mono">logs/motor_&lt;fecha&gt;.log</code> del PC del admin.
+          </p>
+        </CardContent>
+      </Card>
 
       {/* Subida manual: SOLO en modo local. En la nube se oculta para evitar que un
           Excel de la tabla base (sin medidas) pise los datos buenos por accidente. */}
