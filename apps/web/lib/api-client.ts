@@ -10,8 +10,6 @@ import type {
   CatalogoOpciones,
   CatalogoPage,
   DimensionAgrupado,
-  Documento,
-  DocumentoCreate,
   NotificacionesResponse,
   Producto,
   Sucursal,
@@ -19,8 +17,6 @@ import type {
   SugeridoFiltros,
   SugeridoKpis,
   SugeridoPage,
-  PostVentaFiltros,
-  PostVentaMeta,
   Recurrente,
   RecurrenteCreate,
   VentasResponse,
@@ -349,49 +345,6 @@ export const api = {
     return res.json();
   },
 
-  async postVentaMeta(): Promise<PostVentaMeta> {
-    return getJSON("/api/post-venta/meta");
-  },
-
-  async postVentaContar(f: PostVentaFiltros): Promise<number> {
-    const p = new URLSearchParams();
-    if (f.periodo_desde) p.set("periodo_desde", f.periodo_desde);
-    if (f.periodo_hasta) p.set("periodo_hasta", f.periodo_hasta);
-    if (f.fecha_desde) p.set("fecha_desde", f.fecha_desde);
-    if (f.fecha_hasta) p.set("fecha_hasta", f.fecha_hasta);
-    if (f.sucursal) p.set("sucursal", f.sucursal);
-    const r = await getJSON<{ filas: number }>(`/api/post-venta/contar?${p.toString()}`);
-    return r.filas;
-  },
-
-  async exportPostVenta(
-    f: PostVentaFiltros,
-    formato: "csv" | "xlsx" = "csv"
-  ): Promise<void> {
-    const endpoint = formato === "csv" ? "/api/post-venta/export-csv" : "/api/post-venta/export-excel";
-    const res = await req(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(f),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail ?? "No se pudo generar el archivo");
-    }
-    const blob = await res.blob();
-    const dispo = res.headers.get("Content-Disposition") ?? "";
-    const match = dispo.match(/filename="?([^"]+)"?/);
-    const nombre =
-      match?.[1] ??
-      (formato === "csv" ? "planilla_post_venta.csv" : "planilla_post_venta.xlsx");
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = nombre;
-    a.click();
-    URL.revokeObjectURL(url);
-  },
-
   async auditoria(limit = 100, offset = 0): Promise<AuditoriaPage> {
     return getJSON(`/api/auditoria?limit=${limit}&offset=${offset}`);
   },
@@ -405,35 +358,6 @@ export const api = {
     return getJSON(
       `/api/notificaciones?solo_no_leidas=${soloNoLeidas}&limit=${limit}`
     );
-  },
-
-  async ventasKpis(): Promise<import("./types").VentasKpis> {
-    return getJSON("/api/ventas/kpis");
-  },
-
-  async ventasMensual(meses = 12): Promise<import("./types").VentasMes[]> {
-    return getJSON(`/api/ventas/mensual?meses=${meses}`);
-  },
-
-  async ventasPorSucursal(periodo?: string): Promise<import("./types").VentasPorSucursal> {
-    const q = periodo ? `?periodo=${encodeURIComponent(periodo)}` : "";
-    return getJSON(`/api/ventas/por-sucursal${q}`);
-  },
-
-  async ventasLineas(
-    f: import("./types").VentasLineasFiltros,
-    opts: { page?: number; limit?: number } = {}
-  ): Promise<import("./types").VentasLineasPage> {
-    const p = new URLSearchParams();
-    if (f.periodo_desde) p.set("periodo_desde", f.periodo_desde);
-    if (f.periodo_hasta) p.set("periodo_hasta", f.periodo_hasta);
-    if (f.fecha_desde) p.set("fecha_desde", f.fecha_desde);
-    if (f.fecha_hasta) p.set("fecha_hasta", f.fecha_hasta);
-    if (f.sucursal) p.set("sucursal", f.sucursal);
-    if (f.q) p.set("q", f.q);
-    p.set("page", String(opts.page ?? 1));
-    p.set("limit", String(opts.limit ?? 500));
-    return getJSON(`/api/ventas/lineas?${p.toString()}`);
   },
 
   async ultimaSincronizacion(): Promise<{ creado_en: string | null; detalle: string | null }> {
@@ -648,40 +572,6 @@ export const api = {
     return getJSON(`/api/inventario/salud?${p.toString()}`);
   },
 
-  /** Enlaces a documentos de SharePoint (ventas historicas, etc.). */
-  async documentos(incluirInactivos = false): Promise<Documento[]> {
-    return getJSON(`/api/documentos?incluir_inactivos=${incluirInactivos}`);
-  },
-
-  async crearDocumento(payload: DocumentoCreate): Promise<Documento> {
-    const res = await req("/api/documentos", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo crear el enlace"));
-    return res.json();
-  },
-
-  async editarDocumento(id: string, payload: Partial<DocumentoCreate> & { activo?: boolean }): Promise<Documento> {
-    const res = await req(`/api/documentos/${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo editar el enlace"));
-    return res.json();
-  },
-
-  async eliminarDocumento(id: string): Promise<void> {
-    const res = await req(`/api/documentos/${encodeURIComponent(id)}`, { method: "DELETE" });
-    if (!res.ok && res.status !== 204) throw new Error("No se pudo eliminar el enlace");
-  },
-
-  /** Registra la apertura (auditoria). Fire-and-forget: no bloquea el clic. */
-  registrarAperturaDocumento(id: string): void {
-    req(`/api/documentos/${encodeURIComponent(id)}/apertura`, { method: "POST" }).catch(() => {});
-  },
 
   async chat(
     pregunta: string,

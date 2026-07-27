@@ -72,18 +72,6 @@ def run() -> int:
         db.rollback()
         print(f"AVISO stock (continuo igual): {e}", file=sys.stderr)
 
-    # Planilla Post Venta (solo año en curso, para exportar desde la web). No es crítico.
-    try:
-        pres = powerbi_desktop_loader.sync_post_venta_desktop(db)
-        print(
-            f"OK post-venta: {pres['filas_cargadas']} filas cargadas "
-            f"({pres.get('filas_recibidas', '?')} recibidas), "
-            f"{pres['periodos']} períodos, {pres['sucursales']} sucursales."
-        )
-    except Exception as e:  # noqa: BLE001
-        db.rollback()
-        print(f"AVISO post-venta (continuo igual): {e}", file=sys.stderr)
-
     # Registrar el evento de sincronizacion en auditoria_log para que la web
     # pueda mostrar "Ultima sync: hace X min".
     try:

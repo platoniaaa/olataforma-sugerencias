@@ -132,11 +132,6 @@ SUMMARIZECOLUMNS(
     gemini_api_key: str = ""
     gemini_modelo: str = "gemini-2.5-flash"
 
-    # --- Planilla Post Venta (exportación web) ---
-    # Tabla transaccional enorme del BI. A la nube se sube solo el AÑO EN CURSO (el filtro
-    # por período se arma dinámicamente en código). El nombre de la tabla es configurable.
-    powerbi_post_venta_tabla: str = "Planilla Post_venta"
-
     model_config = SettingsConfigDict(
         env_file=(".env", "../../.env"),
         env_file_encoding="utf-8",

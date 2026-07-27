@@ -303,22 +303,6 @@ export interface CatalogoDetalle extends CatalogoRow {
   stock_por_sucursal: StockSucursalRow[];
 }
 
-export interface PostVentaMeta {
-  columnas: string[];
-  filas: number;
-  periodos: string[];
-  sucursales: string[];
-  actualizado_en: string | null;
-}
-
-export interface PostVentaFiltros {
-  periodo_desde?: string | null;
-  periodo_hasta?: string | null;
-  fecha_desde?: string | null;  // YYYY-MM-DD
-  fecha_hasta?: string | null;  // YYYY-MM-DD
-  sucursal?: string | null;
-}
-
 export interface CargaResultado {
   filas_cargadas: number;
   productos: number;
@@ -366,15 +350,6 @@ export interface NotificacionesResponse {
   no_leidas: number;
 }
 
-export interface VentasKpis {
-  periodo_actual: string | null;
-  periodo_anterior: string | null;
-  actual: { clp: number; unidades: number; n_lineas: number };
-  anterior: { clp: number; unidades: number; n_lineas: number };
-  var_clp_pct: number | null;
-  var_unidades_pct: number | null;
-}
-
 export interface VentasMes {
   periodo: string;
   clp: number;
@@ -416,26 +391,6 @@ export interface VentasLineasFiltros {
 }
 
 /** Enlace a un archivo que vive en SharePoint (no lo almacena la plataforma). */
-export interface Documento {
-  id: string;
-  titulo: string;
-  descripcion: string | null;
-  url: string;
-  categoria: string;
-  orden: number;
-  activo: boolean;
-  creado_por_email: string | null;
-  actualizado_en: string | null;
-}
-
-export interface DocumentoCreate {
-  titulo: string;
-  url: string;
-  descripcion?: string | null;
-  categoria?: string;
-  orden?: number;
-}
-
 /** Salud del inventario: donde esta la plata detenida y donde falta. */
 export interface InventarioResumen {
   valor_inventario_clp: number;
