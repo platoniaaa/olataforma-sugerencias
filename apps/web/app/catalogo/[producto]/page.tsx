@@ -2,17 +2,33 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Plus } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { formatoCLP, formatoNumero } from "@/lib/formato";
 import { GraficoVentas } from "@/components/grafico-ventas";
-import type { CatalogoDetalle } from "@/lib/types";
+import { ModalSugerenciaManual } from "@/components/modal-sugerencia-manual";
+import { Button } from "@/components/ui/button";
+import { getSoloLectura } from "@/lib/auth";
+import type { CatalogoDetalle, Sucursal } from "@/lib/types";
 
 export default function DetalleCatalogoPage({ params }: { params: { producto: string } }) {
   const producto = decodeURIComponent(params.producto);
   const [d, setD] = useState<CatalogoDetalle | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(true);
+
+  // Sugerencia manual desde el catalogo: es el unico lugar donde se encuentra un
+  // producto que el motor no sugirio, asi que aca se puede pedir sin dar la vuelta
+  // por el buscador del sugerido.
+  const [sucursales, setSucursales] = useState<Sucursal[]>([]);
+  const [modal, setModal] = useState(false);
+  const [soloLectura, setSoloLectura] = useState(false);
+  const [guardado, setGuardado] = useState(false);
+
+  useEffect(() => {
+    setSoloLectura(getSoloLectura());
+    api.sucursales().then(setSucursales).catch(() => {});
+  }, []);
 
   useEffect(() => {
     setCargando(true);
@@ -44,11 +60,29 @@ export default function DetalleCatalogoPage({ params }: { params: { producto: st
             <h1 className="text-xl font-semibold tracking-tight text-slate-900">{d.producto}</h1>
             <p className="text-sm text-slate-600">{d.glosa ?? "—"}</p>
           </div>
-          <span className="inline-flex items-center rounded bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
-            CATÁLOGO
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center rounded bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+              CATÁLOGO
+            </span>
+            {!soloLectura && (
+              <Button size="sm" onClick={() => setModal(true)}>
+                <Plus size={15} /> Sugerencia manual
+              </Button>
+            )}
+          </div>
         </div>
       </div>
+
+      {guardado && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-[13px] text-emerald-800">
+          <span className="inline-flex items-center gap-1.5">
+            <CheckCircle2 size={15} /> Sugerencia creada. Ya aparece en el sugerido.
+          </span>
+          <Link href="/sugerencias-manuales" className="font-medium underline">
+            Ver sugerencias manuales
+          </Link>
+        </div>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-3">
         <Card titulo="Stock total (BI)" valor={formatoNumero(stockTotal)} acento />
@@ -105,6 +139,16 @@ export default function DetalleCatalogoPage({ params }: { params: { producto: st
           </table>
         )}
       </div>
+
+      {/* Sin sucursalInicial: el catalogo no tiene sucursal, la elige en el modal. */}
+      <ModalSugerenciaManual
+        open={modal}
+        onClose={() => setModal(false)}
+        onGuardado={() => setGuardado(true)}
+        sucursales={sucursales}
+        productoInicial={d.producto}
+        soloIndividual
+      />
     </div>
   );
 }
