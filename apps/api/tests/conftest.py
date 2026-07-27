@@ -14,7 +14,7 @@ from src.models import (
     DimSucursal,
     Sugerido,
     Usuario,
-    VentaMensual,
+    VentaHistorica,
 )
 from src.services.auth import hash_password, requiere_auth
 
@@ -62,9 +62,9 @@ def _seed(session):
         sugerido_traslado=4, sugerido_compra_neto=6, pedir_flag="Si",
     ))
     for mes, cant in [("202503", 12), ("202504", 8), ("202505", 15)]:
-        session.add(VentaMensual(
-            tenant_id="curifor", producto="20 BXO5W30AA", sucursal_id="LINDEROS",
-            mes=mes, cantidad=cant,
+        session.add(VentaHistorica(
+            tenant_id="curifor", producto="20 BXO5W30AA", sucursal="LINDEROS",
+            periodo=mes, cantidad=cant,
         ))
     session.commit()
 

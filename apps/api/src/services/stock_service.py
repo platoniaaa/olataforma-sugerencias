@@ -1,10 +1,62 @@
-"""Consultas sobre stock_unificado: total por producto y desglose por sucursal."""
+"""Stock por producto-bodega: lo publica el motor, lo consultan catalogo y sugerido."""
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, insert, select
 from sqlalchemy.orm import Session
 
+from ..config import get_settings
 from ..models import StockUnificado
+
+settings = get_settings()
+
+# Insert por lotes: el snapshot completo son ~30k filas y una por una tarda de mas.
+_LOTE = 1000
+
+
+def reemplazar(db: Session, filas: list[dict]) -> dict:
+    """Reemplaza la foto del stock con la que acaba de leer el motor.
+
+    Cada fila: producto, bodega, sucursal_id, stock, origen. Es una foto del
+    stock vigente, no un historico: se borra todo y se vuelve a insertar.
+
+    Antes esta tabla solo la llenaba el Power BI Desktop; al retirarlo quedo
+    congelada y el catalogo mostraba stock viejo como si fuera de hoy.
+    """
+    tenant = settings.default_tenant_id
+    validas: list[dict] = []
+    for f in filas:
+        prod = (f.get("producto") or "").strip()
+        if not prod:
+            continue
+        try:
+            stock = float(f.get("stock") or 0)
+        except (TypeError, ValueError):
+            continue
+        validas.append(
+            {
+                "tenant_id": tenant,
+                "producto": prod,
+                "bodega": (f.get("bodega") or "").strip() or None,
+                "sucursal_id": (f.get("sucursal_id") or "").strip() or None,
+                "stock": stock,
+                "origen": (f.get("origen") or "").strip() or None,
+            }
+        )
+
+    # Si el motor manda una tanda vacia NO se borra lo que hay: es mejor mostrar
+    # la foto anterior que dejar el catalogo sin stock por una corrida fallida.
+    if not validas:
+        return {"filas_cargadas": 0, "ignoradas": len(filas), "reemplazo": False}
+
+    db.execute(delete(StockUnificado).where(StockUnificado.tenant_id == tenant))
+    for i in range(0, len(validas), _LOTE):
+        db.execute(insert(StockUnificado), validas[i : i + _LOTE])
+    db.commit()
+    return {
+        "filas_cargadas": len(validas),
+        "ignoradas": len(filas) - len(validas),
+        "reemplazo": True,
+    }
 
 
 def stock_total_por_producto(db: Session, productos: list[str]) -> dict[str, float]:

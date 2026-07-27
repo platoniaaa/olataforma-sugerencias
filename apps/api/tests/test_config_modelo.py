@@ -124,3 +124,57 @@ def test_lead_time_publicar_reemplaza_la_foto(client):
     ]})
     d = client.get("/api/calibracion/lead-time-proveedor").json()
     assert d["total"] == 1 and d["items"][0]["proveedor"] == "NUEVO"
+
+
+def _catalogar(db_session, producto="20 BXO5W30AA"):
+    """La ficha del catalogo solo responde si el producto esta en el maestro."""
+    from src.models import ProductoCatalogo
+
+    db_session.add(ProductoCatalogo(
+        producto=producto, tenant_id="curifor", glosa="ACEITE 5W30 LITRO FORD",
+    ))
+    db_session.commit()
+
+
+def test_stock_publicar_y_verlo_en_el_catalogo(client, db_session):
+    """El motor publica el stock por bodega y la ficha del catalogo lo muestra.
+
+    Antes esta tabla la llenaba solo el Power BI Desktop; al retirarlo, el stock
+    del catalogo quedo congelado.
+    """
+    _catalogar(db_session)
+    r = client.post("/api/admin/stock-unificado", json={"filas": [
+        {"producto": "20 BXO5W30AA", "bodega": "LINDEROS 1",
+         "sucursal_id": "LINDEROS", "stock": 30, "origen": "CURIFOR"},
+        {"producto": "20 BXO5W30AA", "bodega": "CD REPUESTOS",
+         "sucursal_id": "CD REPUESTOS", "stock": 12, "origen": "CURIFOR"},
+        {"producto": "20 BXO5W30AA", "bodega": "FRONTERA 1",
+         "sucursal_id": "TALCA", "stock": 5, "origen": "FRONTERA"},
+        {"producto": "", "bodega": "X", "stock": 99},  # sin codigo -> se ignora
+    ]})
+    assert r.status_code == 200
+    assert r.json() == {"filas_cargadas": 3, "ignoradas": 1, "reemplazo": True}
+
+    d = client.get("/api/catalogo/20 BXO5W30AA").json()
+    assert d["stock_total"] == 47
+    # Ordenado por stock desc, con la bodega y la empresa de cada fila.
+    assert [f["bodega"] for f in d["stock_por_sucursal"]] == [
+        "LINDEROS 1", "CD REPUESTOS", "FRONTERA 1",
+    ]
+    assert d["stock_por_sucursal"][2]["origen"] == "FRONTERA"
+
+
+def test_stock_publicar_vacio_no_borra_la_foto_anterior(client, db_session):
+    """Una corrida que no trajo filas no debe dejar el catalogo sin stock.
+
+    Es preferible mostrar la foto de ayer que borrarla por un Excel que llego
+    vacio o un error de lectura a medio camino.
+    """
+    _catalogar(db_session)
+    client.post("/api/admin/stock-unificado", json={"filas": [
+        {"producto": "20 BXO5W30AA", "bodega": "B1", "sucursal_id": "LINDEROS", "stock": 7},
+    ]})
+    r = client.post("/api/admin/stock-unificado", json={"filas": []})
+    assert r.json() == {"filas_cargadas": 0, "ignoradas": 0, "reemplazo": False}
+
+    assert client.get("/api/catalogo/20 BXO5W30AA").json()["stock_total"] == 7

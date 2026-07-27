@@ -1,5 +1,19 @@
 """Consulta del historico de ventas desde 2018."""
+import pytest
+from sqlalchemy import delete
+
 from src.models import VentaHistorica
+
+
+@pytest.fixture(autouse=True)
+def _historico_limpio(db_session):
+    """Parte de tabla vacia: aca se prueban conteos y rangos globales.
+
+    El seed comun carga ventas en `venta_historica` (de ahi sale el grafico de los
+    12 meses), y esas filas descuadrarian los totales que se verifican abajo.
+    """
+    db_session.execute(delete(VentaHistorica))
+    db_session.commit()
 
 
 def _vh(db_session, periodo, producto, sucursal, cantidad, neto=None, n=1):

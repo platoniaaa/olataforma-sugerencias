@@ -85,7 +85,7 @@ export default function DetalleCatalogoPage({ params }: { params: { producto: st
       )}
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <Card titulo="Stock total (BI)" valor={formatoNumero(stockTotal)} acento />
+        <Card titulo="Stock total" valor={formatoNumero(stockTotal)} acento />
         <Card titulo="Familia" valor={d.familia ?? "—"} />
         <Card titulo="Procedencia" valor={d.procedencia ?? "—"} />
         <Card titulo="Costo" valor={d.costo != null ? formatoCLP(d.costo) : "—"} />
@@ -99,7 +99,7 @@ export default function DetalleCatalogoPage({ params }: { params: { producto: st
         <div className="border-b border-slate-100 px-4 py-3">
           <h2 className="text-sm font-semibold text-slate-900">Stock por sucursal / bodega</h2>
           <p className="text-xs text-slate-500">
-            Snapshot del Power BI (tabla "Stock Unificado") al último push.
+            Lo publica el motor en cada corrida, desde los Excel de stock.
           </p>
         </div>
         {conStock.length === 0 ? (

@@ -667,7 +667,7 @@ def test_excel_labels_cubren_columnas_del_frontend():
 def test_regla_stock_sin_venta_marca_pedir_no(db_session):
     """Regla: si stock_activo >= demanda_mensual y no hubo venta el mes anterior,
     la plataforma fuerza pedir='No' aunque el BI haya sugerido comprar."""
-    from src.models import Sugerido, VentaMensual
+    from src.models import Sugerido, VentaHistorica
     from src.services.sugerido_service import (
         _aplicar_regla_stock_sin_venta,
         _mes_anterior_yyyymm,
@@ -688,9 +688,9 @@ def test_regla_stock_sin_venta_marca_pedir_no(db_session):
         demanda_mensual=10.0, stock_activo_suc=50, total_sugerido_suc=5,
     ))
     # TEST-REGLA-2 SI tuvo venta el mes anterior -> NO se debe aplicar la regla.
-    db_session.add(VentaMensual(
-        tenant_id="curifor", producto="TEST-REGLA-2", sucursal_id="LINDEROS",
-        mes=_mes_anterior_yyyymm(), cantidad=3,
+    db_session.add(VentaHistorica(
+        tenant_id="curifor", producto="TEST-REGLA-2", sucursal="LINDEROS",
+        periodo=_mes_anterior_yyyymm(), cantidad=3,
     ))
     db_session.commit()
 
@@ -720,6 +720,44 @@ def test_regla_stock_sin_venta_marca_pedir_no(db_session):
     assert items[0]["pedir_flag"] == "No"
     assert items[1]["pedir"] == "Si", "con venta mes anterior, no aplicar la regla"
     assert items[2]["pedir"] == "Si", "stock insuficiente, no aplicar la regla"
+
+
+def test_regla_stock_sin_venta_no_aplica_si_el_mes_no_esta_cargado(db_session):
+    """Si el mes anterior no tiene NINGUNA fila cargada, la regla no se aplica.
+
+    Sin esta guarda, un mes que todavia no llega se lee como "nadie vendio nada" y
+    la regla marcaria pedir='No' a todo producto con stock >= demanda, sacandolos
+    del sugerido (el dashboard filtra por "solo pedir"). Paso de verdad: la tabla
+    de ventas se alimentaba solo del Power BI y quedo congelada al retirarlo.
+    """
+    from sqlalchemy import delete
+
+    from src.models import VentaHistorica
+    from src.services.sugerido_service import (
+        _aplicar_regla_stock_sin_venta,
+        _mes_anterior_yyyymm,
+    )
+
+    # Ni una fila del mes anterior: el periodo no esta cargado.
+    db_session.execute(
+        delete(VentaHistorica).where(VentaHistorica.periodo == _mes_anterior_yyyymm())
+    )
+    db_session.commit()
+
+    items = [
+        {
+            "producto": "TEST-GUARDA", "sucursal_id": "LINDEROS",
+            "stock_activo_suc": 50, "demanda_mensual": 10.0,
+            "pedir": "Si", "pedir_flag": "Si",
+        },
+    ]
+    _aplicar_regla_stock_sin_venta(items, db_session)
+
+    assert items[0]["pedir"] == "Si", (
+        "sin datos del mes anterior no se puede afirmar 'no tuvo venta': "
+        "la regla debe abstenerse, no ocultar la compra"
+    )
+    assert items[0]["pedir_flag"] == "Si"
 
 
 MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

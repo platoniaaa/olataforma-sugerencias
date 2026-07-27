@@ -15,6 +15,7 @@ from ..services import (
     motor_comparacion,
     powerbi_desktop_loader,
     powerbi_loader,
+    stock_service,
 )
 from ..services.auth import requiere_admin
 
@@ -45,6 +46,34 @@ def publicar_lead_time(
     if not isinstance(filas, list):
         raise HTTPException(status_code=400, detail="Falta la lista 'filas'")
     return lead_time_service.reemplazar(db, filas)
+
+
+@router.post("/stock-unificado")
+def publicar_stock_unificado(
+    payload: dict,
+    db: Session = Depends(get_db),
+) -> dict:
+    """El motor publica el stock por producto-bodega (reemplaza la foto vigente). Admin.
+
+    payload: {"filas": [{producto, bodega, sucursal_id, stock, origen}]}
+
+    Lo alimenta el Excel de "Stock bodegas" que el motor ya lee para calcular el
+    sugerido. Antes esta tabla venia del Power BI Desktop; al retirarlo, el stock
+    del catalogo quedo congelado.
+    """
+    filas = payload.get("filas")
+    if not isinstance(filas, list):
+        raise HTTPException(status_code=400, detail="Falta la lista 'filas'")
+    resumen = stock_service.reemplazar(db, filas)
+    if resumen["reemplazo"]:
+        auditoria_service.registrar(
+            db,
+            accion="stock_publicado",
+            entidad="sistema",
+            detalle=f"Stock unificado: {resumen['filas_cargadas']} filas",
+        )
+        db.commit()
+    return resumen
 
 
 @router.post("/cargar-sugerido")

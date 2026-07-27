@@ -14,7 +14,7 @@ from ..models import (
     StockUnificado,
     Sugerido,
     SugerenciaManual,
-    VentaMensual,
+    VentaHistorica,
 )
 from ..schemas import SugeridoFiltros
 from . import margen, pedidos_service, stock_service
@@ -345,7 +345,7 @@ def _aplicar_regla_stock_sin_venta(items: list[dict], db: Session) -> None:
     demanda con stock propio y ademas el producto no se movio el mes pasado
     (= demanda historica que ya no se materializa hoy).
 
-    Muta `items` in-place. Una sola query batch a VentaMensual para todos los
+    Muta `items` in-place. Una sola query batch a `venta_historica` para todos los
     pares (producto, sucursal) involucrados.
     """
     if not items:
@@ -358,21 +358,36 @@ def _aplicar_regla_stock_sin_venta(items: list[dict], db: Session) -> None:
     if not pares:
         return
     mes = _mes_anterior_yyyymm()
+
+    # Guarda: "sin venta" solo se puede afirmar si el mes ESTA cargado. Si la tabla
+    # no tiene ninguna fila de ese periodo, es que los datos no llegaron todavia, no
+    # que nadie vendio; aplicar la regla ahi marcaria "No pedir" a todo producto con
+    # stock >= demanda y los sacaria del sugerido (el dashboard filtra "solo pedir").
+    # Ante la duda no se aplica: es preferible sugerir de mas que ocultar compras.
+    hay_mes = db.scalar(
+        select(func.count())
+        .select_from(VentaHistorica)
+        .where(VentaHistorica.periodo == mes)
+        .limit(1)
+    )
+    if not hay_mes:
+        return
+
     productos = {p for p, _ in pares}
     sucursales = {s for _, s in pares}
     # Suma de cantidad vendida el mes anterior por par.
     rows = db.execute(
         select(
-            VentaMensual.producto,
-            VentaMensual.sucursal_id,
-            func.coalesce(func.sum(VentaMensual.cantidad), 0).label("c"),
+            VentaHistorica.producto,
+            VentaHistorica.sucursal,
+            func.coalesce(func.sum(VentaHistorica.cantidad), 0).label("c"),
         )
         .where(
-            VentaMensual.producto.in_(productos),
-            VentaMensual.sucursal_id.in_(sucursales),
-            VentaMensual.mes == mes,
+            VentaHistorica.producto.in_(productos),
+            VentaHistorica.sucursal.in_(sucursales),
+            VentaHistorica.periodo == mes,
         )
-        .group_by(VentaMensual.producto, VentaMensual.sucursal_id)
+        .group_by(VentaHistorica.producto, VentaHistorica.sucursal)
     ).all()
     venta_map = {(p, s): float(c or 0) for p, s, c in rows}
 
@@ -852,16 +867,21 @@ def ventas_12m(db: Session, producto: str, sucursal_id: str | None = None) -> di
     Devuelve DOS series:
     - `meses_general`: suma del producto en TODAS las sucursales (la venta total).
     - `meses_sucursal`: solo la sucursal del sugerido (vacío si no se entrega).
+
+    Sale de `venta_historica`, que se carga de los Excel de Ventas. Antes salia de
+    `venta_mensual`, que solo llenaba el Power BI Desktop: al retirarlo el grafico
+    quedo congelado en la ultima corrida del BI, en las tres pantallas que lo usan
+    (detalle de producto, ficha del catalogo y el chat).
     """
 
     def _consulta(suc: str | None) -> list[tuple[str, float]]:
         stmt = select(
-            VentaMensual.mes,
-            func.coalesce(func.sum(VentaMensual.cantidad), 0).label("cantidad"),
-        ).where(VentaMensual.producto == producto)
+            VentaHistorica.periodo,
+            func.coalesce(func.sum(VentaHistorica.cantidad), 0).label("cantidad"),
+        ).where(VentaHistorica.producto == producto)
         if suc:
-            stmt = stmt.where(VentaMensual.sucursal_id == suc)
-        stmt = stmt.group_by(VentaMensual.mes).order_by(VentaMensual.mes.asc())
+            stmt = stmt.where(VentaHistorica.sucursal == suc)
+        stmt = stmt.group_by(VentaHistorica.periodo).order_by(VentaHistorica.periodo.asc())
         return [(m, float(c)) for m, c in db.execute(stmt).all()]
 
     general = _consulta(None)[-12:]
