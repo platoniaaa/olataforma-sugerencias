@@ -5,7 +5,7 @@ from sqlalchemy import distinct, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
-from ..models import ProductoCatalogo
+from ..models import ProductoCatalogo, Sugerido
 from . import stock_service
 
 settings = get_settings()
@@ -73,7 +73,29 @@ def detalle(db: Session, producto: str) -> dict | None:
     desglose = stock_service.stock_por_sucursal(db, producto)
     d["stock_total"] = sum(r["stock"] for r in desglose) if desglose else d.get("stock_total")
     d["stock_por_sucursal"] = desglose
+    # Reemplazos: el maestro del ERP casi no los trae (0,9% de los productos). Los
+    # que valen son los del mix, que el motor resuelve y publica en `sugerido`. Se
+    # prefiere esa fuente y el maestro queda de respaldo.
+    d["reemplazo"] = _reemplazos(db, producto) or d.get("reemplazo")
     return d
+
+
+def _reemplazos(db: Session, producto: str) -> str | None:
+    """Grupo de reemplazo que el motor calculó para este producto (del mix)."""
+    try:
+        return db.scalar(
+            select(Sugerido.reemplazos)
+            .where(
+                Sugerido.tenant_id == settings.default_tenant_id,
+                Sugerido.producto == producto,
+                Sugerido.reemplazos.isnot(None),
+                Sugerido.reemplazos != "",
+            )
+            .limit(1)
+        )
+    except Exception:
+        db.rollback()
+        return None
 
 
 def opciones_filtros(db: Session) -> dict:

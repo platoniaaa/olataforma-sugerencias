@@ -45,6 +45,11 @@ export default function DetalleCatalogoPage({ params }: { params: { producto: st
 
   const stockTotal = d.stock_total ?? 0;
   const conStock = d.stock_por_sucursal.filter((s) => s.stock > 0);
+  // El maestro los trae en un solo campo, separados por coma.
+  const reemplazos = (d.reemplazo ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   return (
     <div className="space-y-4">
@@ -92,6 +97,30 @@ export default function DetalleCatalogoPage({ params }: { params: { producto: st
         <Card titulo="Precio" valor={d.precio != null ? formatoCLP(d.precio) : "—"} />
         <Card titulo="Unidad" valor={d.unidad ?? "—"} />
       </div>
+
+      {/* Equivalentes: el sugerido los trata como un mismo producto (stock y
+          demanda se suman), asi que hay que verlos antes de pedir. */}
+      {reemplazos.length > 0 && (
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <h2 className="text-sm font-semibold text-slate-900">
+            Productos equivalentes (reemplazos)
+          </h2>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Se agrupan con este código para calcular stock y demanda.
+          </p>
+          <div className="mt-2.5 flex flex-wrap gap-2">
+            {reemplazos.map((r) => (
+              <Link
+                key={r}
+                href={`/catalogo/${encodeURIComponent(r)}`}
+                className="rounded bg-slate-100 px-2 py-1 font-mono text-[12px] text-slate-700 transition-colors hover:bg-brand-50 hover:text-brand"
+              >
+                {r}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       <GraficoVentas producto={d.producto} />
 

@@ -164,6 +164,28 @@ def test_stock_publicar_y_verlo_en_el_catalogo(client, db_session):
     assert d["stock_por_sucursal"][2]["origen"] == "FRONTERA"
 
 
+def test_catalogo_muestra_los_reemplazos_del_mix(client, db_session):
+    """La ficha del catalogo muestra el grupo de reemplazo que calculo el motor.
+
+    El maestro del ERP trae la columna Reemplazo vacia en el 99% de los productos;
+    la agrupacion buena sale del mix y llega en `sugerido.reemplazos`. Por eso se
+    prefiere esa fuente y el maestro queda de respaldo.
+    """
+    _catalogar(db_session, "80 173897")
+    d = client.get("/api/catalogo/80 173897").json()
+    assert d["reemplazo"] is None, "sin fila en sugerido no hay grupo que mostrar"
+
+    from src.models import Sugerido
+
+    db_session.add(Sugerido(
+        tenant_id="curifor", producto="80 173897", descripcion="LIMPIADOR DE FRENOS",
+        sucursal_id="LINDEROS", nombre_sucursal="Linderos", reemplazos="80 391732",
+    ))
+    db_session.commit()
+
+    assert client.get("/api/catalogo/80 173897").json()["reemplazo"] == "80 391732"
+
+
 def test_stock_publicar_vacio_no_borra_la_foto_anterior(client, db_session):
     """Una corrida que no trajo filas no debe dejar el catalogo sin stock.
 
