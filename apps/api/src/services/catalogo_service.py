@@ -80,19 +80,55 @@ def detalle(db: Session, producto: str) -> dict | None:
     return d
 
 
+def _partes(lista: str | None) -> list[str]:
+    return [x.strip() for x in (lista or "").split(",") if x.strip()]
+
+
 def _reemplazos(db: Session, producto: str) -> str | None:
-    """Grupo de reemplazo que el motor calculó para este producto (del mix)."""
+    """Los otros códigos del grupo de reemplazo de este producto (según el mix).
+
+    El motor solo escribe la lista en la fila del MASTER del grupo (el miembro que
+    más vendió). Buscar únicamente por `producto` dejaba sin reemplazos a los otros
+    miembros: entrando por el código equivocado parecía que no tenía equivalentes.
+    Por eso, si no es master, se busca el grupo donde figura y se devuelven todos
+    los demás (incluido el master).
+    """
+    tenant = settings.default_tenant_id
     try:
-        return db.scalar(
+        propio = db.scalar(
             select(Sugerido.reemplazos)
             .where(
-                Sugerido.tenant_id == settings.default_tenant_id,
+                Sugerido.tenant_id == tenant,
                 Sugerido.producto == producto,
                 Sugerido.reemplazos.isnot(None),
                 Sugerido.reemplazos != "",
             )
             .limit(1)
         )
+        if propio:
+            return propio
+
+        # No es master: buscar el grupo que lo contiene. El LIKE es un prefiltro
+        # grosero (traeria "80 1738" al buscar "80 17"), asi que el match exacto se
+        # confirma comparando contra los elementos ya separados.
+        candidatos = db.execute(
+            select(Sugerido.producto, Sugerido.reemplazos)
+            .where(
+                Sugerido.tenant_id == tenant,
+                Sugerido.reemplazos.like(f"%{producto}%"),
+            )
+            .limit(50)
+        ).all()
+        for master, lista in candidatos:
+            miembros = _partes(lista)
+            if producto not in miembros:
+                continue
+            otros = [m for m in miembros if m != producto]
+            if master and master != producto:
+                otros.insert(0, master)
+            if otros:
+                return ", ".join(dict.fromkeys(otros))
+        return None
     except Exception:
         db.rollback()
         return None

@@ -186,6 +186,50 @@ def test_catalogo_muestra_los_reemplazos_del_mix(client, db_session):
     assert client.get("/api/catalogo/80 173897").json()["reemplazo"] == "80 391732"
 
 
+def test_catalogo_muestra_el_grupo_desde_cualquier_miembro(client, db_session):
+    """Entrar por un miembro que no es master igual debe mostrar el grupo.
+
+    El motor escribe la lista de reemplazos solo en la fila del master (el que mas
+    vendio). Buscando por otro codigo del grupo parecia que no tenia equivalentes.
+    """
+    from src.models import Sugerido
+
+    # Master del grupo: 80 391732, con los otros dos como reemplazos.
+    db_session.add(Sugerido(
+        tenant_id="curifor", producto="80 391732", descripcion="LIMPIADOR HELLA",
+        sucursal_id="LINDEROS", nombre_sucursal="Linderos",
+        reemplazos="80 PR/51822, 80 173897",
+    ))
+    # Distractor: contiene "80 17" como substring, pero NO es del grupo. Cubre el
+    # falso positivo del LIKE.
+    db_session.add(Sugerido(
+        tenant_id="curifor", producto="OTRO", descripcion="Otro grupo",
+        sucursal_id="LINDEROS", nombre_sucursal="Linderos", reemplazos="80 1738000",
+    ))
+    db_session.commit()
+
+    # Desde el master: los otros dos.
+    _catalogar(db_session, "80 391732")
+    assert client.get("/api/catalogo/80 391732").json()["reemplazo"] == (
+        "80 PR/51822, 80 173897"
+    )
+
+    # Desde un miembro: el master primero y despues el otro miembro, sin repetirse.
+    _catalogar(db_session, "80 PR/51822")
+    assert client.get("/api/catalogo/80 PR/51822").json()["reemplazo"] == (
+        "80 391732, 80 173897"
+    )
+
+    _catalogar(db_session, "80 173897")
+    assert client.get("/api/catalogo/80 173897").json()["reemplazo"] == (
+        "80 391732, 80 PR/51822"
+    )
+
+    # El codigo parecido no pertenece a ningun grupo: el LIKE no debe colarlo.
+    _catalogar(db_session, "80 17")
+    assert client.get("/api/catalogo/80 17").json()["reemplazo"] is None
+
+
 def test_stock_publicar_vacio_no_borra_la_foto_anterior(client, db_session):
     """Una corrida que no trajo filas no debe dejar el catalogo sin stock.
 
