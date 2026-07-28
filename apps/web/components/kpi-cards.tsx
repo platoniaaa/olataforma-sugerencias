@@ -15,12 +15,15 @@ function KpiCard({
   valor,
   index,
   acento,
+  nota,
 }: {
   icon: React.ReactNode;
   label: string;
   valor: string;
   index: string;
   acento?: boolean;
+  /** Renglón chico bajo la cifra (ej: cuánto viene de sugerencias manuales). */
+  nota?: string | null;
 }) {
   return (
     <div className="group relative overflow-hidden border border-ink-200 bg-white p-5 transition-colors hover:border-ink-300">
@@ -40,6 +43,9 @@ function KpiCard({
       >
         {valor}
       </p>
+      {/* Desglose opcional: se reserva el alto igual cuando no hay nota, para que
+          las cuatro tarjetas queden parejas. */}
+      <p className="mt-1.5 h-4 text-[11px] leading-4 text-ink-500">{nota ?? ""}</p>
       {/* linea inferior tipo "subrayado tecnico" */}
       <span
         className={`absolute bottom-0 left-0 h-px transition-all ${
@@ -52,6 +58,12 @@ function KpiCard({
 
 export function KpiCards({ kpis, cargando }: Props) {
   const v = (s: string) => (cargando || !kpis ? "—" : s);
+  // Los totales ya incluyen las sugerencias manuales; el paréntesis dice cuánto de
+  // eso se cargó a mano. Solo aparece si hay algo que mostrar.
+  const uManual = kpis?.total_sugerido_manual ?? 0;
+  const clpManual = kpis?.valor_manual_clp ?? 0;
+  const nota = (mostrar: boolean, texto: string) =>
+    cargando || !kpis || !mostrar ? null : texto;
   return (
     <div className="grid grid-cols-2 gap-px bg-ink-200 lg:grid-cols-4">
       <KpiCard
@@ -59,12 +71,14 @@ export function KpiCards({ kpis, cargando }: Props) {
         icon={<Boxes size={16} />}
         label="Total Sugerido"
         valor={v(formatoNumero(kpis?.total_sugerido))}
+        nota={nota(uManual > 0, `(${formatoNumero(uManual)} manuales)`)}
       />
       <KpiCard
         index="02"
         icon={<DollarSign size={16} />}
         label="Valor Total"
         valor={v(formatoCLPCorto(kpis?.valor_total_clp))}
+        nota={nota(clpManual > 0, `(${formatoCLPCorto(clpManual)} manuales)`)}
         acento
       />
       <KpiCard

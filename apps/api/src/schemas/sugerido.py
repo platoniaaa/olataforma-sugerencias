@@ -97,6 +97,7 @@ class SugeridoPage(BaseModel):
 class SugeridoKpis(BaseModel):
     """KPIs agregados segun los filtros aplicados."""
 
+    # Incluyen las sugerencias manuales vigentes (igual que la tabla).
     total_sugerido: float = 0
     valor_total_clp: float = 0
     n_productos: int = 0
@@ -104,6 +105,10 @@ class SugeridoKpis(BaseModel):
     # Conteo exacto de filas que cumplen los filtros (incluidos los de columna del
     # grid). El dashboard lo muestra como "N filas tras el filtro".
     n_filas: int = 0
+    # Cuanto de los dos totales de arriba viene de sugerencias manuales. El
+    # dashboard lo muestra entre parentesis bajo la cifra.
+    total_sugerido_manual: float = 0
+    valor_manual_clp: float = 0
 
 
 class AgrupadoRow(BaseModel):

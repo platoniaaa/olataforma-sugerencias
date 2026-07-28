@@ -81,12 +81,16 @@ export interface SugeridoPage {
 }
 
 export interface SugeridoKpis {
+  /** Incluyen las sugerencias manuales vigentes (igual que la tabla). */
   total_sugerido: number;
   valor_total_clp: number;
   n_productos: number;
   n_proveedores: number;
   /** Conteo exacto de filas que cumplen los filtros (incluidos los de columna). */
   n_filas?: number;
+  /** Cuánto de los totales de arriba viene de sugerencias manuales. */
+  total_sugerido_manual?: number;
+  valor_manual_clp?: number;
 }
 
 /** Filtro de una columna del grid (traducido del multi-select). Se usa el campo
