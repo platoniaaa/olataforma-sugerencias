@@ -339,6 +339,7 @@ export default function DashboardPage() {
         onChange={setFiltros}
         hayFiltrosColumna={hayFiltrosColumna}
         onLimpiarTodo={limpiarFiltrosTodo}
+        onBuscar={cargar}
       />
 
       {error && (
