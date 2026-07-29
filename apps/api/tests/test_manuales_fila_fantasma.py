@@ -134,6 +134,49 @@ def test_la_regla_de_stock_sin_venta_no_pisa_una_manual(client, db_session):
     assert filas["REG-2"]["pedir"] == "Si"   # ...pero no sobre la que tiene manual
 
 
+def test_buscar_por_descripcion_no_borra_las_unidades_manuales(client, db_session):
+    """La misma fila tiene que dar lo mismo se la busque como se la busque.
+
+    `_manuales_por_par` filtraba por `producto ILIKE %q%`, pero la busqueda global
+    matchea tambien descripcion, sucursal, proveedor y marca: buscando por
+    descripcion el diccionario quedaba vacio y las unidades manuales se perdian.
+    Medido en produccion: 53 unidades por codigo vs 17 por descripcion."""
+    _sug(db_session, "BUS-1", sucursal="LINDEROS", total=17, descripcion="ACEITE MOTOR 5W20")
+    _manual(db_session, "BUS-1", 36, "LINDEROS")
+
+    def total(q):
+        r = _filas(client, q=q, solo_pedir=False)
+        return next(f["total_sugerido_suc"] for f in r["items"] if f["producto"] == "BUS-1")
+
+    assert total("BUS-1") == 53                 # por codigo
+    assert total("ACEITE MOTOR 5W20") == 53     # por descripcion
+    assert total("Linderos") == 53              # por sucursal
+    assert total(PROV) == 53                    # por proveedor
+
+
+def test_los_kpis_tambien_cuentan_las_manuales_al_buscar_por_sucursal(client, db_session):
+    _sug(db_session, "BUS-2", sucursal="LINDEROS", total=10)
+    _manual(db_session, "BUS-2", 8, "LINDEROS")
+
+    k = _kpis(client, q="Linderos", solo_pedir=False)
+    assert k["total_sugerido_manual"] == 8
+
+
+def test_una_manual_huerfana_no_aparece_en_una_busqueda_ajena(client, db_session):
+    """La fila sintetica SI se acota a la busqueda: es una fila que se agrega."""
+    _sug(db_session, "BUS-3", sucursal="LINDEROS", total=10, descripcion="FILTRO DE AIRE")
+    db_session.add(ProductoCatalogo(
+        tenant_id="curifor", producto="HUE-1", glosa="CORREA DENTADA", costo=100.0,
+    ))
+    db_session.commit()
+    _manual(db_session, "HUE-1", 4, "LINDEROS")
+
+    assert "HUE-1" not in {f["producto"] for f in _filas(client, q="FILTRO DE AIRE")["items"]}
+    # ...pero si aparece cuando la busqueda le corresponde.
+    assert "HUE-1" in {f["producto"] for f in _filas(client, q="CORREA")["items"]}
+    assert "HUE-1" in {f["producto"] for f in _filas(client, q="HUE-")["items"]}
+
+
 def test_los_kpis_siguen_cuadrando_con_la_tabla(client, db_session):
     _sug(db_session, "FAN-6", sucursal="LINDEROS", total=23)
     _sug(db_session, "FAN-7", sucursal="LINDEROS", total=7, pedir="No", pedir_flag="No")

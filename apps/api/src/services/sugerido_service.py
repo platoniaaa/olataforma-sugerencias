@@ -261,10 +261,22 @@ def _no_vencida():
     )
 
 
-def _manuales_por_par(db: Session, q: str | None = None) -> dict[tuple[str, str], int]:
+def _manuales_por_par(db: Session) -> dict[tuple[str, str], int]:
     """Devuelve {(producto, sucursal_id): unidades vigentes} de sugerencias manuales.
 
-    Si se pasa q, solo trae los productos cuyo codigo lo contiene (acota al caso de busqueda).
+    SIN filtrar por la busqueda, a proposito. Antes recibia `q` y filtraba por
+    `producto ILIKE %q%`, pero la busqueda global del dashboard matchea ademas
+    descripcion, sucursal, proveedor, marca, tipo de origen, ABC y abastece_cd:
+    buscar "ACEITE MOTOR 5W20 SN" o "Rancagua" dejaba el diccionario VACIO y las
+    unidades cargadas a mano desaparecian de filas que igual se estaban mostrando.
+    Medido en produccion: `20 XO5W20Q1SP`/LINDEROS salia con 53 unidades buscando
+    por codigo y con 17 buscando por su propia descripcion (las 36 manuales se
+    evaporaban), y el KPI con q="Rancagua" reportaba 0 unidades manuales teniendo
+    27 pares por 349 unidades.
+
+    Son pocas filas (~100), asi que traerlas todas no cuesta nada. El acotamiento
+    por busqueda se hace donde corresponde: sobre las filas que se AGREGAN
+    (`solas` en `_resolver_manuales`), no sobre las unidades que se suman.
     """
     stmt = (
         select(
@@ -275,8 +287,6 @@ def _manuales_por_par(db: Session, q: str | None = None) -> dict[tuple[str, str]
         .where(SugerenciaManual.archivada.is_(False), _no_vencida())
         .group_by(SugerenciaManual.producto, SugerenciaManual.sucursal_id)
     )
-    if q:
-        stmt = stmt.where(SugerenciaManual.producto.ilike(f"%{q}%"))
     return {
         (p, s): int(t or 0) for p, s, t in db.execute(stmt).all() if t and int(t) > 0
     }
@@ -304,7 +314,7 @@ def _resolver_manuales(db: Session, f: SugeridoFiltros) -> dict:
     fila buena (con proveedor, ABC y stock) escondida en otra pestania.
     """
     vacio: dict = {"por_par": {}, "en_vista": set(), "extras": set(), "solas": {}}
-    por_par = _manuales_por_par(db, (f.q or "").strip() or None)
+    por_par = _manuales_por_par(db)
     if not por_par:
         return vacio
     pares = set(por_par)
@@ -326,6 +336,29 @@ def _resolver_manuales(db: Session, f: SugeridoFiltros) -> dict:
     if f.sucursales_permitidas is not None:
         permitidas = set(f.sucursales_permitidas)
         solas = {(p, s): u for (p, s), u in solas.items() if s in permitidas}
+    # Estas si se acotan a la busqueda: son filas que se AGREGAN, y meter en los
+    # resultados de "aceite" una fila que no tiene nada que ver seria ruido. Se
+    # mira el codigo, la glosa del catalogo y la sucursal, que es lo unico que
+    # tiene una fila sintetica (la busqueda global mira mas columnas, pero una
+    # fila sin sugerido no las tiene).
+    q_text = (f.q or "").strip()
+    if q_text and solas:
+        like = f"%{q_text}%"
+        por_glosa = {
+            c.producto
+            for c in db.scalars(
+                select(ProductoCatalogo).where(
+                    ProductoCatalogo.producto.in_({p for p, _ in solas}),
+                    ProductoCatalogo.glosa.ilike(like),
+                )
+            ).all()
+        }
+        ql = q_text.lower()
+        solas = {
+            (p, s): u
+            for (p, s), u in solas.items()
+            if ql in p.lower() or ql in s.lower() or p in por_glosa
+        }
     return {"por_par": por_par, "en_vista": en_vista, "extras": extras, "solas": solas}
 
 
