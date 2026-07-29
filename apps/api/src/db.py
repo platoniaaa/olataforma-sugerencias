@@ -105,6 +105,10 @@ def create_all() -> None:
         "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS precio_urgente_vor_ford INTEGER",
         "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS precio_promociones_ford INTEGER",
         "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS precio_urgente_recargo15_ford INTEGER",
+        # 2026-07: lista de precios de Gildemeister (Hyundai, JAC, Mahindra...).
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS precio_sugerido_gilde INTEGER",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS precio_dealer_gilde INTEGER",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS precio_final_dealer_gilde INTEGER",
         # 2026-07: sugerencias que mantienen un nivel de stock (modo objetivo).
         "ALTER TABLE sugerencia_recurrente ADD COLUMN IF NOT EXISTS stock_objetivo INTEGER",
         # 2026-07: como se pidio cada sugerencia manual (para poder explicarla).

@@ -116,6 +116,9 @@ HEADER_ALIASES: dict[str, str] = {
     "precio_urgente_vor_ford": "precio_urgente_vor_ford",
     "precio_promociones_ford": "precio_promociones_ford",
     "precio_urgente_recargo15_ford": "precio_urgente_recargo15_ford",
+    "precio_sugerido_gilde": "precio_sugerido_gilde",
+    "precio_dealer_gilde": "precio_dealer_gilde",
+    "precio_final_dealer_gilde": "precio_final_dealer_gilde",
     # Nombres tal como aparecen en el VISUAL de Power BI (medidas):
     "total_sugerido": "total_sugerido_suc",
     "stock_activo": "stock_activo_suc",
@@ -133,6 +136,7 @@ INT_FIELDS = {
     "precio_flota_ford", "precio_dealer_ford", "precio_publico_ford",
     "precio_publico_iva_ford", "precio_reposicion_ford", "precio_urgente_vor_ford",
     "precio_promociones_ford", "precio_urgente_recargo15_ford",
+    "precio_sugerido_gilde", "precio_dealer_gilde", "precio_final_dealer_gilde",
 }
 FLOAT_FIELDS = {
     "demanda_mensual", "demanda_diaria", "desv_std_mensual", "costo_unitario",

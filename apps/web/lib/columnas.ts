@@ -117,6 +117,14 @@ export const COLUMNAS: DefColumna[] = [
     info: "Precio de FORD en promoción para el repuesto. En blanco si el código no está en la lista de FORD." },
   { key: "precio_urgente_recargo15_ford", label: "Precio Urgente +15% FORD", tipo: "clp", visiblePorDefecto: false,
     info: "Precio de FORD en pedido urgente con recargo del 15%. En blanco si el código no está en la lista de FORD." },
+  // Lista de Gildemeister (Hyundai, JAC, Mahindra, Brilliance, BAIC...). Tiene tres
+  // conceptos, no los ocho de FORD. Un producto está en una lista o en la otra.
+  { key: "precio_sugerido_gilde", label: "Precio Sugerido GILDEMEISTER", tipo: "clp", visiblePorDefecto: false,
+    info: "Precio sugerido al público de Gildemeister. Cumple el mismo rol que el Precio Público de FORD: es el que se usa para el margen. En blanco si el código no está en su lista." },
+  { key: "precio_dealer_gilde", label: "Precio Dealer GILDEMEISTER", tipo: "clp", visiblePorDefecto: false,
+    info: "Lo que Gildemeister le cobra al concesionario. Sirve de referencia del costo de reposición. En blanco si el código no está en su lista." },
+  { key: "precio_final_dealer_gilde", label: "Precio Final Dealer GILDEMEISTER", tipo: "clp", visiblePorDefecto: false,
+    info: "Precio dealer final de Gildemeister (con descuentos ya aplicados). En blanco si el código no está en su lista." },
   // Margen: precio de lista FORD contra el costo unitario. En blanco si falta alguno de los dos.
   { key: "margen_pct", label: "Margen %", tipo: "porcentaje", visiblePorDefecto: false,
     info: "Margen sobre el precio público de FORD: (precio público − costo unitario) / precio público. En blanco si el producto no tiene precio FORD o no tiene costo." },

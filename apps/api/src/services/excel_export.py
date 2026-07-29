@@ -74,6 +74,10 @@ LABELS: dict[str, str] = {
     "precio_urgente_vor_ford": "Precio Urgente VOR FORD",
     "precio_promociones_ford": "Precio Promociones FORD",
     "precio_urgente_recargo15_ford": "Precio Urgente +15% FORD",
+    # Lista de Gildemeister (Hyundai, JAC, Mahindra, Brilliance, BAIC...).
+    "precio_sugerido_gilde": "Precio Sugerido GILDEMEISTER",
+    "precio_dealer_gilde": "Precio Dealer GILDEMEISTER",
+    "precio_final_dealer_gilde": "Precio Final Dealer GILDEMEISTER",
     # Margen calculado contra el costo unitario (services/margen.py).
     "margen_unitario_clp": "Margen Unitario CLP",
     "margen_pct": "Margen %",
@@ -95,6 +99,20 @@ CLP_COLUMNS = {
     "precio_publico_iva_ford", "precio_reposicion_ford", "precio_urgente_vor_ford",
     "precio_promociones_ford", "precio_urgente_recargo15_ford",
     "margen_unitario_clp", "margen_sugerido_clp",
+    "precio_sugerido_gilde", "precio_dealer_gilde", "precio_final_dealer_gilde",
+}
+# Columnas que son UNIDADES: se muestran sin decimales aunque la base las guarde
+# como Float. Sin esto salian "815.138,00" — el fallback de formato miraba el tipo
+# Python, y esas columnas son Float en la BD aunque el valor sea entero. Ademas
+# quedaba incoherente dentro de la misma planilla: el stock por bodega es Integer
+# y salia "134.997", mientras Stock Activo salia "134.997,00".
+UNIDADES_COLUMNS = {
+    "total_sugerido_suc", "sugerido_suc", "sugerido_compra_neto", "sugerido_traslado",
+    "stock_activo_suc", "stock_en_transito_suc", "stock_en_cd", "unidades_pedidas",
+    "stock_seguridad", "punto_de_pedido",
+    "stock_linderos", "stock_curico", "stock_talca", "stock_rancagua",
+    "stock_diez_de_julio_2", "stock_chillan", "stock_cd_repuestos", "stock_brasil_18",
+    "stock_placilla", "stock_chillan_viejo", "stock_talca_2",
 }
 HEADER_FILL = PatternFill("solid", fgColor="1E40AF")
 HEADER_FONT = Font(color="FFFFFF", bold=True)
@@ -127,7 +145,11 @@ def generar_excel(rows: list[dict], columnas: list[str] | None) -> bytes:
             cell = ws.cell(row=i, column=j, value=value)
             if col in CLP_COLUMNS and isinstance(value, (int, float)):
                 cell.number_format = '"$"#,##0'
+            elif col in UNIDADES_COLUMNS and isinstance(value, (int, float)):
+                cell.number_format = "#,##0"
             elif isinstance(value, float):
+                # Lo que queda con decimales es lo que de verdad los tiene:
+                # demanda mensual/diaria, desviacion estandar, porcentajes.
                 cell.number_format = "#,##0.00"
 
     # Ancho de columnas aproximado.

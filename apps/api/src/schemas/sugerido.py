@@ -75,6 +75,10 @@ class SugeridoRow(BaseModel):
     precio_urgente_vor_ford: int | None = None
     precio_promociones_ford: int | None = None
     precio_urgente_recargo15_ford: int | None = None
+    # Lista de Gildemeister: tres conceptos, no los ocho de FORD.
+    precio_sugerido_gilde: int | None = None
+    precio_dealer_gilde: int | None = None
+    precio_final_dealer_gilde: int | None = None
     # Margen calculado (services/margen.py): None si falta el precio o el costo.
     margen_unitario_clp: float | None = None
     margen_pct: float | None = None

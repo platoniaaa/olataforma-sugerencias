@@ -63,6 +63,10 @@ export interface SugeridoRow {
   precio_urgente_vor_ford: number | null;
   precio_promociones_ford: number | null;
   precio_urgente_recargo15_ford: number | null;
+  // Lista de Gildemeister (Hyundai, JAC, Mahindra...): tres conceptos, no los ocho de FORD.
+  precio_sugerido_gilde: number | null;
+  precio_dealer_gilde: number | null;
+  precio_final_dealer_gilde: number | null;
   // Margen calculado en el backend (services/margen.py).
   margen_unitario_clp: number | null;
   margen_pct: number | null;

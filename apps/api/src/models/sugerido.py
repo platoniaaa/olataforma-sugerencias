@@ -100,6 +100,12 @@ class Sugerido(Base):
     precio_urgente_vor_ford: Mapped[int | None] = mapped_column(Integer, nullable=True)
     precio_promociones_ford: Mapped[int | None] = mapped_column(Integer, nullable=True)
     precio_urgente_recargo15_ford: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Lista de precios de Gildemeister (Hyundai, JAC, Mahindra, Brilliance, BAIC...).
+    # Tiene tres conceptos, no los ocho de FORD: sugerido al publico, dealer y
+    # dealer final. Van en columnas propias para no mentir con el sufijo _ford.
+    precio_sugerido_gilde: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    precio_dealer_gilde: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    precio_final_dealer_gilde: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     __table_args__ = (
         Index("ix_sugerido_prod_suc", "producto", "sucursal_id"),

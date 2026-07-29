@@ -20,8 +20,24 @@ inventar margenes con datos incompletos.
 """
 from __future__ import annotations
 
-# Campo de precio que se toma como precio de venta principal.
-PRECIO_VENTA_PRINCIPAL = "precio_publico_ford"
+# Precio de venta principal, en orden de preferencia. Un producto esta en UNA de
+# las listas, no en las dos: FORD publica su precio publico y Gildemeister su
+# precio sugerido, que cumplen el mismo rol. Si algun dia se agrega otra lista,
+# se suma aca y el margen la toma sin tocar nada mas.
+PRECIOS_VENTA = ("precio_publico_ford", "precio_sugerido_gilde")
+PRECIOS_DEALER = ("precio_dealer_ford", "precio_dealer_gilde")
+
+# Compatibilidad: habia codigo y tests que miraban esta constante.
+PRECIO_VENTA_PRINCIPAL = PRECIOS_VENTA[0]
+
+
+def _primero(fila: dict, campos) -> float | None:
+    """Primer campo con valor > 0 de la lista (None si ninguno)."""
+    for c in campos:
+        v = fila.get(c)
+        if v and v > 0:
+            return v
+    return None
 
 # Campos derivados que este modulo agrega a cada fila del sugerido.
 CAMPOS_MARGEN = (
@@ -49,7 +65,7 @@ def calcular_margen(fila: dict) -> None:
     if not costo or costo <= 0:
         return
 
-    publico = fila.get(PRECIO_VENTA_PRINCIPAL)
+    publico = _primero(fila, PRECIOS_VENTA)
     if publico and publico > 0:
         fila["margen_unitario_clp"] = round(publico - costo)
         fila["margen_pct"] = _pct(publico - costo, publico)
@@ -62,7 +78,7 @@ def calcular_margen(fila: dict) -> None:
     if flota and flota > 0:
         fila["margen_flota_pct"] = _pct(flota - costo, flota)
 
-    dealer = fila.get("precio_dealer_ford")
+    dealer = _primero(fila, PRECIOS_DEALER)
     if dealer and dealer > 0:
         # Positivo = el costo de Curifor esta POR ENCIMA del precio dealer de FORD.
         fila["sobrecosto_vs_dealer_pct"] = _pct(costo - dealer, dealer)

@@ -86,3 +86,29 @@ def test_export_incluye_las_columnas_de_margen():
 
     for campo in margen.CAMPOS_MARGEN:
         assert campo in LABELS
+
+
+def test_margen_usa_la_lista_de_gildemeister_cuando_no_hay_ford():
+    """Un Hyundai no esta en la lista de FORD: su precio sugerido cumple el mismo rol."""
+    fila = {"costo_unitario": 1000.0, "precio_sugerido_gilde": 2500.0,
+            "precio_dealer_gilde": 1200.0, "total_sugerido_suc": 4}
+    margen.calcular_margen(fila)
+    assert fila["margen_unitario_clp"] == 1500
+    assert fila["margen_pct"] == 60.0
+    assert fila["margen_sugerido_clp"] == 6000
+    # El dealer de Gildemeister tambien sirve de referencia de reposicion.
+    assert fila["sobrecosto_vs_dealer_pct"] == -16.7
+
+
+def test_ford_manda_sobre_gildemeister_si_estan_los_dos():
+    fila = {"costo_unitario": 1000.0, "precio_publico_ford": 2000.0,
+            "precio_sugerido_gilde": 9999.0}
+    margen.calcular_margen(fila)
+    assert fila["margen_unitario_clp"] == 1000
+
+
+def test_sin_ninguna_lista_el_margen_queda_vacio():
+    fila = {"costo_unitario": 1000.0}
+    margen.calcular_margen(fila)
+    assert fila["margen_unitario_clp"] is None
+    assert fila["margen_pct"] is None
