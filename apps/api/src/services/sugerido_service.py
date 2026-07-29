@@ -415,9 +415,17 @@ def _mes_anterior_yyyymm(hoy: "date | None" = None) -> str:
     return f"{h.year}{h.month - 1:02d}"
 
 
-def _aplicar_regla_stock_sin_venta(items: list[dict], db: Session) -> None:
+def _aplicar_regla_stock_sin_venta(
+    items: list[dict], db: Session, con_manual: set[tuple[str, str]] | None = None
+) -> None:
     """Regla de negocio: si un producto tiene stock activo de sucursal >= demanda
     mensual Y no tuvo venta en el mes calendario anterior, no se sugiere comprar.
+
+    `con_manual` son los pares que tienen sugerencia manual vigente: la regla NO
+    los toca. Cargar una manual es decir "compra esto igual"; que una regla
+    automatica la volviera a marcar "no pedir" seria pasar por encima de una
+    decision explicita de Abastecimiento (y ademas dejaria la fila fuera del
+    dashboard, que filtra por "solo pedir").
 
     Se aplica marcando `pedir = "No"` y `pedir_flag = "No"`. El total_sugerido_suc
     del BI NO se altera (la regla es opinable y conviene poder revisarla); como
@@ -478,6 +486,8 @@ def _aplicar_regla_stock_sin_venta(items: list[dict], db: Session) -> None:
         p = it.get("producto")
         s = it.get("sucursal_id")
         if not p or not s:
+            continue
+        if con_manual and (p, s) in con_manual:
             continue
         stock_activo = it.get("stock_activo_suc")
         demanda = it.get("demanda_mensual")
@@ -613,8 +623,9 @@ def listar(
     pedidos_service.agregar_a_filas(items, db)
 
     # Regla de negocio (jun-2026): si tiene stock para su demanda mensual y no
-    # tuvo venta el mes anterior, no se sugiere comprar.
-    _aplicar_regla_stock_sin_venta(items, db)
+    # tuvo venta el mes anterior, no se sugiere comprar. Las que tienen manual
+    # quedan fuera: ahi ya hubo una decision explicita de comprar.
+    _aplicar_regla_stock_sin_venta(items, db, con_manual=set(manuales))
 
     return items, total + total_extras + total_manuales_solas + total_cat
 
@@ -1029,9 +1040,9 @@ def listar_por_ids(
     margen.agregar_margen(items)
     pedidos_service.agregar_a_filas(items, db)
     # Misma regla de negocio que aplica `listar`: stock cubre el mes + sin venta
-    # el mes anterior -> pedir = No. Asi el export Excel respeta lo mismo que ve
-    # la grilla.
-    _aplicar_regla_stock_sin_venta(items, db)
+    # el mes anterior -> pedir = No, salvo que tenga manual. Asi el export Excel
+    # respeta lo mismo que ve la grilla.
+    _aplicar_regla_stock_sin_venta(items, db, con_manual=set(manuales))
     return items
 
 

@@ -12,7 +12,8 @@ Los tres destinos correctos de una manual:
   - su fila existe pero la esconde un toggle -> se muestra la fila REAL igual
   - el producto no esta en el sugerido  -> recien ahi, fila sintetica del catalogo
 """
-from src.models import ProductoCatalogo, Sugerido, SugerenciaManual
+from src.models import ProductoCatalogo, Sugerido, SugerenciaManual, VentaHistorica
+from src.services.sugerido_service import _mes_anterior_yyyymm
 
 PROV = "Ford Motor Company Chile"
 
@@ -111,6 +112,26 @@ def test_producto_fuera_del_sugerido_si_lleva_fila_sintetica(client, db_session)
     assert fila["origen"] == "manual"
     assert fila["total_sugerido_suc"] == 4
     assert fila["proveedor"] is None  # el catalogo del ERP no guarda proveedor
+
+
+def test_la_regla_de_stock_sin_venta_no_pisa_una_manual(client, db_session):
+    """"Tiene stock y no vendio -> no pedir" no puede tumbar una orden explicita."""
+    mes = _mes_anterior_yyyymm()
+    # Con al menos una fila del mes, la regla deja de abstenerse y se aplica.
+    db_session.add(VentaHistorica(
+        tenant_id="curifor", producto="OTRO", sucursal="LINDEROS",
+        periodo=mes, cantidad=1,
+    ))
+    db_session.commit()
+    # Stock (100) cubre la demanda mensual (10) y no vendio el mes pasado.
+    comun = dict(stock_activo_suc=100, demanda_mensual=10)
+    _sug(db_session, "REG-1", sucursal="LINDEROS", **comun)
+    _sug(db_session, "REG-2", sucursal="LINDEROS", **comun)
+    _manual(db_session, "REG-2", 4, "LINDEROS")
+
+    filas = {f["producto"]: f for f in _filas(client, solo_pedir=False)["items"]}
+    assert filas["REG-1"]["pedir"] == "No"   # la regla se aplica...
+    assert filas["REG-2"]["pedir"] == "Si"   # ...pero no sobre la que tiene manual
 
 
 def test_los_kpis_siguen_cuadrando_con_la_tabla(client, db_session):
