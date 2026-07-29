@@ -160,7 +160,7 @@ function TablaActividad({ items, cargando }: { items: AuditoriaLog[]; cargando: 
               const cant = nivel
                 ? `→ ${formatoNumero(Number(nivel[1]))} u`
                 : it.dias_inventario != null
-                  ? `+${it.dias_inventario} dias`
+                  ? `→ ${it.dias_inventario} dias`
                   : it.unidades != null
                     ? `+${formatoNumero(it.unidades)} u`
                     : "—";

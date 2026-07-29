@@ -21,9 +21,11 @@ export function tipoDeSugerencia(m: SugerenciaManual) {
   if (m.dias_inventario)
     return {
       icon: TrendingUp,
-      etiqueta: `${m.dias_inventario} días de inventario`,
+      etiqueta: `Cubrir ${m.dias_inventario} días de inventario`,
       clase: "bg-blue-50 text-blue-700",
-      detalle: "Las unidades salen de la demanda diaria del producto en esa sucursal.",
+      detalle:
+        "El nivel sale de la demanda diaria del producto en esa sucursal; se pidió " +
+        "solo lo que faltaba, descontando stock, tránsito y lo que ya sugería el sistema.",
     };
   return {
     icon: null,

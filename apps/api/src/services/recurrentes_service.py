@@ -38,7 +38,9 @@ def _crear_instancias(db: Session, rec: SugerenciaRecurrente) -> int:
     """Archiva la instancia anterior de esta regla y crea la nueva. Devuelve cuántas creó.
 
     Segun el modo, la cantidad se recalcula en cada ejecucion:
-    - 'dias de inventario': con la demanda diaria actualizada del BI.
+    - 'dias de inventario': con la demanda diaria actualizada del BI y el stock del
+      momento, pidiendo solo lo que falte para cubrir esos dias (si ya estan
+      cubiertos, esa vez no pide nada).
     - 'stock objetivo': con el stock del momento, pidiendo solo la brecha que falta
       para llegar al nivel. Esto es lo que mantiene el nivel de forma automatica:
       si en el ciclo anterior se repuso y el stock quedo arriba, esta vez no pide
@@ -135,9 +137,9 @@ def crear(db: Session, payload, usuario_email: str | None = None) -> SugerenciaR
     # Aplica de inmediato (primera instancia) y agenda la próxima.
     n_creadas = _crear_instancias(db, rec)
     _avanzar(rec, hoy)
-    # Ya trae el signo: el modo objetivo no "suma N", mantiene un nivel.
+    # Ya trae el signo: ni dias ni objetivo "suman N", los dos completan un nivel.
     cantidad_str = (
-        f"+{payload.dias_inventario} dias" if payload.dias_inventario
+        f"cubrir {payload.dias_inventario} dias de inventario" if payload.dias_inventario
         else f"mantener {payload.stock_objetivo} u en stock" if payload.stock_objetivo
         else f"+{payload.unidades} u"
     )

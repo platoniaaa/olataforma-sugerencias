@@ -249,6 +249,20 @@ export const api = {
     return getJSON(`/api/sugerencias-manuales/previsualizar-objetivo?${p.toString()}`);
   },
 
+  /** Que pasaria al pedir esos dias de cobertura, antes de guardar. */
+  async previsualizarDias(
+    producto: string,
+    sucursalId: string,
+    dias: number
+  ): Promise<import("./types").PreviewDias> {
+    const p = new URLSearchParams({
+      producto,
+      sucursal_id: sucursalId,
+      dias: String(dias),
+    });
+    return getJSON(`/api/sugerencias-manuales/previsualizar-dias?${p.toString()}`);
+  },
+
   async crearSugerenciaMasiva(
     filtros: SugeridoFiltros,
     cantidad: { unidades?: number; dias_inventario?: number; stock_objetivo?: number },

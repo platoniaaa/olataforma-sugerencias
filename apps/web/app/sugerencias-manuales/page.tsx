@@ -28,7 +28,9 @@ function EtiquetaTipo({ m }: { m: SugerenciaManual }) {
       </Badge>
     );
   if (m.dias_inventario)
-    return <Badge className="bg-blue-50 text-blue-700">{m.dias_inventario} días de inv.</Badge>;
+    return (
+      <Badge className="bg-blue-50 text-blue-700">cubrir {m.dias_inventario} días</Badge>
+    );
   return <Badge className="bg-slate-100 text-slate-600">unidades directas</Badge>;
 }
 
@@ -379,7 +381,7 @@ function SeccionRecurrentes({
                   {r.stock_objetivo
                     ? `mantener ${formatoNumero(r.stock_objetivo)} u`
                     : r.dias_inventario
-                      ? `+${r.dias_inventario} días`
+                      ? `cubrir ${r.dias_inventario} días`
                       : `+${formatoNumero(r.unidades)} u`}
                 </Badge>
                 <Badge className="bg-slate-100 text-slate-600">

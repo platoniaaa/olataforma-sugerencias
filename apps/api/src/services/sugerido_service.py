@@ -797,23 +797,29 @@ def pares_filtrados(db: Session, f: SugeridoFiltros) -> list[tuple[str, str]]:
     return [(p, s) for p, s in db.execute(stmt).all()]
 
 
+def _objetivo_dias(demanda_diaria: float, dias: int) -> int:
+    """Unidades necesarias para cubrir `dias` de venta. Minimo 1."""
+    return max(1, math.ceil(demanda_diaria * dias))
+
+
 def unidades_desde_dias(
     db: Session, producto: str, sucursal_id: str, dias: int
 ) -> int | None:
-    """Convierte 'dias de inventario' a unidades: ceil(dias * demanda_diaria).
+    """Unidades que FALTAN para tener `dias` de inventario cubiertos.
+
+    El nivel a alcanzar es ceil(dias * demanda_diaria), y de ahi se descuenta lo
+    que ya esta cubierto: stock, transito y lo que el sistema ya sugiere. Un SKU
+    con stock de sobra devuelve 0 en vez de sumar los dias completos encima: pedir
+    "30 dias" sobre un producto que ya tiene para 50 era comprar de mas.
 
     Devuelve None si el producto+sucursal no esta en el sugerido o no tiene
-    demanda diaria > 0 (en ese caso el caller decide: omitir o avisar).
+    demanda diaria > 0: sin demanda no hay como convertir dias a unidades (en ese
+    caso el caller decide: omitir o avisar).
     """
     if dias <= 0:
         return None
-    row = db.execute(
-        select(Sugerido.demanda_diaria)
-        .where(Sugerido.producto == producto, Sugerido.sucursal_id == sucursal_id)
-    ).first()
-    if not row or row[0] is None or row[0] <= 0:
-        return None
-    return max(1, math.ceil(float(row[0]) * dias))
+    d = detalle_dias(db, producto, sucursal_id, dias)
+    return None if d is None else d["faltante"]
 
 
 def unidades_por_par(
@@ -821,23 +827,35 @@ def unidades_por_par(
 ) -> dict[tuple[str, str], int]:
     """Calcula unidades para muchos pares de una sola query.
 
-    Solo devuelve pares con demanda_diaria > 0; los demas quedan fuera del dict
-    (el caller los reporta como omitidos).
+    Misma regla que `unidades_desde_dias`: el nivel por dias menos lo ya cubierto.
+    Quedan fuera del dict los pares sin demanda diaria y los que ya tienen esos
+    dias cubiertos (el caller los reporta como omitidos).
     """
     if not pares or dias <= 0:
         return {}
     productos = {p for p, _ in pares}
     sucursales = {s for _, s in pares}
     rows = db.execute(
-        select(Sugerido.producto, Sugerido.sucursal_id, Sugerido.demanda_diaria)
-        .where(Sugerido.producto.in_(productos), Sugerido.sucursal_id.in_(sucursales))
+        select(
+            Sugerido.producto,
+            Sugerido.sucursal_id,
+            Sugerido.demanda_diaria,
+            Sugerido.stock_activo_suc,
+            Sugerido.stock_en_transito_suc,
+            Sugerido.total_sugerido_suc,
+        ).where(Sugerido.producto.in_(productos), Sugerido.sucursal_id.in_(sucursales))
     ).all()
-    mapa: dict[tuple[str, str], float] = {(p, s): d for p, s, d in rows if d}
+    datos = {(p, s): (dem, st, tr, sug) for p, s, dem, st, tr, sug in rows}
     out: dict[tuple[str, str], int] = {}
     for par in pares:
-        d = mapa.get(par)
-        if d and d > 0:
-            out[par] = max(1, math.ceil(float(d) * dias))
+        fila = datos.get(par)
+        if not fila or not fila[0] or float(fila[0]) <= 0:
+            continue
+        falta = _faltante_para_objetivo(
+            _objetivo_dias(float(fila[0]), dias), *fila[1:]
+        )
+        if falta > 0:
+            out[par] = falta
     return out
 
 
@@ -907,6 +925,50 @@ def detalle_objetivo(
         # En que bodegas esta ese stock. Sin esto el usuario lee "hay 3" y no
         # tiene como comprobarlo: el producto puede no aparecer en la grilla
         # (pedir=No) y las columnas de stock por bodega vienen ocultas.
+        "bodegas": _bodegas_de(db, producto, sucursal_id),
+    }
+
+
+def detalle_dias(
+    db: Session, producto: str, sucursal_id: str, dias: int
+) -> dict | None:
+    """Lo mismo que `detalle_objetivo`, pero con el nivel expresado en dias de venta.
+
+    Devuelve las mismas claves (por eso el desglose de la pantalla sirve para los
+    dos modos) mas la demanda diaria y cuantos dias cubre hoy lo que ya hay, que es
+    como el usuario piensa el problema: "ya tengo para 50 dias, no me pidas 30 mas".
+
+    Devuelve None cuando no hay demanda diaria: sin ella los dias no se pueden
+    convertir a unidades. A diferencia del modo objetivo, este modo necesita si o
+    si que el par este en el sugerido del BI (de ahi sale la demanda).
+    """
+    if dias <= 0:
+        return None
+    row = db.execute(
+        select(
+            Sugerido.demanda_diaria,
+            Sugerido.stock_activo_suc,
+            Sugerido.stock_en_transito_suc,
+            Sugerido.total_sugerido_suc,
+        ).where(Sugerido.producto == producto, Sugerido.sucursal_id == sucursal_id)
+    ).first()
+    if not row or row[0] is None or float(row[0]) <= 0:
+        return None
+    demanda = float(row[0])
+    stock, transito, sistema = float(row[1] or 0), float(row[2] or 0), float(row[3] or 0)
+    objetivo = _objetivo_dias(demanda, dias)
+    cubierto = stock + transito + sistema
+    return {
+        "dias": dias,
+        "demanda_diaria": demanda,
+        "objetivo": objetivo,
+        "stock": stock,
+        "transito": transito,
+        "sugerido_sistema": sistema,
+        "cubierto": cubierto,
+        "faltante": _faltante_para_objetivo(objetivo, stock, transito, sistema),
+        "dias_cubiertos": cubierto / demanda,
+        "en_sugerido": True,
         "bodegas": _bodegas_de(db, producto, sucursal_id),
     }
 

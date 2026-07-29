@@ -97,6 +97,24 @@ def previsualizar_objetivo(
     return {**d, "desglose": _desglose(d)}
 
 
+@router.get("/previsualizar-dias")
+def previsualizar_dias(
+    producto: str = Query(...),
+    sucursal_id: str = Query(...),
+    dias: int = Query(..., gt=0),
+    db: Session = Depends(get_db),
+):
+    """Que pasaria al pedir esos dias de inventario, ANTES de guardar.
+
+    Mismo contrato que la vista previa del modo objetivo. El caso sin demanda se
+    responde 200 con `sin_demanda`: es informacion util para la pantalla, no un
+    error, y asi el usuario lo ve al tipear en vez de al guardar."""
+    d = sugerido_service.detalle_dias(db, producto, sucursal_id, dias)
+    if d is None:
+        return {"sin_demanda": True, "dias": dias}
+    return {**d, "sin_demanda": False, "desglose": _desglose(d)}
+
+
 @router.get("", response_model=list[SugerenciaManualOut])
 def listar(
     producto: str | None = Query(None),
@@ -128,13 +146,23 @@ def crear(
     email: str = Depends(requiere_escritura),
 ):
     if payload.dias_inventario:
-        unidades = sugerido_service.unidades_desde_dias(
+        d = sugerido_service.detalle_dias(
             db, payload.producto, payload.sucursal_id, payload.dias_inventario
         )
-        if unidades is None:
+        if d is None:
             raise HTTPException(
                 status_code=400,
                 detail="Sin demanda diaria para este producto/sucursal. Usa modo 'unidades'.",
+            )
+        unidades = d["faltante"]
+        if unidades == 0:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Los {payload.dias_inventario} dias ({d['objetivo']} u) ya estan "
+                    f"cubiertos: {_desglose(d)}, alcanza para "
+                    f"{_n(d['dias_cubiertos'])} dias. Hoy no hay nada que pedir."
+                ),
             )
     elif payload.stock_objetivo:
         # Funciona aunque el producto no este en el sugerido de esa sucursal: ahi
@@ -200,8 +228,9 @@ def crear_masiva(
 ):
     """Crea una sugerencia manual para cada producto x sucursal que cumple los filtros.
 
-    Modo 'dias_inventario': calcula unidades por par segun demanda_diaria del BI; los
-    pares sin demanda quedan omitidos. Modo 'unidades': mismo numero para todos.
+    Modo 'dias_inventario': calcula lo que falta para cubrir esos dias segun la
+    demanda_diaria del BI; quedan omitidos los pares sin demanda y los que ya tienen
+    esos dias cubiertos. Modo 'unidades': mismo numero para todos.
 
     Todas las filas creadas en esta llamada comparten un mismo `lote_id` (UUID4)
     para poder borrarlas juntas despues con DELETE /lote/{lote_id}.
@@ -217,6 +246,7 @@ def crear_masiva(
         if payload.stock_objetivo:
             # Omitidos aca = productos que YA estan en el nivel pedido (no falta nada).
             mapa = sugerido_service.unidades_objetivo_por_par(db, pares, payload.stock_objetivo)
+        # Por dias: omitidos = sin demanda diaria o con esos dias ya cubiertos.
         else:
             mapa = sugerido_service.unidades_por_par(db, pares, payload.dias_inventario)
         for par in pares:
@@ -250,9 +280,9 @@ def crear_masiva(
         )
     db.add_all(nuevas)
     db.flush()
-    # Ya trae el signo: el modo objetivo no "suma N", mantiene un nivel.
+    # Ya trae el signo: ni dias ni objetivo "suman N", los dos completan un nivel.
     cantidad_str = (
-        f"+{payload.dias_inventario} dias" if payload.dias_inventario
+        f"cubrir {payload.dias_inventario} dias de inventario" if payload.dias_inventario
         else f"mantener {payload.stock_objetivo} u en stock" if payload.stock_objetivo
         else f"+{payload.unidades} u"
     )
@@ -263,7 +293,9 @@ def crear_masiva(
         dias_inventario=payload.dias_inventario, motivo=payload.motivo,
         detalle=f"Masiva: {len(nuevas)} pares, {omitidas} omitidos, {cantidad_str} (lote {lote_id[:8]})",
     )
-    razon_omitidas = "ya estaban en nivel" if payload.stock_objetivo else "sin demanda"
+    razon_omitidas = (
+        "ya estaban en nivel" if payload.stock_objetivo else "sin demanda o ya cubiertos"
+    )
     auditoria_service.notificar(
         db, tipo="masiva_creada",
         titulo=f"{email.split('@')[0]} cargo {len(nuevas)} sugerencias",

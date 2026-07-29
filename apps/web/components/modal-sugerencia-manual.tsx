@@ -9,11 +9,18 @@ import { MultiSelect } from "@/components/ui/multiselect";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api-client";
 import { formatoNumero } from "@/lib/formato";
-import type { PreviewObjetivo, Producto, Sucursal, SugeridoFiltros } from "@/lib/types";
+import type {
+  PreviewDias,
+  PreviewObjetivo,
+  Producto,
+  Sucursal,
+  SugeridoFiltros,
+} from "@/lib/types";
 
 type Modo = "individual" | "grupo" | "todos";
-// "objetivo" no suma sobre el sugerido como los otros dos: fija un nivel de stock
-// a mantener y pide solo la brecha que falta para llegar a el.
+// Solo "unidades" suma sobre el sugerido. "objetivo" fija un nivel de stock y
+// "dias" fija una cobertura en dias: los dos piden solo la brecha que falta,
+// descontando stock, transito y lo que el sistema ya sugiere.
 type TipoCantidad = "dias" | "unidades" | "objetivo";
 
 interface Props {
@@ -70,8 +77,9 @@ export function ModalSugerenciaManual({
   const [conteo, setConteo] = useState<number | null>(null);
   const [contando, setContando] = useState(false);
 
-  // Vista previa del modo "mantener stock" (solo individual: necesita el par exacto).
-  const [preview, setPreview] = useState<PreviewObjetivo | null>(null);
+  // Vista previa de los modos que descuentan lo ya cubierto — "mantener stock" y
+  // "días" (solo individual: necesita el par exacto).
+  const [preview, setPreview] = useState<PreviewObjetivo | PreviewDias | null>(null);
 
   // Recurrencia
   const [recurrente, setRecurrente] = useState(false);
@@ -133,20 +141,29 @@ export function ModalSugerenciaManual({
   // Vista previa: explica de dónde sale el número antes de guardar. Se recalcula
   // al cambiar producto, sucursal o nivel.
   useEffect(() => {
-    const nivel = parseInt(cantidad, 10);
-    if (tipoCantidad !== "objetivo" || modo !== "individual" || !producto || !sucursal || !nivel) {
+    const n = parseInt(cantidad, 10);
+    const descuenta = tipoCantidad === "objetivo" || tipoCantidad === "dias";
+    if (!descuenta || modo !== "individual" || !producto || !sucursal || !n) {
       setPreview(null);
       return;
     }
     const t = setTimeout(async () => {
       try {
-        setPreview(await api.previsualizarObjetivo(producto, sucursal, nivel));
+        setPreview(
+          tipoCantidad === "dias"
+            ? await api.previsualizarDias(producto, sucursal, n)
+            : await api.previsualizarObjetivo(producto, sucursal, n)
+        );
       } catch {
         setPreview(null);
       }
     }, 300);
     return () => clearTimeout(t);
   }, [tipoCantidad, modo, producto, sucursal, cantidad]);
+
+  // La preview de días trae la demanda y los días ya cubiertos; la de objetivo no.
+  const previewDias =
+    preview && "dias_cubiertos" in preview ? (preview as PreviewDias) : null;
 
   // Filtros equivalentes al modo grupo/todos.
   const filtrosModo: SugeridoFiltros = useMemo(() => {
@@ -257,7 +274,7 @@ export function ModalSugerenciaManual({
             `Se aplicaron ${r.creadas} sugerencias. ` +
               (tipoCantidad === "objetivo"
                 ? `${r.omitidas} producto/sucursal ya estaban en el nivel pedido.`
-                : `${r.omitidas} producto/sucursal sin demanda diaria se omitieron.`)
+                : `${r.omitidas} producto/sucursal se omitieron: sin demanda diaria o ya tenían esos días cubiertos.`)
           );
         }
       }
@@ -295,7 +312,9 @@ export function ModalSugerenciaManual({
       description={
         tipoCantidad === "objetivo"
           ? "Mantiene un nivel de stock: pide solo lo que falta para llegar a él."
-          : "Suma unidades por sobre lo que sugiere el sistema."
+          : tipoCantidad === "dias"
+            ? "Completa la cobertura hasta esos días: si el stock ya alcanza, no pide nada."
+            : "Suma unidades por sobre lo que sugiere el sistema."
       }
     >
       <div className="space-y-4">
@@ -457,8 +476,8 @@ export function ModalSugerenciaManual({
             <Label htmlFor="uni" className="!mb-0">
               {tipoCantidad === "dias"
                 ? modo === "individual"
-                  ? "Días de inventario adicional"
-                  : "Días de inventario adicional para cada producto"
+                  ? "Días de inventario a cubrir"
+                  : "Días de inventario a cubrir en cada producto"
                 : tipoCantidad === "objetivo"
                   ? modo === "individual"
                     ? "Stock a mantener (unidades)"
@@ -507,8 +526,11 @@ export function ModalSugerenciaManual({
           />
           {tipoCantidad === "dias" && (
             <p className="mt-1 text-[11px] text-slate-500">
-              Se convierte a unidades por cada producto/sucursal segun su demanda
-              diaria (redondeo hacia arriba). Los productos sin demanda registrada se omiten.
+              Cobertura que quieres tener. Se convierte a unidades segun la demanda diaria
+              de cada producto/sucursal (redondeo hacia arriba) y se pide{" "}
+              <b>solo lo que falta</b>: descuenta el stock actual, lo que viene en tránsito y
+              lo que el sistema ya está sugiriendo. Si el stock ya cubre esos días no se pide
+              nada. Los productos sin demanda registrada se omiten.
             </p>
           )}
           {tipoCantidad === "objetivo" && (
@@ -526,8 +548,17 @@ export function ModalSugerenciaManual({
             </p>
           )}
 
+          {/* Sin demanda diaria no hay forma de convertir días a unidades. */}
+          {previewDias?.sin_demanda && (
+            <div className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+              Este producto no tiene demanda diaria registrada en esta sucursal, así que
+              los días no se pueden convertir a unidades. Usa <b>Unidades</b> o{" "}
+              <b>Mantener stock</b>.
+            </div>
+          )}
+
           {/* De dónde sale el número, antes de guardar. */}
-          {preview && (
+          {preview && !previewDias?.sin_demanda && (
             <div
               className={cn(
                 "mt-2 rounded-md px-3 py-2 text-[12px]",
@@ -539,6 +570,11 @@ export function ModalSugerenciaManual({
               <p className="font-medium">
                 {preview.faltante > 0 ? (
                   <>Se pedirán {formatoNumero(preview.faltante)} unidades.</>
+                ) : previewDias ? (
+                  <>
+                    Ya tienes cobertura para {formatoNumero(Math.floor(previewDias.dias_cubiertos))}{" "}
+                    días: no se pide nada.
+                  </>
                 ) : recurrente ? (
                   <>
                     El nivel ya está cubierto hoy: no se pide nada ahora, y la regla
@@ -576,6 +612,13 @@ export function ModalSugerenciaManual({
                 <li className="border-t border-current/15 pt-0.5">
                   Cubierto: <b>{formatoNumero(preview.cubierto)}</b> de{" "}
                   {formatoNumero(preview.objetivo)}
+                  {previewDias && (
+                    <span className="opacity-80">
+                      {" "}
+                      u que cubren {previewDias.dias} días (demanda{" "}
+                      {previewDias.demanda_diaria.toFixed(1)} u/día)
+                    </span>
+                  )}
                 </li>
               </ul>
               {!preview.en_sugerido && (
@@ -657,6 +700,13 @@ export function ModalSugerenciaManual({
                     <b> solo lo que falte</b> para volver a {cantidad || "—"} unidades
                     {fechaFin ? `, hasta el ${fechaFin}` : ", hasta que elimines la regla"}. Si
                     el nivel ya está cubierto, esa vez no pide nada.
+                  </>
+                ) : tipoCantidad === "dias" ? (
+                  <>
+                    Cada {parseInt(cadaDias, 10) || "—"} días se revisa la demanda y el stock y
+                    se pide <b>solo lo que falte</b> para cubrir {cantidad || "—"} días
+                    {fechaFin ? `, hasta el ${fechaFin}` : ", hasta que elimines la regla"}. Si
+                    la cobertura ya está, esa vez no pide nada.
                   </>
                 ) : (
                   <>

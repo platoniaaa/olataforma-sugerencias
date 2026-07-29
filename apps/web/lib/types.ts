@@ -197,6 +197,19 @@ export interface PreviewObjetivo {
   bodegas: { bodega: string; stock: number; origen: string | null }[];
 }
 
+/**
+ * Vista previa del modo "días de inventario". Mismas partes que el objetivo (el
+ * nivel se descuenta igual), más la demanda y los días que ya cubre lo que hay.
+ */
+export interface PreviewDias extends PreviewObjetivo {
+  dias: number;
+  demanda_diaria: number;
+  /** Cuántos días alcanza a cubrir hoy el stock + tránsito + sugerido del sistema. */
+  dias_cubiertos: number;
+  /** Sin demanda diaria no hay forma de convertir días a unidades. */
+  sin_demanda: boolean;
+}
+
 export interface LineaCarro {
   producto: string;
   descripcion: string | null;

@@ -11,7 +11,11 @@ class SugerenciaManualCreate(BaseModel):
     producto: str
     sucursal_id: str
     unidades: int | None = Field(default=None, gt=0, description="Unidades adicionales (si modo='unidades')")
-    dias_inventario: int | None = Field(default=None, gt=0, description="Dias de inventario adicional (si modo='dias')")
+    dias_inventario: int | None = Field(
+        default=None, gt=0,
+        description="Dias de inventario a cubrir (si modo='dias'). Se pide solo lo que falte "
+        "para llegar a esa cobertura, descontando stock, transito y lo que ya sugiere el sistema.",
+    )
     stock_objetivo: int | None = Field(
         default=None, gt=0,
         description="Nivel de stock a mantener (si modo='objetivo'). Se pide solo lo que falta "
@@ -42,7 +46,9 @@ class SugerenciaManualMasiva(BaseModel):
 
 class SugerenciaManualMasivaResultado(BaseModel):
     creadas: int
-    omitidas: int = 0  # pares sin demanda diaria cuando se pidio por dias
+    # Por dias: pares sin demanda diaria o que ya tienen esos dias cubiertos.
+    # Por objetivo: pares que ya estaban en el nivel pedido.
+    omitidas: int = 0
     # Lote (UUID) que agrupa las filas creadas en esta llamada — sirve para
     # borrarlas juntas via DELETE /lote/{lote_id}. None si no se creo ninguna.
     lote_id: str | None = None
@@ -83,7 +89,11 @@ class RecurrenteCreate(BaseModel):
     sucursal_id: str | None = None
     filtros: SugeridoFiltros | None = None  # modo grupo
     unidades: int | None = Field(default=None, gt=0)
-    dias_inventario: int | None = Field(default=None, gt=0)
+    dias_inventario: int | None = Field(
+        default=None, gt=0,
+        description="Dias de inventario a cubrir. En cada ejecucion se recalcula contra la "
+        "demanda y el stock del momento: si esos dias ya estan cubiertos, no pide nada.",
+    )
     stock_objetivo: int | None = Field(
         default=None, gt=0,
         description="Nivel de stock a mantener. En cada ejecucion se recalcula contra el "

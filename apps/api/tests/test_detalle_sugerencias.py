@@ -33,7 +33,8 @@ def test_dias_de_inventario_queda_registrado(client, db_session):
     r = client.post("/api/sugerencias-manuales", json={
         "producto": "T-DIAS", "sucursal_id": "LINDEROS", "dias_inventario": 3,
     }).json()
-    assert r["unidades"] == 6  # 3 dias x 2 u/dia
+    # 3 dias x 2 u/dia = 6 u de nivel, menos 3 de stock y 2 que ya sugiere el sistema.
+    assert r["unidades"] == 1
     assert r["dias_inventario"] == 3
     assert r["stock_objetivo"] is None
 
