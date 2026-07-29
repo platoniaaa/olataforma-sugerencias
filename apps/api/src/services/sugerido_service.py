@@ -6,7 +6,18 @@ Solo se filtra/agrega lo que ya esta cargado en la tabla.
 import math
 from datetime import datetime, timezone
 
-from sqlalchemy import Float, Integer, Numeric, String, distinct, false, func, or_, select
+from sqlalchemy import (
+    Float,
+    Integer,
+    Numeric,
+    String,
+    and_,
+    distinct,
+    false,
+    func,
+    or_,
+    select,
+)
 from sqlalchemy.orm import Session
 
 from ..models import (
@@ -82,7 +93,15 @@ def _clausula_columna(fc):
     return None
 
 
-def _apply_filters(stmt, f: SugeridoFiltros):
+def _apply_alcance(stmt, f: SugeridoFiltros):
+    """Lo que NO existe para la plataforma, pase lo que pase.
+
+    Separado de `_apply_filters` porque son reglas de otra naturaleza: aca no hay
+    nada que el usuario elija, es lo que esta fuera de alcance (su permiso de
+    sucursal, sucursales cerradas, productos internos). `_resolver_manuales` lo
+    usa para preguntar "¿este producto existe en el sugerido?" sin arrastrar la
+    vista ni los filtros de la pantalla.
+    """
     # Restriccion de acceso por sucursal (la fija el servidor segun el usuario).
     # Debe ir primero: acota TODO el sugerido a las sucursales del usuario.
     if f.sucursales_permitidas is not None:
@@ -95,6 +114,11 @@ def _apply_filters(stmt, f: SugeridoFiltros):
     # Excluir productos internos (D&P REPTO-TALLER, etc.) de todo el sugerido.
     for pref in PREFIJOS_EXCLUIDOS:
         stmt = stmt.where(~Sugerido.producto.ilike(f"{pref}%"))
+    return stmt
+
+
+def _apply_filters(stmt, f: SugeridoFiltros):
+    stmt = _apply_alcance(stmt, f)
     busqueda = bool(f.q and f.q.strip())
     if busqueda:
         like = f"%{f.q}%"
@@ -258,27 +282,63 @@ def _manuales_por_par(db: Session, q: str | None = None) -> dict[tuple[str, str]
     }
 
 
-def _pares_en_sugerido(
-    db: Session, f: SugeridoFiltros, manuales: dict[tuple[str, str], int]
-) -> set[tuple[str, str]]:
-    """De los pares que tienen sugerencia manual, cuales YA existen en el sugerido.
+def _resolver_manuales(db: Session, f: SugeridoFiltros) -> dict:
+    """Decide como entra cada sugerencia manual vigente en la pantalla actual.
 
-    Se consulta sobre TODO el set filtrado, NO sobre la pagina que se esta
-    devolviendo. Mirando solo la pagina, una manual cuyo par cae en la pagina 3
-    quedaba fuera de `pares_en_sugerido`, asi que se mostraba ademas como fila
-    sintetica en la pagina 1 y sus unidades se contaban dos veces. Sintoma:
-    el total de filas cambiaba segun el tamano de pagina (789 con limit=5,
-    721 con limit=1000). No se notaba en el dashboard porque el frontend pide
-    una sola pagina de 5000, pero cualquier otro consumidor de la API lo veia.
+    Tres destinos posibles:
 
-    Se acota a los productos que tienen manual: son pocos, la query es chica.
+    - `en_vista`: su fila del sugerido ya pasa todos los filtros. Las unidades se
+      suman sobre esa fila y no hay nada mas que hacer.
+    - `extras`: la fila pertenece a esta vista pero quedo fuera por "solo pedir" o
+      "solo nacionales". Una manual es una orden explicita de comprar, asi que la
+      fila se muestra igual (con sus datos reales, no en blanco).
+    - `solas`: el producto NO tiene fila en el sugerido en ninguna parte. Recien
+      ahi corresponde fabricar una fila desde el catalogo.
+
+    OJO con `en_tabla`: se consulta la tabla COMPLETA, solo con el alcance del
+    usuario, sin la vista ni los filtros de pantalla. Preguntando sobre el set ya
+    filtrado, una manual de Linderos mirada desde la pestania "Compra CD" parecia
+    huerfana: el codigo le fabricaba una fila desde `producto_catalogo`, que NO
+    tiene columna de proveedor, y la pegaba en la vista del CD. Resultado: 97
+    filas en blanco de otras sucursales dentro de la compra del CD, todas con su
+    fila buena (con proveedor, ABC y stock) escondida en otra pestania.
     """
-    if not manuales:
-        return set()
-    stmt = _apply_filters(select(Sugerido.producto, Sugerido.sucursal_id), f).where(
-        Sugerido.producto.in_({p for p, _ in manuales})
-    )
-    return {(p, s) for p, s in db.execute(stmt).all()} & set(manuales)
+    vacio: dict = {"por_par": {}, "en_vista": set(), "extras": set(), "solas": {}}
+    por_par = _manuales_por_par(db, (f.q or "").strip() or None)
+    if not por_par:
+        return vacio
+    pares = set(por_par)
+    productos = {p for p, _ in pares}
+
+    def _consultar(stmt) -> set[tuple[str, str]]:
+        stmt = stmt.where(Sugerido.producto.in_(productos))
+        return {(p, s) for p, s in db.execute(stmt).all()} & pares
+
+    cols = select(Sugerido.producto, Sugerido.sucursal_id)
+    en_vista = _consultar(_apply_filters(cols, f))
+    # Sin "solo pedir"/"solo nacionales": lo que la vista SI muestra pero esos dos
+    # toggles esconden.
+    amplio = f.model_copy(update={"solo_pedir": False, "solo_nacionales": False})
+    extras = _consultar(_apply_filters(cols, amplio)) - en_vista
+    en_tabla = _consultar(_apply_alcance(cols, f))
+
+    solas = {par: u for par, u in por_par.items() if par not in en_tabla}
+    if f.sucursales_permitidas is not None:
+        permitidas = set(f.sucursales_permitidas)
+        solas = {(p, s): u for (p, s), u in solas.items() if s in permitidas}
+    return {"por_par": por_par, "en_vista": en_vista, "extras": extras, "solas": solas}
+
+
+def _filas_de_pares(db: Session, pares: set[tuple[str, str]]) -> list[Sugerido]:
+    """Filas del sugerido para un conjunto de pares (producto, sucursal).
+
+    Con OR de AND en vez de `tuple_().in_()`: la forma con tuplas no es portable
+    entre SQLite (tests) y Postgres (produccion).
+    """
+    if not pares:
+        return []
+    cond = or_(*[and_(Sugerido.producto == p, Sugerido.sucursal_id == s) for p, s in pares])
+    return list(db.scalars(select(Sugerido).where(cond)).all())
 
 
 def _fila_sintetica_manual(
@@ -472,42 +532,45 @@ def listar(
     # Trae las manuales VIGENTES por par. Cuando hay busqueda acotamos al texto;
     # cuando no, traemos todas (el sugerido del BI ya esta paginado, son pocas).
     q_text = (f.q or "").strip() or None
-    manuales = _manuales_por_par(db, q_text)
-    # Que pares ya estan en el sugerido: sobre TODO el set filtrado, no sobre la
-    # pagina (ver el docstring de _pares_en_sugerido).
-    pares_en_sugerido = _pares_en_sugerido(db, f, manuales)
+    man = _resolver_manuales(db, f)
+    manuales = man["por_par"]
 
-    # Mapeo a dict + suma de manuales para los pares ya presentes en sugerido.
-    items: list[dict] = []
-    for s in sugeridos:
+    def _a_dict(s: Sugerido) -> dict:
         d = {c.name: getattr(s, c.name) for c in Sugerido.__table__.columns}
         d["origen"] = "sugerido"
         _aplicar_manuales_a_fila(d, manuales.get((s.producto, s.sucursal_id), 0))
-        items.append(d)
+        return d
 
-    # Filas sinteticas para pares (producto, sucursal) que estan SOLO en manuales
-    # (no estan en el sugerido). Son las que alguien cargo a mano sobre un producto
-    # que el modelo no pide; si no se mostraran, se compraria a ciegas.
-    manuales_solas = [
-        (p, s, u) for (p, s), u in manuales.items() if (p, s) not in pares_en_sugerido
-    ]
-    # El acceso por sucursal manda tambien sobre estas filas.
-    if f.sucursales_permitidas is not None:
-        permitidas = set(f.sucursales_permitidas)
-        manuales_solas = [(p, s, u) for p, s, u in manuales_solas if s in permitidas]
-    # El total NO depende de la pagina; las filas se agregan solo en la primera:
-    # van despues de paginar, asi que repetirlas en cada pagina seria mostrarlas
-    # N veces (y hacer que el total variara con el tamano de pagina).
-    total_manuales_solas = len(manuales_solas)
-    if manuales_solas and page == 1:
-        productos_m = {p for p, _, _ in manuales_solas}
+    # Mapeo a dict + suma de manuales para los pares ya presentes en sugerido.
+    items: list[dict] = [_a_dict(s) for s in sugeridos]
+
+    # Los totales NO dependen de la pagina; las filas de abajo se agregan solo en
+    # la primera: van despues de paginar, asi que repetirlas en cada pagina seria
+    # mostrarlas N veces (y hacer que el total variara con el tamano de pagina).
+    total_extras = len(man["extras"])
+    total_manuales_solas = len(man["solas"])
+
+    # Filas reales que "solo pedir"/"solo nacionales" escondia. La manual es una
+    # orden explicita de comprar: gana sobre el toggle, y se muestra la fila BUENA
+    # (con proveedor, ABC y stock), no una en blanco.
+    if man["extras"] and page == 1:
+        items.extend(_a_dict(s) for s in _filas_de_pares(db, man["extras"]))
+
+    # Filas sinteticas para pares (producto, sucursal) que NO estan en el sugerido
+    # en ninguna parte. Son las que alguien cargo a mano sobre un producto que el
+    # modelo no pide; si no se mostraran, se compraria a ciegas. Salen sin
+    # proveedor ni ABC porque `producto_catalogo` no los tiene: es lo unico que
+    # hay cuando el producto no existe en el sugerido.
+    if man["solas"] and page == 1:
         cat_map = {
             c.producto: c
             for c in db.scalars(
-                select(ProductoCatalogo).where(ProductoCatalogo.producto.in_(productos_m))
+                select(ProductoCatalogo).where(
+                    ProductoCatalogo.producto.in_({p for p, _ in man["solas"]})
+                )
             ).all()
         }
-        for p, s, u in manuales_solas:
+        for (p, s), u in man["solas"].items():
             items.append(_fila_sintetica_manual(p, s, u, cat_map.get(p)))
 
     # Catalogo (productos que no estan ni en sugerido ni con manuales): solo cuando hay busqueda.
@@ -553,7 +616,7 @@ def listar(
     # tuvo venta el mes anterior, no se sugiere comprar.
     _aplicar_regla_stock_sin_venta(items, db)
 
-    return items, total + total_manuales_solas + total_cat
+    return items, total + total_extras + total_manuales_solas + total_cat
 
 
 def _aporte_manuales(db: Session, f: SugeridoFiltros) -> dict:
@@ -571,51 +634,66 @@ def _aporte_manuales(db: Session, f: SugeridoFiltros) -> dict:
     solo las acota el permiso de sucursal, no los filtros del usuario. Si algun dia
     eso cambia, hay que cambiarlo en los dos lados o las tarjetas dejan de cuadrar.
     """
-    vacio = {"unidades": 0.0, "valor_clp": 0.0, "filas_solas": 0, "productos_solos": set()}
-    manuales = _manuales_por_par(db, (f.q or "").strip() or None)
+    vacio = {"unidades": 0.0, "valor_clp": 0.0, "manual_unidades": 0.0, "manual_clp": 0.0,
+             "filas": 0, "productos": set()}
+    man = _resolver_manuales(db, f)
+    manuales = man["por_par"]
     if not manuales:
         return vacio
 
-    pares_sug = _pares_en_sugerido(db, f, manuales)
-    unidades = 0.0
-    valor = 0.0
+    unidades = valor = 0.0          # lo que hay que SUMARLE a los totales base
+    manual_u = manual_clp = 0.0     # de eso, cuanto viene de sugerencias manuales
+    filas = 0
+    productos: set[str] = set()
 
-    if pares_sug:
-        costos = {
-            (p, s): float(c or 0)
-            for p, s, c in db.execute(
-                _apply_filters(
-                    select(Sugerido.producto, Sugerido.sucursal_id, Sugerido.costo_unitario), f
-                ).where(Sugerido.producto.in_({p for p, _ in pares_sug}))
-            ).all()
-        }
-        for par in pares_sug:
-            u = manuales[par]
-            unidades += u
-            valor += u * costos.get(par, 0.0)
+    # 1) Sobre filas que el KPI base ya conto: solo se agregan las unidades manuales.
+    filas_en_vista = _filas_de_pares(db, man["en_vista"])
+    for s in filas_en_vista:
+        u = manuales[(s.producto, s.sucursal_id)]
+        clp = u * float(s.costo_unitario or 0)
+        unidades += u
+        valor += clp
+        manual_u += u
+        manual_clp += clp
 
-    solas = {par: u for par, u in manuales.items() if par not in pares_sug}
-    if f.sucursales_permitidas is not None:
-        permitidas = set(f.sucursales_permitidas)
-        solas = {(p, s): u for (p, s), u in solas.items() if s in permitidas}
-    if solas:
+    # 2) Filas que el KPI base NO conto (las escondia "solo pedir"): entran enteras,
+    #    con su propio sugerido, mas las unidades manuales.
+    for s in _filas_de_pares(db, man["extras"]):
+        u = manuales[(s.producto, s.sucursal_id)]
+        clp = u * float(s.costo_unitario or 0)
+        unidades += float(s.total_sugerido_suc or 0) + u
+        valor += float(s.total_valor_sugerido_clp or 0) + clp
+        manual_u += u
+        manual_clp += clp
+        filas += 1
+        productos.add(s.producto)
+
+    # 3) Filas propias (producto sin fila en el sugerido), valorizadas con el catalogo.
+    if man["solas"]:
         costo_cat = {
             c.producto: float(c.costo or 0)
             for c in db.scalars(
                 select(ProductoCatalogo).where(
-                    ProductoCatalogo.producto.in_({p for p, _ in solas})
+                    ProductoCatalogo.producto.in_({p for p, _ in man["solas"]})
                 )
             ).all()
         }
-        for (p, _s), u in solas.items():
+        for (p, _s), u in man["solas"].items():
+            clp = u * costo_cat.get(p, 0.0)
             unidades += u
-            valor += u * costo_cat.get(p, 0.0)
+            valor += clp
+            manual_u += u
+            manual_clp += clp
+            filas += 1
+            productos.add(p)
 
     return {
-        "unidades": float(unidades),
-        "valor_clp": float(valor),
-        "filas_solas": len(solas),
-        "productos_solos": {p for p, _ in solas},
+        "unidades": unidades,
+        "valor_clp": valor,
+        "manual_unidades": manual_u,
+        "manual_clp": manual_clp,
+        "filas": filas,
+        "productos": productos,
     }
 
 
@@ -635,10 +713,10 @@ def kpis(db: Session, f: SugeridoFiltros) -> dict:
     man = _aporte_manuales(db, f)
 
     # Productos: hay que unir los conjuntos (una manual puede traer un producto que
-    # el sugerido no tiene). Solo se materializa la lista si hace falta.
-    if man["productos_solos"]:
+    # el sugerido no tiene en esta vista). Solo se materializa la lista si hace falta.
+    if man["productos"]:
         productos = {p for (p,) in db.execute(select(distinct(base.c.producto))).all()}
-        n_productos = len(productos | man["productos_solos"])
+        n_productos = len(productos | man["productos"])
     else:
         n_productos = db.scalar(select(func.count(distinct(base.c.producto)))) or 0
 
@@ -647,10 +725,10 @@ def kpis(db: Session, f: SugeridoFiltros) -> dict:
         "valor_total_clp": float(valor_total) + man["valor_clp"],
         "n_productos": int(n_productos),
         "n_proveedores": int(n_proveedores),
-        "n_filas": int(n_filas) + man["filas_solas"],
+        "n_filas": int(n_filas) + man["filas"],
         # Desglose para mostrar entre parentesis cuanto viene de sugerencias manuales.
-        "total_sugerido_manual": man["unidades"],
-        "valor_manual_clp": man["valor_clp"],
+        "total_sugerido_manual": man["manual_unidades"],
+        "valor_manual_clp": man["manual_clp"],
     }
 
 
