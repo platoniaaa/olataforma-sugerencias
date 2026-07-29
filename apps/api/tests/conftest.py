@@ -1,22 +1,31 @@
 """Fixtures de pytest: base de datos SQLite en memoria + cliente de prueba con datos."""
 import json
+import os
 
-import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+# La suite corre siempre contra SQLite en memoria, pero `src.db` crea su engine al
+# importarse y `src.config` lee el .env del repo. Sin esto, en un PC con el .env de
+# produccion los tests se quedan colgados intentando abrir una conexion al Postgres
+# remoto (o fallan si no esta instalado su driver). Se setea ANTES de importar src
+# porque la variable de entorno le gana al .env en pydantic-settings; con setdefault,
+# quien quiera apuntar a otra base igual puede exportarla.
+os.environ.setdefault("DATABASE_URL", "sqlite://")
 
-from src.db import Base, get_db
-from src.main import app
-from src.models import (
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy import create_engine  # noqa: E402
+from sqlalchemy.orm import sessionmaker  # noqa: E402
+from sqlalchemy.pool import StaticPool  # noqa: E402
+
+from src.db import Base, get_db  # noqa: E402
+from src.main import app  # noqa: E402
+from src.models import (  # noqa: E402
     DimProducto,
     DimSucursal,
     Sugerido,
     Usuario,
     VentaHistorica,
 )
-from src.services.auth import hash_password, requiere_auth
+from src.services.auth import hash_password, requiere_auth  # noqa: E402
 
 
 @pytest.fixture()
