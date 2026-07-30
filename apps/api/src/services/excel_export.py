@@ -85,7 +85,15 @@ LABELS: dict[str, str] = {
     "margen_sugerido_clp": "Margen del Sugerido CLP",
     "sobrecosto_vs_dealer_pct": "Sobrecosto vs Dealer %",
     "unidades_pedidas": "Ya Pedido (unidades)",
+    # Regla InStock (repuestos de pauta que no pueden faltar).
+    "instock": "InStock",
+    "instock_modelos": "InStock Modelos",
+    "instock_minimo": "InStock Minimo",
+    "instock_agregado": "InStock Agregado",
 }
+
+# Booleanos que en el Excel se leen mejor como Si/vacio que como TRUE/FALSE.
+BOOL_COLUMNS = {"instock"}
 
 # Columnas por defecto si el cliente no especifica.
 DEFAULT_COLUMNS = [
@@ -142,6 +150,8 @@ def generar_excel(rows: list[dict], columnas: list[str] | None) -> bytes:
     for i, row in enumerate(rows, start=2):
         for j, col in enumerate(cols, start=1):
             value = _valor(row, col)
+            if col in BOOL_COLUMNS:
+                value = "Si" if value else None
             cell = ws.cell(row=i, column=j, value=value)
             if col in CLP_COLUMNS and isinstance(value, (int, float)):
                 cell.number_format = '"$"#,##0'

@@ -58,12 +58,22 @@ function KpiCard({
 
 export function KpiCards({ kpis, cargando }: Props) {
   const v = (s: string) => (cargando || !kpis ? "—" : s);
-  // Los totales ya incluyen las sugerencias manuales; el paréntesis dice cuánto de
-  // eso se cargó a mano. Solo aparece si hay algo que mostrar.
+  // Los totales ya incluyen las sugerencias manuales y lo que agrega la regla
+  // InStock; el paréntesis dice cuánto viene de cada una. Solo aparece si hay algo
+  // que mostrar, y si conviven las dos se muestran juntas.
   const uManual = kpis?.total_sugerido_manual ?? 0;
   const clpManual = kpis?.valor_manual_clp ?? 0;
+  const uInstock = kpis?.total_sugerido_instock ?? 0;
+  const clpInstock = kpis?.valor_instock_clp ?? 0;
   const nota = (mostrar: boolean, texto: string) =>
     cargando || !kpis || !mostrar ? null : texto;
+  const desglose = (manual: number, instock: number, fmt: (n: number) => string) =>
+    [
+      manual > 0 ? `${fmt(manual)} manuales` : null,
+      instock > 0 ? `${fmt(instock)} InStock` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
   return (
     <div className="grid grid-cols-2 gap-px bg-ink-200 lg:grid-cols-4">
       <KpiCard
@@ -71,14 +81,20 @@ export function KpiCards({ kpis, cargando }: Props) {
         icon={<Boxes size={16} />}
         label="Total Sugerido"
         valor={v(formatoNumero(kpis?.total_sugerido))}
-        nota={nota(uManual > 0, `(${formatoNumero(uManual)} manuales)`)}
+        nota={nota(
+          uManual > 0 || uInstock > 0,
+          `(${desglose(uManual, uInstock, (n) => formatoNumero(n))})`
+        )}
       />
       <KpiCard
         index="02"
         icon={<DollarSign size={16} />}
         label="Valor Total"
         valor={v(formatoCLPCorto(kpis?.valor_total_clp))}
-        nota={nota(clpManual > 0, `(${formatoCLPCorto(clpManual)} manuales)`)}
+        nota={nota(
+          clpManual > 0 || clpInstock > 0,
+          `(${desglose(clpManual, clpInstock, (n) => formatoCLPCorto(n))})`
+        )}
         acento
       />
       <KpiCard

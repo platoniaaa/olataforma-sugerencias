@@ -1,7 +1,15 @@
 // Definicion central de las columnas del sugerido: etiqueta, tipo y si se ven por defecto.
 import type { SugeridoRow } from "./types";
 
-export type TipoColumna = "texto" | "numero" | "decimal" | "clp" | "abc" | "porcentaje";
+export type TipoColumna =
+  | "texto"
+  | "numero"
+  | "decimal"
+  | "clp"
+  | "abc"
+  | "porcentaje"
+  /** Booleano: se pinta "Sí" cuando es verdadero y "—" cuando no. */
+  | "si_no";
 
 export interface DefColumna {
   key: keyof SugeridoRow;
@@ -24,6 +32,8 @@ export const COLUMNAS: DefColumna[] = [
     info: "Clase ABC del producto a nivel nacional (todas las sucursales juntas). Se usa para decidir la compra centralizada en el CD." },
   { key: "nombre_sucursal", label: "Sucursal", tipo: "texto", visiblePorDefecto: true,
     info: "Sucursal a la que corresponde esta fila." },
+  { key: "instock", label: "InStock", tipo: "si_no", visiblePorDefecto: true,
+    info: "Repuesto de una pauta de mantención: Ford Transit / Ranger / F-150 (años modelo 2023-2024) y Hyundai Accent / Grand i10 / i20 (todas las generaciones). En Linderos, Rancagua, Curicó y Chillán nunca puede haber menos de 2 unidades: si el stock, el tránsito y el sugerido no llegan a esa cifra, el sugerido se completa solo." },
   { key: "total_sugerido_suc", label: "Total Sugerido", tipo: "numero", visiblePorDefecto: true, pin: "right",
     info: "Unidades sugeridas a comprar para la sucursal. = Demanda × (ciclo de orden + lead time) + stock de seguridad − stock actual − tránsito." },
   // Ocultas por defecto:
@@ -138,6 +148,13 @@ export const COLUMNAS: DefColumna[] = [
     info: "Cuánto está el costo unitario por encima del precio dealer de FORD. Positivo = se está comprando más caro que la lista dealer; conviene revisar." },
   { key: "unidades_pedidas", label: "Ya Pedido", tipo: "numero", visiblePorDefecto: false,
     info: "Unidades de esta línea que alguien ya marcó como pedidas (últimos 45 días, sin recibir todavía). Es informativo: no descuenta del sugerido." },
+  // Detalle de la regla InStock (la columna "InStock" va arriba, visible por defecto).
+  { key: "instock_modelos", label: "InStock Modelos", tipo: "texto", visiblePorDefecto: false,
+    info: "Modelos de la pauta de mantención que usan este repuesto." },
+  { key: "instock_minimo", label: "InStock Mínimo", tipo: "numero", visiblePorDefecto: false,
+    info: "Unidades que nunca pueden faltar del repuesto en una sucursal con taller." },
+  { key: "instock_agregado", label: "InStock Agregado", tipo: "numero", visiblePorDefecto: false,
+    info: "Unidades que la regla del mínimo agregó al total sugerido de esta fila. En blanco si el stock, el tránsito y el sugerido ya cubrían el mínimo." },
 ];
 
 export const KEYS_POR_DEFECTO = COLUMNAS.filter((c) => c.visiblePorDefecto).map((c) => c.key as string);

@@ -2,7 +2,7 @@
 
 export interface SugeridoRow {
   id: number;
-  origen?: "sugerido" | "catalogo" | "manual";
+  origen?: "sugerido" | "catalogo" | "manual" | "instock";
   producto: string;
   descripcion: string | null;
   sucursal_id: string;
@@ -75,6 +75,14 @@ export interface SugeridoRow {
   sobrecosto_vs_dealer_pct: number | null;
   /** Unidades ya marcadas como pedidas (services/pedidos_service.py). */
   unidades_pedidas: number | null;
+  /** Repuesto de pauta de mantención que no puede faltar (services/instock_service.py). */
+  instock: boolean | null;
+  /** Modelos de la pauta que lo usan ("F-150, Ranger"). */
+  instock_modelos: string | null;
+  /** Unidades que nunca pueden faltar en una sucursal con taller. */
+  instock_minimo: number | null;
+  /** Cuánto sumó la regla del mínimo a esta fila. */
+  instock_agregado: number | null;
 }
 
 export interface SugeridoPage {
@@ -95,6 +103,9 @@ export interface SugeridoKpis {
   /** Cuánto de los totales de arriba viene de sugerencias manuales. */
   total_sugerido_manual?: number;
   valor_manual_clp?: number;
+  /** Cuánto viene de la regla InStock (mínimo de repuestos de pauta). */
+  total_sugerido_instock?: number;
+  valor_instock_clp?: number;
 }
 
 /** Filtro de una columna del grid (traducido del multi-select). Se usa el campo

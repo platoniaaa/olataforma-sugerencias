@@ -17,7 +17,13 @@ from ..schemas import (
     SugeridoRow,
     VentasResponse,
 )
-from ..services import excel_export, margen, snapshot_service, sugerido_service
+from ..services import (
+    excel_export,
+    instock_service,
+    margen,
+    snapshot_service,
+    sugerido_service,
+)
 from ..services.auth import sucursales_permitidas
 from ..services.sugerido_service import SUCURSALES_OCULTAS
 
@@ -143,9 +149,10 @@ def detalle(
     row = sugerido_service.detalle(db, producto, sucursal_id)
     if not row:
         raise HTTPException(status_code=404, detail="No existe sugerido para ese producto/sucursal")
-    # El detalle no pasa por listar(): el margen se calcula aca para que la ficha
-    # del producto muestre lo mismo que las columnas de la tabla.
+    # El detalle no pasa por listar(): el margen y la regla InStock se aplican aca
+    # para que la ficha del producto muestre lo mismo que las columnas de la tabla.
     fila = {c.name: getattr(row, c.name) for c in Sugerido.__table__.columns}
+    instock_service.aplicar([fila], instock_service.catalogo(db))
     margen.calcular_margen(fila)
     return SugeridoRow.model_validate(fila)
 

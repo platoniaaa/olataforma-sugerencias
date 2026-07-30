@@ -4,6 +4,7 @@ NOTA Fase 0: aca NO se calcula el sugerido. Los valores ya vienen del Power BI.
 Solo se filtra/agrega lo que ya esta cargado en la tabla.
 """
 import math
+import unicodedata
 from datetime import datetime, timezone
 
 from sqlalchemy import (
@@ -28,7 +29,7 @@ from ..models import (
     VentaHistorica,
 )
 from ..schemas import SugeridoFiltros
-from . import margen, pedidos_service, stock_service
+from . import instock_service, margen, pedidos_service, stock_service
 
 # Columnas por las que se permite ordenar (whitelist para evitar inyeccion).
 SORTABLE = {c.name for c in Sugerido.__table__.columns}
@@ -374,16 +375,92 @@ def _filas_de_pares(db: Session, pares: set[tuple[str, str]]) -> list[Sugerido]:
     return list(db.scalars(select(Sugerido).where(cond)).all())
 
 
+def producto_existe(db: Session, producto: str) -> bool:
+    """El codigo aparece en alguna fuente de datos: sugerido, catalogo o stock.
+
+    Es la condicion minima para poder cargarle una sugerencia manual. Si el codigo
+    no esta en ninguna, no hay de donde sacar descripcion, costo ni proveedor: la
+    fila sale entera en blanco en la grilla y en el Excel, y nadie puede saber que
+    producto era (paso en produccion con `74 1324409TBW0000`, tipeado a mano en el
+    modal, que no existe en el maestro de 409k productos).
+
+    Se mira tambien `stock_unificado` y no solo el catalogo: si hay stock cargado
+    del producto, el producto existe aunque el maestro venga desfasado. Es el lado
+    seguro del error -bloquear una compra legitima es peor que dejar pasar un
+    codigo raro que ademas tiene stock-.
+    """
+
+    def _hay(modelo) -> bool:
+        try:
+            return bool(
+                db.scalar(
+                    select(func.count()).select_from(
+                        select(modelo.id).where(modelo.producto == producto).limit(1).subquery()
+                    )
+                )
+            )
+        except Exception:
+            # Tabla ausente (despliegue viejo): no bloquear por eso.
+            return False
+
+    return any(_hay(m) for m in (Sugerido, ProductoCatalogo, StockUnificado))
+
+
+def _stock_de_pares(db: Session, pares: set[tuple[str, str]]) -> dict[tuple[str, str], float]:
+    """Stock de `stock_unificado` para varios pares (producto, sucursal), en una query.
+
+    Tolerante igual que `_stock_en_sucursal`: si la tabla no existe todavia, devuelve
+    vacio y las filas quedan con el stock en '-' en vez de romper la pantalla.
+    """
+    if not pares:
+        return {}
+    cond = or_(
+        *[
+            and_(StockUnificado.producto == p, StockUnificado.sucursal_id == s)
+            for p, s in pares
+        ]
+    )
+    try:
+        filas = db.execute(
+            select(
+                StockUnificado.producto,
+                StockUnificado.sucursal_id,
+                func.coalesce(func.sum(StockUnificado.stock), 0),
+            )
+            .where(cond)
+            .group_by(StockUnificado.producto, StockUnificado.sucursal_id)
+        ).all()
+    except Exception:
+        return {}
+    return {(p, s): float(t or 0) for p, s, t in filas}
+
+
+# Descripcion de reemplazo cuando la manual apunta a un codigo que ya no esta en el
+# catalogo maestro. Sin esto la fila sale entera en blanco y parece un bug de la
+# grilla, cuando el problema es el codigo.
+SIN_CATALOGO = "(codigo no encontrado en el catalogo)"
+
+
 def _fila_sintetica_manual(
-    producto: str, sucursal_id: str, unidades: int, cat: ProductoCatalogo | None
+    producto: str,
+    sucursal_id: str,
+    unidades: int,
+    cat: ProductoCatalogo | None,
+    stock_suc: float | None = None,
+    origen: str = "manual",
 ) -> dict:
-    """Fila para un par (producto, sucursal) que tiene sugerencia manual pero NO esta en el
-    sugerido del BI. Se enriquece con los datos del catalogo si estan disponibles."""
+    """Fila para un par (producto, sucursal) que hay que comprar pero NO esta en el
+    sugerido del BI. Se enriquece con los datos del catalogo si estan disponibles.
+
+    `origen` distingue de donde salio la orden de comprar: "manual" (alguien la
+    cargo a mano) o "instock" (la regla del minimo de pauta). En los dos casos la
+    fila es igual: el BI no la tiene y las unidades son las que hay que comprar.
+    """
     return {
         "id": -abs(hash((producto, sucursal_id))) % (10**9),
-        "origen": "manual",
+        "origen": origen,
         "producto": producto,
-        "descripcion": cat.glosa if cat else None,
+        "descripcion": cat.glosa if cat else SIN_CATALOGO,
         "sucursal_id": sucursal_id,
         "nombre_sucursal": sucursal_id,
         "empresa": None,
@@ -401,7 +478,10 @@ def _fila_sintetica_manual(
         "costo_unitario": cat.costo if cat else None,
         "pedir": "Si",
         "reemplazos": cat.reemplazo if cat else None,
-        "sugerido_suc": None, "stock_activo_suc": None,
+        "sugerido_suc": None,
+        # El BI no tiene la fila, pero el stock de la sucursal si se conoce por
+        # bodega: mostrarlo evita comprar sobre stock que ya esta ahi.
+        "stock_activo_suc": stock_suc,
         "stock_en_transito_suc": None, "stock_en_cd": None,
         "sugerido_traslado": None,
         "sugerido_compra_neto": float(unidades),
@@ -434,6 +514,147 @@ def _aplicar_manuales_a_fila(d: dict, manual_unidades: int) -> None:
     d["pedir_flag"] = "Si"
 
 
+def _sin_tildes(texto: str) -> str:
+    return unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode()
+
+
+def _sucursales_instock(f: SugeridoFiltros) -> list[str]:
+    """Sucursales con taller que el usuario puede ver y que la pantalla no filtro.
+
+    Tres recortes, en orden: las que tienen taller (donde rige el minimo), las que
+    el permiso del usuario le deja ver, y las que eligio en el filtro de sucursal.
+
+    Ese ultimo filtro va por `nombre_sucursal` ("Curico") y aca tenemos el
+    `sucursal_id` ("CURICO"), asi que se comparan en mayusculas y SIN TILDES: si el
+    BI escribe "Curicó" o "Chillán", una comparacion literal dejaria esas dos
+    sucursales fuera de la regla justo cuando el usuario las filtra.
+    """
+    permitidas = f.sucursales_permitidas
+    elegidas = {
+        _sin_tildes(s.strip().upper()) for s in (f.sucursales or []) if s and s.strip()
+    }
+    return [
+        s
+        for s in instock_service.SUCURSALES_INSTOCK
+        if (permitidas is None or s in permitidas)
+        and (not elegidas or _sin_tildes(s.upper()) in elegidas)
+    ]
+
+
+def _resolver_instock(db: Session, f: SugeridoFiltros, manuales: dict, man: dict) -> dict:
+    """Que pares InStock no llegan al minimo y como entran en la pantalla actual.
+
+    Mismo problema que `_resolver_manuales`, y por eso la misma estructura: la
+    regla del minimo obliga a comprar filas que el sugerido del BI deja en cero, y
+    esas filas las esconde el toggle "solo pedir" o directamente no existen en la
+    tabla. Si no se inyectaran, la regla seria invisible justo en el caso que la
+    justifica (repuesto de pauta clase D, sin venta y con stock cero).
+
+    Tres destinos, calculados sobre el universo completo (no sobre la pagina):
+
+    - `solo_unidades`: la fila ya esta contada en la pantalla —o la conto
+      `_aporte_manuales`—; solo falta sumarle las unidades del minimo. No hay nada
+      que inyectar: cuando la fila se pinte, `instock_service.aplicar` la sube.
+    - `extras`: la fila existe en esta vista pero la escondio "solo pedir" o "solo
+      nacionales". Se muestra la fila BUENA (con proveedor, ABC y stock).
+    - `solas`: el par no esta en el sugerido en ninguna parte. Recien ahi se
+      fabrica una fila desde el catalogo.
+
+    Las que ya inyecto el camino de las sugerencias manuales quedan fuera de
+    `extras`/`solas` (irian dos veces): entran en `solo_unidades`.
+    """
+    vacio: dict = {"cat": {}, "solo_unidades": {}, "extras": {}, "solas": {}, "costos": {}}
+    cat = instock_service.catalogo(db)
+    if not cat:
+        return vacio
+    sucursales = _sucursales_instock(f)
+    if not sucursales:
+        return vacio
+
+    productos = set(cat)
+    q_text = (f.q or "").strip()
+    if q_text:
+        # Con busqueda, la pantalla muestra lo que matchea el texto: inyectar todos
+        # los repuestos de pauta encima seria ruido. Mismo criterio que las manuales.
+        productos = {p for p in productos if q_text.lower() in p.lower()}
+        if not productos:
+            return vacio
+
+    # Datos del BI para los pares candidatos, en una query.
+    filas = db.execute(
+        select(
+            Sugerido.producto,
+            Sugerido.sucursal_id,
+            Sugerido.stock_activo_suc,
+            Sugerido.stock_en_transito_suc,
+            Sugerido.total_sugerido_suc,
+            Sugerido.costo_unitario,
+        ).where(Sugerido.producto.in_(productos), Sugerido.sucursal_id.in_(sucursales))
+    ).all()
+    datos = {(p, s): (st, tr, sug, costo) for p, s, st, tr, sug, costo in filas}
+
+    # Stock real de los pares que el BI no tiene (ahi el sugerido del sistema es 0).
+    sin_fila = {
+        (p, s) for p in productos for s in sucursales if (p, s) not in datos
+    }
+    stock_suelto = _stock_de_pares(db, sin_fila) if sin_fila else {}
+
+    faltantes: dict[tuple[str, str], int] = {}
+    costos: dict[tuple[str, str], float] = {}
+    for p in productos:
+        minimo = cat[p]["minimo"]
+        for s in sucursales:
+            par = (p, s)
+            manual = manuales.get(par, 0)
+            if par in datos:
+                st, tr, sug, costo = datos[par]
+                falta = instock_service.faltante(minimo, st, tr, float(sug or 0) + manual)
+                costos[par] = float(costo or 0)
+            else:
+                falta = instock_service.faltante(
+                    minimo, stock_suelto.get(par), 0, manual
+                )
+            if falta > 0:
+                faltantes[par] = falta
+    if not faltantes:
+        return vacio
+
+    pares = set(faltantes)
+    cols = select(Sugerido.producto, Sugerido.sucursal_id)
+
+    def _consultar(stmt) -> set[tuple[str, str]]:
+        stmt = stmt.where(Sugerido.producto.in_({p for p, _ in pares}))
+        return {(p, s) for p, s in db.execute(stmt).all()} & pares
+
+    en_vista = _consultar(_apply_filters(cols, f))
+    amplio = f.model_copy(update={"solo_pedir": False, "solo_nacionales": False})
+    extras = _consultar(_apply_filters(cols, amplio)) - en_vista
+    en_tabla = _consultar(_apply_alcance(cols, f))
+
+    # Las filas que las sugerencias manuales ya inyectan: no se repiten.
+    ya_inyectados = set(man.get("extras") or ()) | set(man.get("solas") or ())
+    solo_unidades = {par: faltantes[par] for par in (en_vista | ya_inyectados) & pares}
+    extras = {par: faltantes[par] for par in extras - ya_inyectados}
+    # Las filas sueltas son compra de sucursal: no tienen sentido en las pestanias
+    # del CD ni de distribucion, que miran otro tramo del proceso.
+    vista = (f.vista or "todas").lower()
+    solas = (
+        {
+            par: faltantes[par]
+            for par in pares - en_tabla - ya_inyectados
+        }
+        if vista in ("todas", "sucursales")
+        else {}
+    )
+    return {
+        "cat": cat,
+        "solo_unidades": solo_unidades,
+        "extras": extras,
+        "solas": solas,
+        "costos": costos,
+    }
+
+
 def _mes_anterior_yyyymm(hoy: "date | None" = None) -> str:
     """Devuelve el mes calendario anterior en formato YYYYMM (string).
 
@@ -449,16 +670,17 @@ def _mes_anterior_yyyymm(hoy: "date | None" = None) -> str:
 
 
 def _aplicar_regla_stock_sin_venta(
-    items: list[dict], db: Session, con_manual: set[tuple[str, str]] | None = None
+    items: list[dict], db: Session, protegidos: set[tuple[str, str]] | None = None
 ) -> None:
     """Regla de negocio: si un producto tiene stock activo de sucursal >= demanda
     mensual Y no tuvo venta en el mes calendario anterior, no se sugiere comprar.
 
-    `con_manual` son los pares que tienen sugerencia manual vigente: la regla NO
-    los toca. Cargar una manual es decir "compra esto igual"; que una regla
-    automatica la volviera a marcar "no pedir" seria pasar por encima de una
-    decision explicita de Abastecimiento (y ademas dejaria la fila fuera del
-    dashboard, que filtra por "solo pedir").
+    `protegidos` son los pares donde ya hay una decision explicita de comprar: los
+    que tienen sugerencia manual vigente y los repuestos InStock bajo el minimo de
+    pauta. La regla NO los toca. Cargar una manual (o dejar un repuesto de pauta
+    bajo el minimo) es decir "compra esto igual"; que una regla automatica lo
+    volviera a marcar "no pedir" seria pasar por encima de esa decision (y ademas
+    dejaria la fila fuera del dashboard, que filtra por "solo pedir").
 
     Se aplica marcando `pedir = "No"` y `pedir_flag = "No"`. El total_sugerido_suc
     del BI NO se altera (la regla es opinable y conviene poder revisarla); como
@@ -520,7 +742,7 @@ def _aplicar_regla_stock_sin_venta(
         s = it.get("sucursal_id")
         if not p or not s:
             continue
-        if con_manual and (p, s) in con_manual:
+        if protegidos and (p, s) in protegidos:
             continue
         stock_activo = it.get("stock_activo_suc")
         demanda = it.get("demanda_mensual")
@@ -587,11 +809,16 @@ def listar(
     # Mapeo a dict + suma de manuales para los pares ya presentes en sugerido.
     items: list[dict] = [_a_dict(s) for s in sugeridos]
 
+    # Repuestos de pauta bajo el minimo (regla InStock). Se resuelve DESPUES de las
+    # manuales porque el minimo descuenta lo que la manual ya pidio.
+    ins = _resolver_instock(db, f, manuales, man)
+
     # Los totales NO dependen de la pagina; las filas de abajo se agregan solo en
     # la primera: van despues de paginar, asi que repetirlas en cada pagina seria
     # mostrarlas N veces (y hacer que el total variara con el tamano de pagina).
     total_extras = len(man["extras"])
     total_manuales_solas = len(man["solas"])
+    total_instock = len(ins["extras"]) + len(ins["solas"])
 
     # Filas reales que "solo pedir"/"solo nacionales" escondia. La manual es una
     # orden explicita de comprar: gana sobre el toggle, y se muestra la fila BUENA
@@ -613,8 +840,38 @@ def listar(
                 )
             ).all()
         }
+        stock_pares = _stock_de_pares(db, set(man["solas"]))
         for (p, s), u in man["solas"].items():
-            items.append(_fila_sintetica_manual(p, s, u, cat_map.get(p)))
+            items.append(
+                _fila_sintetica_manual(p, s, u, cat_map.get(p), stock_pares.get((p, s)))
+            )
+
+    # Lo mismo para la regla InStock: la fila real cuando existe, una sintetica
+    # cuando el BI no tiene el par. Un repuesto de pauta bajo el minimo hay que
+    # comprarlo aunque el modelo no lo pida; si no se mostrara, el mínimo seria
+    # una regla invisible.
+    if (ins["extras"] or ins["solas"]) and page == 1:
+        if ins["extras"]:
+            items.extend(_a_dict(s) for s in _filas_de_pares(db, set(ins["extras"])))
+        if ins["solas"]:
+            cat_ins = {
+                c.producto: c
+                for c in db.scalars(
+                    select(ProductoCatalogo).where(
+                        ProductoCatalogo.producto.in_({p for p, _ in ins["solas"]})
+                    )
+                ).all()
+            }
+            stock_ins = _stock_de_pares(db, set(ins["solas"]))
+            for (p, s), u in ins["solas"].items():
+                fila = _fila_sintetica_manual(
+                    p, s, u, cat_ins.get(p), stock_ins.get((p, s)), origen="instock"
+                )
+                # Ya viene con el faltante adentro: se deja anotado para que la
+                # columna "InStock agregado" explique de donde salio el numero (y
+                # para que `aplicar` no lo vuelva a sumar).
+                fila["instock_agregado"] = float(u)
+                items.append(fila)
 
     # Catalogo (productos que no estan ni en sugerido ni con manuales): solo cuando hay busqueda.
     total_cat = 0
@@ -630,9 +887,10 @@ def listar(
         )
         try:
             catalogo_items = list(db.scalars(cat_stmt).all())
-            # Omitir productos que ya aparecieron como filas sinteticas manuales.
-            productos_manuales = {p for (p, _) in manuales.keys()}
-            catalogo_items = [c for c in catalogo_items if c.producto not in productos_manuales]
+            # Omitir productos que ya aparecieron como filas sinteticas (manuales o
+            # InStock): la fila del catalogo seria la misma sin sucursal ni unidades.
+            ya_sinteticos = {p for (p, _) in manuales} | {p for (p, _) in ins["solas"]}
+            catalogo_items = [c for c in catalogo_items if c.producto not in ya_sinteticos]
             total_cat = len(catalogo_items)
             # Igual que las manuales sueltas: cuentan siempre, se muestran en la
             # pagina 1 (se agregan despues de paginar).
@@ -652,18 +910,24 @@ def listar(
     # el modelo Sugerido. Las filas que ya vienen del catalogo o sinteticas no
     # se tocan: el helper salta cuando ya hay 'reemplazos' en la fila.
     _enriquecer_con_catalogo(items, db)
+    # Regla InStock (jul-2026): marca los repuestos de pauta y completa el minimo
+    # en las sucursales con taller. Va antes del margen para que el margen del
+    # sugerido incluya las unidades que agrega la regla.
+    instock_service.aplicar(items, ins["cat"])
     margen.agregar_margen(items)
     pedidos_service.agregar_a_filas(items, db)
 
     # Regla de negocio (jun-2026): si tiene stock para su demanda mensual y no
-    # tuvo venta el mes anterior, no se sugiere comprar. Las que tienen manual
-    # quedan fuera: ahi ya hubo una decision explicita de comprar.
-    _aplicar_regla_stock_sin_venta(items, db, con_manual=set(manuales))
+    # tuvo venta el mes anterior, no se sugiere comprar. Las que tienen manual o
+    # estan bajo el minimo InStock quedan fuera: ahi ya hubo una decision
+    # explicita de comprar.
+    protegidos = set(manuales) | set(ins["solo_unidades"]) | set(ins["extras"]) | set(ins["solas"])
+    _aplicar_regla_stock_sin_venta(items, db, protegidos=protegidos)
 
-    return items, total + total_extras + total_manuales_solas + total_cat
+    return items, total + total_extras + total_manuales_solas + total_instock + total_cat
 
 
-def _aporte_manuales(db: Session, f: SugeridoFiltros) -> dict:
+def _aporte_manuales(db: Session, f: SugeridoFiltros, man: dict | None = None) -> dict:
     """Cuanto suman las sugerencias manuales vigentes sobre los KPIs.
 
     Espeja EXACTAMENTE lo que hace `listar`, y esa es la razon de ser de esta
@@ -677,10 +941,14 @@ def _aporte_manuales(db: Session, f: SugeridoFiltros) -> dict:
     Las sueltas no tienen proveedor ni clase ABC, asi que —igual que en `listar`—
     solo las acota el permiso de sucursal, no los filtros del usuario. Si algun dia
     eso cambia, hay que cambiarlo en los dos lados o las tarjetas dejan de cuadrar.
+
+    `man` es la resolucion ya calculada (`_resolver_manuales`); se puede pasar para
+    no repetir las queries cuando el caller tambien la necesita.
     """
     vacio = {"unidades": 0.0, "valor_clp": 0.0, "manual_unidades": 0.0, "manual_clp": 0.0,
              "filas": 0, "productos": set()}
-    man = _resolver_manuales(db, f)
+    if man is None:
+        man = _resolver_manuales(db, f)
     manuales = man["por_par"]
     if not manuales:
         return vacio
@@ -741,6 +1009,81 @@ def _aporte_manuales(db: Session, f: SugeridoFiltros) -> dict:
     }
 
 
+def _aporte_instock(db: Session, f: SugeridoFiltros, ins: dict) -> dict:
+    """Cuanto suma la regla InStock sobre los KPIs. Espeja lo que hace `listar`.
+
+    Misma logica de tres casos que `_aporte_manuales`, con la diferencia de que
+    aca lo que se suma es el FALTANTE para llegar al minimo, no unidades pedidas
+    a mano:
+
+    - `solo_unidades`: la fila ya la conto alguien (el SQL base o el aporte de las
+      manuales); solo se agregan las unidades del minimo.
+    - `extras`: fila real que escondia "solo pedir"; entra entera (su sugerido mas
+      el faltante) y suma una fila y un producto.
+    - `solas`: fila propia, valorizada con el costo del catalogo.
+    """
+    vacio = {"unidades": 0.0, "valor_clp": 0.0, "instock_unidades": 0.0,
+             "instock_clp": 0.0, "filas": 0, "productos": set()}
+    if not (ins["solo_unidades"] or ins["extras"] or ins["solas"]):
+        return vacio
+
+    unidades = valor = 0.0        # lo que hay que SUMARLE a los totales base
+    instock_u = instock_clp = 0.0  # de eso, cuanto pone la regla del minimo
+    filas = 0
+    productos: set[str] = set()
+
+    # Costos: los de las filas del BI ya vienen resueltos; el resto sale del catalogo.
+    costos = dict(ins["costos"])
+    pares_valorizar = set(ins["solo_unidades"]) | set(ins["solas"])
+    sin_costo = {par[0] for par in pares_valorizar if not costos.get(par)}
+    costo_cat: dict[str, float] = {}
+    if sin_costo:
+        costo_cat = {
+            c.producto: float(c.costo or 0)
+            for c in db.scalars(
+                select(ProductoCatalogo).where(ProductoCatalogo.producto.in_(sin_costo))
+            ).all()
+        }
+
+    def _costo(par: tuple[str, str]) -> float:
+        return costos.get(par) or costo_cat.get(par[0], 0.0)
+
+    for par, falta in ins["solo_unidades"].items():
+        clp = falta * _costo(par)
+        unidades += falta
+        valor += clp
+        instock_u += falta
+        instock_clp += clp
+
+    for s in _filas_de_pares(db, set(ins["extras"])):
+        falta = ins["extras"][(s.producto, s.sucursal_id)]
+        clp = falta * float(s.costo_unitario or 0)
+        unidades += float(s.total_sugerido_suc or 0) + falta
+        valor += float(s.total_valor_sugerido_clp or 0) + clp
+        instock_u += falta
+        instock_clp += clp
+        filas += 1
+        productos.add(s.producto)
+
+    for par, falta in ins["solas"].items():
+        clp = falta * _costo(par)
+        unidades += falta
+        valor += clp
+        instock_u += falta
+        instock_clp += clp
+        filas += 1
+        productos.add(par[0])
+
+    return {
+        "unidades": unidades,
+        "valor_clp": valor,
+        "instock_unidades": instock_u,
+        "instock_clp": instock_clp,
+        "filas": filas,
+        "productos": productos,
+    }
+
+
 def kpis(db: Session, f: SugeridoFiltros) -> dict:
     base = _apply_filters(select(Sugerido), f).subquery()
 
@@ -754,25 +1097,35 @@ def kpis(db: Session, f: SugeridoFiltros) -> dict:
     # Las sugerencias manuales NO viven en la tabla Sugerido. Hasta jul-2026 las
     # tarjetas las ignoraban mientras la tabla si las sumaba: los numeros de arriba
     # no cuadraban con los de abajo y lo comprado a mano quedaba fuera del total.
-    man = _aporte_manuales(db, f)
+    resolucion = _resolver_manuales(db, f)
+    man = _aporte_manuales(db, f, resolucion)
+    # Idem con la regla InStock: lo que agrega para llegar al minimo de pauta.
+    ins = _aporte_instock(
+        db, f, _resolver_instock(db, f, resolucion["por_par"], resolucion)
+    )
 
-    # Productos: hay que unir los conjuntos (una manual puede traer un producto que
-    # el sugerido no tiene en esta vista). Solo se materializa la lista si hace falta.
-    if man["productos"]:
+    # Productos: hay que unir los conjuntos (una manual o un repuesto de pauta puede
+    # traer un producto que el sugerido no tiene en esta vista). Solo se materializa
+    # la lista si hace falta.
+    extra_productos = man["productos"] | ins["productos"]
+    if extra_productos:
         productos = {p for (p,) in db.execute(select(distinct(base.c.producto))).all()}
-        n_productos = len(productos | man["productos"])
+        n_productos = len(productos | extra_productos)
     else:
         n_productos = db.scalar(select(func.count(distinct(base.c.producto)))) or 0
 
     return {
-        "total_sugerido": float(total_sugerido) + man["unidades"],
-        "valor_total_clp": float(valor_total) + man["valor_clp"],
+        "total_sugerido": float(total_sugerido) + man["unidades"] + ins["unidades"],
+        "valor_total_clp": float(valor_total) + man["valor_clp"] + ins["valor_clp"],
         "n_productos": int(n_productos),
         "n_proveedores": int(n_proveedores),
-        "n_filas": int(n_filas) + man["filas"],
+        "n_filas": int(n_filas) + man["filas"] + ins["filas"],
         # Desglose para mostrar entre parentesis cuanto viene de sugerencias manuales.
         "total_sugerido_manual": man["manual_unidades"],
         "valor_manual_clp": man["manual_clp"],
+        # Idem para la regla InStock (minimo de repuestos de pauta).
+        "total_sugerido_instock": ins["instock_unidades"],
+        "valor_instock_clp": ins["instock_clp"],
     }
 
 
@@ -1132,12 +1485,21 @@ def listar_por_ids(
         items.append(d)
 
     _enriquecer_con_catalogo(items, db)
+    # Regla InStock: marca y completa el minimo, igual que en `listar`, para que el
+    # Excel exporte los mismos numeros que muestra la grilla.
+    cat_instock = instock_service.catalogo(db)
+    instock_service.aplicar(items, cat_instock)
     margen.agregar_margen(items)
     pedidos_service.agregar_a_filas(items, db)
     # Misma regla de negocio que aplica `listar`: stock cubre el mes + sin venta
-    # el mes anterior -> pedir = No, salvo que tenga manual. Asi el export Excel
-    # respeta lo mismo que ve la grilla.
-    _aplicar_regla_stock_sin_venta(items, db, con_manual=set(manuales))
+    # el mes anterior -> pedir = No, salvo que tenga manual o sea un repuesto de
+    # pauta bajo el minimo. Asi el export Excel respeta lo mismo que ve la grilla.
+    protegidos = set(manuales) | {
+        (it["producto"], it["sucursal_id"])
+        for it in items
+        if it.get("instock_agregado")
+    }
+    _aplicar_regla_stock_sin_venta(items, db, protegidos=protegidos)
     return items
 
 

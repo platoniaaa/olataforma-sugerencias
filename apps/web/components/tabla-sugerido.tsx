@@ -14,6 +14,7 @@ import type {
   IRowNode,
   RowClickedEvent,
   SortDirection,
+  ValueGetterParams,
 } from "ag-grid-community";
 import { Check, Copy, Info } from "lucide-react";
 import { COLUMNAS, type DefColumna } from "@/lib/columnas";
@@ -51,18 +52,31 @@ export interface TablaSugeridoHandle {
   limpiarFiltrosColumnas(): void;
 }
 
+// Filas que el sugerido del BI no trae: se etiquetan para que el comprador sepa
+// de dónde salieron (una manual cargada a mano, la regla InStock, o el catálogo).
+const BADGES: Record<string, { texto: string; cls: string }> = {
+  manual: {
+    texto: "MANUAL",
+    cls: "rounded bg-emerald-50 px-1.5 py-px text-[10px] font-semibold text-emerald-700",
+  },
+  instock: {
+    texto: "INSTOCK",
+    cls: "rounded bg-amber-50 px-1.5 py-px text-[10px] font-semibold text-amber-700",
+  },
+  catalogo: {
+    texto: "CATÁLOGO",
+    cls: "rounded bg-slate-100 px-1.5 py-px text-[10px] font-semibold text-slate-500",
+  },
+};
+
 function ProductoCelda(p: { value: unknown; data?: SugeridoRow }) {
   const v = (p.value as string | null) ?? "";
-  const origen = p.data?.origen;
-  if (origen !== "catalogo" && origen !== "manual") return <>{v}</>;
-  const cls =
-    origen === "manual"
-      ? "rounded bg-emerald-50 px-1.5 py-px text-[10px] font-semibold text-emerald-700"
-      : "rounded bg-slate-100 px-1.5 py-px text-[10px] font-semibold text-slate-500";
+  const badge = p.data?.origen ? BADGES[p.data.origen] : undefined;
+  if (!badge) return <>{v}</>;
   return (
     <span className="inline-flex items-center gap-1.5">
       <span>{v}</span>
-      <span className={cls}>{origen === "manual" ? "MANUAL" : "CATÁLOGO"}</span>
+      <span className={badge.cls}>{badge.texto}</span>
     </span>
   );
 }
@@ -155,6 +169,9 @@ function HeaderConInfo(props: IHeaderParams & { info?: string }) {
 function formateador(def: DefColumna) {
   return (p: { value: unknown }) => {
     const v = p.value as number | string | null;
+    // El booleano se decide antes del guard: `false` es un valor legítimo ("no"),
+    // no un dato faltante.
+    if (def.tipo === "si_no") return v ? "Sí" : "—";
     if (v === null || v === undefined || v === "") return "—";
     switch (def.tipo) {
       case "clp":
@@ -172,7 +189,7 @@ function formateador(def: DefColumna) {
 }
 
 function colDef(def: DefColumna): ColDef {
-  const numerica = def.tipo !== "texto" && def.tipo !== "abc";
+  const numerica = def.tipo !== "texto" && def.tipo !== "abc" && def.tipo !== "si_no";
   // Todas las columnas comparten ancho por defecto (flex viene del defaultColDef
   // del grid). Solo seteamos minWidth para que columnas con valores largos no
   // se hagan ilegibles al achicar mucho. El usuario puede redimensionar a gusto
@@ -192,7 +209,17 @@ function colDef(def: DefColumna): ColDef {
   base.headerComponent = HeaderConInfo;
   base.headerComponentParams = { info: def.info };
 
-  if (def.tipo === "abc") {
+  if (def.tipo === "si_no") {
+    // Alineada a la izquierda como el texto, pero destacando el "Sí": la columna
+    // InStock se lee de un vistazo mientras se recorre la grilla.
+    base.valueFormatter = formateador(def);
+    base.cellStyle = (p) => (p.value ? { color: "#b45309", fontWeight: 600 } : null);
+    base.minWidth = 90;
+    // El multi-select del filtro lee el valor crudo: sin esto ofrece "true/false"
+    // en vez de "Sí/No", que es lo que el usuario ve en la celda.
+    base.filterValueGetter = (p: ValueGetterParams<SugeridoRow>) =>
+      p.data?.[def.key as keyof SugeridoRow] ? "Sí" : "No";
+  } else if (def.tipo === "abc") {
     base.cellClass = "font-semibold";
     base.cellStyle = (p) => {
       const map: Record<string, { color: string }> = {
@@ -637,7 +664,9 @@ export const TablaSugerido = forwardRef<TablaSugeridoHandle, Props>(function Tab
         onCellContextMenu={onCellContextMenu}
         onRowClicked={(e: RowClickedEvent<SugeridoRow>) => {
           if (!e.data) return;
-          if (e.data.origen === "catalogo" || e.data.origen === "manual") {
+          // Filas que el BI no tiene (catálogo, manual suelta, InStock suelta): no
+          // hay detalle de sugerido que abrir, se va a la ficha del producto.
+          if (e.data.origen && e.data.origen !== "sugerido") {
             router.push(`/catalogo/${encodeURIComponent(e.data.producto)}`);
             return;
           }

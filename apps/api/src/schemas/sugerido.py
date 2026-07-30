@@ -87,6 +87,12 @@ class SugeridoRow(BaseModel):
     sobrecosto_vs_dealer_pct: float | None = None
     # Unidades ya pedidas de esta linea (services/pedidos_service.py).
     unidades_pedidas: float | None = None
+    # Regla InStock (services/instock_service.py): repuesto de pauta que no puede
+    # faltar en las sucursales con taller.
+    instock: bool | None = None
+    instock_modelos: str | None = None  # "F-150, Ranger"
+    instock_minimo: int | None = None  # unidades que nunca pueden faltar
+    instock_agregado: float | None = None  # cuanto sumo la regla a esta fila
 
 
 class SugeridoPage(BaseModel):
@@ -113,6 +119,9 @@ class SugeridoKpis(BaseModel):
     # dashboard lo muestra entre parentesis bajo la cifra.
     total_sugerido_manual: float = 0
     valor_manual_clp: float = 0
+    # Idem para lo que agrega la regla InStock (minimo de repuestos de pauta).
+    total_sugerido_instock: float = 0
+    valor_instock_clp: float = 0
 
 
 class AgrupadoRow(BaseModel):
