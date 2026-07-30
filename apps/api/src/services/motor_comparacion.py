@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..models import ComparacionMotor, Sugerido
-from . import excel_loader
+from . import config_modelo_service, excel_loader, nivel_maximo
 
 settings = get_settings()
 
@@ -76,6 +76,18 @@ def comparar(db: Session, contenido: bytes, filename: str = "motor.csv") -> dict
     filas_motor, _detectadas, _ignoradas = excel_loader.procesar_registros(registros)
     if not filas_motor:
         raise ValueError("El archivo del motor no trae filas validas.")
+
+    # La reposicion al nivel maximo la aplica la plataforma DESPUES de recibir el
+    # archivo, asi que el sugerido vivo la lleva y el crudo del motor no. Sin
+    # aplicarsela tambien aca, la comparacion marcaria miles de divergencias que
+    # no son un error del motor sino el efecto esperado de la regla, y taparia las
+    # diferencias reales que este panel existe para detectar.
+    try:
+        config = config_modelo_service.vigente(db)
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        config = dict(config_modelo_service.DEFAULTS)
+    nivel_maximo.aplicar(filas_motor, config)
 
     motor: dict[tuple[str, str], dict] = {}
     for f in filas_motor:

@@ -27,7 +27,8 @@ type NavItem = {
   label: string;
   icon: typeof BarChart3;
   soloAdmin?: boolean;
-  /** Requiere permiso de calibracion (admin o autorizado de Abastecimiento). */
+  /** Requiere permiso de configuracion del modelo (admin o autorizado de
+   *  Abastecimiento). El permiso del backend sigue llamandose "calibracion". */
   soloCalibracion?: boolean;
   ocultarSoloLectura?: boolean;
 };
@@ -43,7 +44,7 @@ const NAV: NavItem[] = [
   { href: "/incidencias", label: "Incidencias", icon: AlertCircle },
   { href: "/auditoria", label: "Auditoría", icon: FileText },
   { href: "/modelo", label: "Modelo", icon: Sigma },
-  { href: "/calibracion", label: "Calibración", icon: SlidersHorizontal, soloCalibracion: true },
+  { href: "/configuracion", label: "Configuración", icon: SlidersHorizontal, soloCalibracion: true },
   { href: "/cargar", label: "Cargar datos", icon: Database, soloAdmin: true },
 ];
 

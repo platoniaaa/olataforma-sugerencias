@@ -27,6 +27,7 @@ export interface SugeridoRow {
   desv_std_mensual: number | null;
   stock_seguridad: number | null;
   punto_de_pedido: number | null;
+  nivel_maximo: number | null;
   costo_unitario: number | null;
   pedir: string | null;
   reemplazos: string | null;
@@ -585,12 +586,17 @@ export interface ConfigModeloPlano {
   transito_nacional_dias: number;
   transito_importado_dias: number;
   dias_habiles_mes: number;
+  reponer_a_maximo: boolean;
+  clases_que_reponen: ClasesQueReponen;
   abc_umbral_a_m6: number;
   abc_umbral_b_m6: number;
   abc_umbral_c_m6: number;
   abc_umbral_c_m3: number;
   abc_umbral_c_m12: number;
 }
+
+/** A que productos alcanza la reposicion al nivel maximo. */
+export type ClasesQueReponen = "AB" | "ABCD";
 
 /** Configuracion del modelo como la devuelve la API (Z en diccionarios). */
 export interface ConfigModelo {
@@ -606,6 +612,8 @@ export interface ConfigModelo {
   transito_nacional_dias: number;
   transito_importado_dias: number;
   dias_habiles_mes: number;
+  reponer_a_maximo: boolean;
+  clases_que_reponen: ClasesQueReponen;
   abc_umbral_a_m6: number;
   abc_umbral_b_m6: number;
   abc_umbral_c_m6: number;

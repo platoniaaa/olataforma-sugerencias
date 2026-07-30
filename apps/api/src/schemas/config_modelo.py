@@ -1,6 +1,8 @@
 """Schemas de la configuracion calibrable del modelo."""
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -25,6 +27,9 @@ class ConfigModeloUpdate(BaseModel):
     transito_importado_dias: int | None = Field(default=None, ge=1, le=730)
     # Modulo Demanda
     dias_habiles_mes: int | None = Field(default=None, ge=15, le=31)
+    # Modulo Reposicion al nivel maximo
+    reponer_a_maximo: bool | None = Field(default=None)
+    clases_que_reponen: Literal["AB", "ABCD"] | None = Field(default=None)
     # Modulo Clasificacion ABC
     abc_umbral_a_m6: int | None = Field(default=None, ge=1, le=6)
     abc_umbral_b_m6: int | None = Field(default=None, ge=0, le=6)

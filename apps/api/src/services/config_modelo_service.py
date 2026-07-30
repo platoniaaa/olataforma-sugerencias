@@ -29,6 +29,9 @@ DEFAULTS: dict = {
     "transito_nacional_dias": 30, "transito_importado_dias": 180,
     # Modulo Demanda
     "dias_habiles_mes": 22,
+    # Modulo Reposicion al nivel maximo
+    "reponer_a_maximo": True,
+    "clases_que_reponen": "AB",
     # Modulo Clasificacion ABC
     "abc_umbral_a_m6": 5, "abc_umbral_b_m6": 4, "abc_umbral_c_m6": 3,
     "abc_umbral_c_m3": 2, "abc_umbral_c_m12": 6,
@@ -48,6 +51,14 @@ _RANGOS: dict[str, tuple[float, float]] = {
     "dias_habiles_mes": (15, 31),
     "abc_umbral_a_m6": (1, 6), "abc_umbral_b_m6": (0, 6), "abc_umbral_c_m6": (0, 6),
     "abc_umbral_c_m3": (0, 3), "abc_umbral_c_m12": (0, 12),
+}
+
+# Parametros que no son numeros: se validan por lista de valores permitidos en vez
+# de por rango. Van aparte de `_RANGOS` para que la red de seguridad siga siendo
+# explicita —un parametro sin regla no se puede editar, caiga donde caiga—.
+_OPCIONES: dict[str, tuple] = {
+    "reponer_a_maximo": (True, False),
+    "clases_que_reponen": ("AB", "ABCD"),
 }
 
 _CAMPOS = list(DEFAULTS.keys())
@@ -78,6 +89,8 @@ def _a_dict(fila: ConfiguracionModelo | None) -> dict:
         "transito_nacional_dias": int(base["transito_nacional_dias"]),
         "transito_importado_dias": int(base["transito_importado_dias"]),
         "dias_habiles_mes": int(base["dias_habiles_mes"]),
+        "reponer_a_maximo": bool(base["reponer_a_maximo"]),
+        "clases_que_reponen": str(base["clases_que_reponen"] or "AB"),
         "abc_umbral_a_m6": int(base["abc_umbral_a_m6"]),
         "abc_umbral_b_m6": int(base["abc_umbral_b_m6"]),
         "abc_umbral_c_m6": int(base["abc_umbral_c_m6"]),
@@ -107,13 +120,17 @@ def actualizar(db: Session, cambios: dict, *, usuario: str | None, nota: str | N
 
     tocados: list[str] = []
     for campo, valor in cambios.items():
-        if campo not in _RANGOS:
+        if campo not in _RANGOS and campo not in _OPCIONES:
             raise ValueError(f"Parametro desconocido: {campo!r}")
         if valor is None:
             continue
-        lo, hi = _RANGOS[campo]
-        if not (lo <= valor <= hi):
-            raise ValueError(f"{campo} = {valor} fuera de rango [{lo}, {hi}]")
+        if campo in _RANGOS:
+            lo, hi = _RANGOS[campo]
+            if not (lo <= valor <= hi):
+                raise ValueError(f"{campo} = {valor} fuera de rango [{lo}, {hi}]")
+        elif valor not in _OPCIONES[campo]:
+            opciones = ", ".join(str(v) for v in _OPCIONES[campo])
+            raise ValueError(f"{campo} = {valor!r} no es un valor valido ({opciones})")
         if valor != valores[campo]:
             tocados.append(f"{campo}: {valores[campo]} -> {valor}")
         valores[campo] = valor

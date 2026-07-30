@@ -100,14 +100,29 @@ En criollo: productos importantes y de venta irregular llevan más colchón; los
 
 ## 7 · El sugerido de compra
 
-Con la demanda, el lead time y el colchón se calcula la necesidad y se descuenta lo que ya se tiene:
+Con la demanda, el lead time y el colchón se calcula el nivel que hay que mantener y se
+descuenta lo que ya se tiene:
 
-**Necesidad = Demanda diaria × (ciclo orden + lead time) + Stock seguridad − Stock actual − En tránsito**
+**Nivel máximo = Demanda diaria × (ciclo orden + lead time) + Stock seguridad**, redondeado
+**hacia arriba** a unidades enteras.
 
+**Sugerido = Nivel máximo − Stock actual − En tránsito** (nunca negativo).
+
+- **Nivel máximo:** las unidades que se busca tener. Es entero a propósito: "mi máximo son 2
+  unidades", no 1,42. Se muestra como columna para poder auditar el número —"tengo 1 de 2, por
+  eso pide 1"—.
 - **Stock actual:** lo disponible hoy en la sucursal (sumando el grupo de reemplazos, Curifor + Frontera).
 - **En tránsito:** las OC pendientes que ya vienen en camino (nacional de reposición hasta 30 días, importado hasta 180, frontera hasta 30).
-- **Sugerido:** esa necesidad (nunca negativa), pero solo se sugiere comprar en productos cuya clase que compra es A/B; los de baja clase quedan en 0.
-- **Punto de pedido = Demanda diaria × lead time + Stock seguridad.** Indica *cuándo* reponer (no cuánto).
+- **Se repone siempre hasta el máximo**, sin esperar a cruzar ningún umbral: si el máximo es 2 y
+  se vendió 1, al día siguiente se sugiere 1. Antes el faltante se redondeaba y todo lo que fuera
+  menos de media unidad quedaba en 0 —un SKU con máximo 1,42 y stock 1 no pedía nada—; eran
+  11.953 filas del snapshot de jul-2026, bajo su máximo y sugiriendo cero.
+- **A qué productos alcanza:** por defecto solo a los de clase que compra A/B (mirando la clase
+  local **o** la agregada). Se puede abrir a todas las clases desde Configuración, pero cuesta
+  unos $378 M en vez de $110 M: para una clase D el máximo teórico es una fracción de unidad y el
+  redondeo hacia arriba lo vuelve 1, así que en la práctica es "tener 1 unidad de todo".
+- **Punto de pedido = Demanda diaria × lead time + Stock seguridad.** Es solo informativo: indica
+  a partir de qué nivel el stock ya está justo. **No condiciona el sugerido.**
 - **Pedir:** la fila queda "Sí" cuando el sugerido es mayor que 0.
 
 ## 8 · Distribución desde el CD y traslados
@@ -136,6 +151,7 @@ Sobre el cálculo del modelo, la plataforma aplica algunos ajustes de sentido co
 - **Escalar winsorización (k):** 3 — qué tan estricto es el recorte de meses pico (antes 1).
 - **Días hábiles por mes:** 22 — divisor para pasar de demanda mensual a diaria.
 - **Ciclo de orden:** 5 días (directo y vía CD) — días de cobertura extra que se agregan al pedir.
+- **Reposición al nivel máximo:** activada, clases A/B — si el SKU está bajo su máximo se repone entero, sin umbral.
 - **Lead time por defecto:** 8 días — cuando no hay proveedor ni historial de OC.
 - **Lead time CD → sucursal:** 1 (RM) / 2 (resto) — días de traslado del CD a la sucursal.
 - **Vigencia de tránsito:** 30 d nacional / 180 d importado — ventana para contar una OC como "en camino".

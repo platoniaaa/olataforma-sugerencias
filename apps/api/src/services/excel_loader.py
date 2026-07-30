@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..models import DimProducto, DimSucursal, Sugerido
+from . import config_modelo_service, nivel_maximo
 
 settings = get_settings()
 
@@ -332,6 +333,27 @@ def persistir_filas(
             "anterior. Si la baja es real, ajustar SYNC_MIN_RATIO_FILAS."
         )
 
+    # Reposicion al nivel maximo: unico punto donde se aplica. Va aca y no al leer
+    # porque los KPIs, el Excel, los carros y el chat suman `total_sugerido_suc` en
+    # SQL; recalcular en Python al mostrar dejaria las tarjetas peleadas con la
+    # tabla. Aplicandolo antes del INSERT, todo lo de aguas abajo cuadra solo.
+    # Si la configuracion no se puede leer (tabla nueva, despliegue a medias) se
+    # usan los defaults: la carga diaria no puede caerse por esto.
+    try:
+        config = config_modelo_service.vigente(db)
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        config = dict(config_modelo_service.DEFAULTS)
+    reposicion = nivel_maximo.aplicar(registros_sugerido, config)
+    if reposicion["filas_nuevas"] or reposicion["filas_que_suben"]:
+        advertencias.append(
+            f"Reposicion al nivel maximo (clases {reposicion['clases']}): "
+            f"{reposicion['filas_nuevas']} fila(s) que no pedian nada y "
+            f"{reposicion['filas_que_suben']} que ya pedian suben, "
+            f"+{reposicion['unidades_extra']:,.0f} unidades "
+            f"(${reposicion['clp_extra']:,.0f})."
+        )
+
     # Inserts en multi-fila (un INSERT con muchas VALUES por lote). Con pg8000 esto es
     # MUCHO mas rapido que executemany (que iria fila por fila por la red). chunk=500
     # mantiene los parametros por debajo del limite de Postgres (~65k).
@@ -387,6 +409,7 @@ def persistir_filas(
         "sucursales": len(sucursales_vistas),
         "columnas_detectadas": detectadas,
         "advertencias": advertencias,
+        "reposicion_maximo": reposicion,
     }
 
 

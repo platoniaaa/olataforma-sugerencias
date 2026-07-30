@@ -53,9 +53,29 @@ def simular(
     ciclo_orden_dias_cd: int = CICLO_ORDEN_DIAS_CD,
     z_por_clase: dict[str, float] | None = None,
     factor_lead_time: float = 1.0,
+    reponer_a_maximo: bool | None = None,
+    clases_que_reponen: str | None = None,
 ) -> dict:
-    """Recalcula el sugerido con otros parametros y compara contra el vigente."""
+    """Recalcula el sugerido con otros parametros y compara contra el vigente.
+
+    `reponer_a_maximo` y `clases_que_reponen` no son perillas del simulador: se
+    leen de la configuracion vigente para que la simulacion parta del mismo
+    modelo que produjo el sugerido que se esta comparando. Se aceptan como
+    argumento solo para que los tests puedan fijarlos.
+    """
+    from . import config_modelo_service
     from .sugerido_service import _apply_filters
+
+    if reponer_a_maximo is None or clases_que_reponen is None:
+        try:
+            cfg = config_modelo_service.vigente(db)
+        except Exception:  # noqa: BLE001
+            db.rollback()
+            cfg = dict(config_modelo_service.DEFAULTS)
+        if reponer_a_maximo is None:
+            reponer_a_maximo = bool(cfg["reponer_a_maximo"])
+        if clases_que_reponen is None:
+            clases_que_reponen = str(cfg["clases_que_reponen"])
 
     z_por_clase = z_por_clase or dict(Z_POR_CLASE)
     filtros = f.model_copy(update={"solo_pedir": False})
@@ -102,14 +122,23 @@ def simular(
             ss = _round_com(z * sigma * math.sqrt(max(proteccion, 0)))
 
         # Sugerido: demanda del periodo protegido + SS - lo que ya hay.
-        if (r.clasificacion_abc or "") in CLASES_COMPRA or (
+        clase_compra = (r.clasificacion_abc or "") in CLASES_COMPRA or (
             r.clasificacion_abc_agregada or ""
-        ) in CLASES_COMPRA:
-            bruto = (r.demanda_diaria or 0) * (co + lt) + ss
-            neto = bruto - (r.stock_activo_suc or 0) - (r.stock_en_transito_suc or 0)
-            nuevo = max(_round_com(neto), 0)
+        ) in CLASES_COMPRA
+        cubierto = (r.stock_activo_suc or 0) + (r.stock_en_transito_suc or 0)
+        bruto = (r.demanda_diaria or 0) * (co + lt) + ss
+        if clase_compra:
+            nuevo = max(_round_com(bruto - cubierto), 0)
         else:
             nuevo = 0
+        # Reposicion al nivel maximo: el mismo piso que aplica la carga
+        # (`services/nivel_maximo.py`). Sin esto el simulador daria menos que el
+        # sugerido vigente aun sin mover ningun parametro, que es justo lo que su
+        # test de identidad verifica que no pase.
+        if reponer_a_maximo and (r.demanda_diaria or 0) > 0:
+            aplica = clase_compra if clases_que_reponen == "AB" else True
+            if aplica:
+                nuevo = max(nuevo, max(math.ceil(bruto) - cubierto, 0))
 
         vigente = r.total_sugerido_suc or 0
         costo = r.costo_unitario or 0

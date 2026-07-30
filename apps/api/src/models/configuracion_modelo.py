@@ -13,7 +13,7 @@ inserta una copia de una version vieja), y queda registrado quien y cuando.
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
@@ -63,6 +63,18 @@ class ConfiguracionModelo(Base):
 
     # --- Modulo Demanda ---
     dias_habiles_mes: Mapped[int] = mapped_column(Integer, nullable=False, default=22)
+
+    # --- Modulo Reposicion al nivel maximo ---
+    # Con esto encendido, un SKU bajo su nivel maximo se repone SIEMPRE hasta el
+    # maximo, sin esperar ningun umbral. Antes el faltante se redondeaba y todo lo
+    # que fuera menos de media unidad quedaba en cero: un SKU con maximo 1,42 y
+    # stock 1 no pedia nada (11.953 filas del snapshot de jul-2026 estaban asi).
+    reponer_a_maximo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Que clases entran en la regla: "AB" (solo las de rotacion) o "ABCD" (todas).
+    # Con "ABCD" se pide 1 unidad de practicamente todo SKU con stock cero, porque
+    # para una clase D el maximo teorico es una fraccion de unidad: son ~12.300
+    # filas y >$378M en vez de ~1.700 y $110M. Por eso el default es "AB".
+    clases_que_reponen: Mapped[str] = mapped_column(String, nullable=False, default="AB")
 
     # --- Modulo Clasificacion ABC (meses CON venta que definen cada clase) ---
     abc_umbral_a_m6: Mapped[int] = mapped_column(Integer, nullable=False, default=5)

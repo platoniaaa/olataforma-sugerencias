@@ -56,6 +56,11 @@ class Sugerido(Base):
     desv_std_mensual: Mapped[float | None] = mapped_column(Float, nullable=True)
     stock_seguridad: Mapped[int | None] = mapped_column(Integer, nullable=True)
     punto_de_pedido: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Nivel al que se repone: CEILING(demanda diaria x (ciclo + LT) + stock seguridad).
+    # Entero a proposito: es "cuantas unidades quiero tener", y el comprador tiene que
+    # poder leer "mi maximo es 2, tengo 1, por eso pide 1". Lo calcula la plataforma en
+    # la carga (`services/nivel_maximo.py`), no viene en el archivo del motor.
+    nivel_maximo: Mapped[int | None] = mapped_column(Integer, nullable=True)
     costo_unitario: Mapped[float | None] = mapped_column(Float, nullable=True)
     pedir: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     reemplazos: Mapped[str | None] = mapped_column(String, nullable=True)

@@ -39,6 +39,7 @@ class SugeridoRow(BaseModel):
     desv_std_mensual: float | None = None
     stock_seguridad: int | None = None
     punto_de_pedido: int | None = None
+    nivel_maximo: int | None = None
     costo_unitario: float | None = None
     pedir: str | None = None
     reemplazos: str | None = None

@@ -1,16 +1,16 @@
 "use client";
 
-// Calibracion del modelo, por modulos: cada seccion cubre un aspecto del modelo
-// (lead time, stock de seguridad, demanda) con sus perillas. Edita, mira el
-// impacto y aplica; el motor usa los valores en su proxima corrida. Solo admin.
+// Configuracion del modelo, por modulos: cada seccion cubre un aspecto del modelo
+// (lead time, stock de seguridad, demanda, reposicion) con sus perillas. Edita,
+// mira el impacto y aplica; el motor usa los valores en su proxima corrida.
 import { useEffect, useState } from "react";
 import {
-  SlidersHorizontal, Play, Save, RotateCcw, Truck, Shield, TrendingUp, History, Search, Tags,
+  SlidersHorizontal, Play, Save, RotateCcw, Target, Truck, Shield, TrendingUp, History, Search, Tags,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { formatoCLPCorto, formatoNumero } from "@/lib/formato";
 import type {
-  ConfigModelo, ConfigModeloPlano, LeadTimeResponse, SimulacionResultado,
+  ClasesQueReponen, ConfigModelo, ConfigModeloPlano, LeadTimeResponse, SimulacionResultado,
 } from "@/lib/types";
 
 // Nivel de servicio (una cola de la normal) a partir de Z, para mostrar "≈ 95%".
@@ -77,6 +77,8 @@ function aPlano(c: ConfigModelo): ConfigModeloPlano {
     transito_nacional_dias: c.transito_nacional_dias,
     transito_importado_dias: c.transito_importado_dias,
     dias_habiles_mes: c.dias_habiles_mes,
+    reponer_a_maximo: c.reponer_a_maximo,
+    clases_que_reponen: c.clases_que_reponen,
     abc_umbral_a_m6: c.abc_umbral_a_m6,
     abc_umbral_b_m6: c.abc_umbral_b_m6,
     abc_umbral_c_m6: c.abc_umbral_c_m6,
@@ -85,7 +87,7 @@ function aPlano(c: ConfigModelo): ConfigModeloPlano {
   };
 }
 
-export default function CalibracionPage() {
+export default function ConfiguracionPage() {
   const [vigente, setVigente] = useState<ConfigModelo | null>(null);
   const [ed, setEd] = useState<ConfigModeloPlano | null>(null);
   const [nota, setNota] = useState("");
@@ -106,7 +108,7 @@ export default function CalibracionPage() {
       // oculta la seccion, pero se puede llegar escribiendo la URL.
       setError(
         msg.includes("403")
-          ? "No tienes permiso para calibrar el modelo. Pídeselo a un administrador."
+          ? "No tienes permiso para configurar el modelo. Pídeselo a un administrador."
           : msg || "No se pudo cargar la configuración"
       );
     }
@@ -120,7 +122,7 @@ export default function CalibracionPage() {
     return <p className="text-slate-500">{error ?? "Cargando…"}</p>;
   }
 
-  const set = (k: keyof ConfigModeloPlano, v: number) => {
+  const set = <K extends keyof ConfigModeloPlano>(k: K, v: ConfigModeloPlano[K]) => {
     setEd({ ...ed, [k]: v });
     setImpacto(null);
     setMsg(null);
@@ -129,9 +131,13 @@ export default function CalibracionPage() {
   const cambios = (): Partial<ConfigModeloPlano> => {
     const base = aPlano(vigente);
     const out: Partial<ConfigModeloPlano> = {};
-    (Object.keys(ed) as (keyof ConfigModeloPlano)[]).forEach((k) => {
+    // Copia por clave dentro de un generico: los valores ya no son todos number
+    // (hay un boolean y un string), y sin acotar K a una sola clave TypeScript no
+    // puede casar el tipo de origen con el de destino.
+    const copiarSiCambio = <K extends keyof ConfigModeloPlano>(k: K) => {
       if (ed[k] !== base[k]) out[k] = ed[k];
-    });
+    };
+    (Object.keys(ed) as (keyof ConfigModeloPlano)[]).forEach(copiarSiCambio);
     return out;
   };
   const hayCambios = Object.keys(cambios()).length > 0;
@@ -190,7 +196,7 @@ export default function CalibracionPage() {
     <div className="space-y-5">
       <div>
         <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight text-slate-900">
-          <SlidersHorizontal size={20} /> Calibración del modelo
+          <SlidersHorizontal size={20} /> Configuración del modelo
         </h1>
         <p className="text-[13px] text-slate-500">
           Ajusta los parámetros del sugerido, por módulo. Los cambios se aplican en la próxima
@@ -230,6 +236,48 @@ export default function CalibracionPage() {
           <Campo label="Clase B" min={0} max={3.5} step={0.001} value={ed.z_imp_cd_b}
             onChange={(v) => set("z_imp_cd_b", v)} hint={nivelServicio(ed.z_imp_cd_b)} />
         </Grupo>
+      </Modulo>
+
+      {/* MÓDULO · Reposición al nivel máximo */}
+      <Modulo icon={Target} titulo="Reposición al nivel máximo"
+        subtitulo="Si un producto está bajo su nivel máximo, se repone hasta el máximo sin esperar ningún umbral.">
+        <label className="flex cursor-pointer items-start gap-2.5">
+          <input type="checkbox" checked={ed.reponer_a_maximo}
+            onChange={(e) => set("reponer_a_maximo", e.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-brand" />
+          <span className="text-[13px] text-slate-700">
+            <strong>Reponer siempre hasta el nivel máximo.</strong>
+            <span className="mt-0.5 block text-[12px] text-slate-500">
+              El nivel máximo es <em>demanda diaria × (ciclo de orden + lead time) + stock de
+              seguridad</em>, redondeado hacia arriba a unidades enteras. Si el máximo es 2 y hay 1,
+              se sugiere 1. Apagado, el faltante se redondea y todo lo que sea menos de media unidad
+              queda en cero.
+            </span>
+          </span>
+        </label>
+        <Grupo titulo="¿A qué productos se les aplica?">
+          <label className="block">
+            <select value={ed.clases_que_reponen} disabled={!ed.reponer_a_maximo}
+              onChange={(e) => set("clases_que_reponen", e.target.value as ClasesQueReponen)}
+              className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-[13px] disabled:bg-slate-50 disabled:text-slate-400">
+              <option value="AB">Solo clases A y B (rotación)</option>
+              <option value="ABCD">Todas las clases (A, B, C y D)</option>
+            </select>
+            <span className="mt-1 block text-[11.5px] text-slate-500">
+              Cuenta la clase de la sucursal <em>o</em> la de la empresa: un repuesto que rota poco
+              acá pero harto a nivel empresa entra igual.
+            </span>
+          </label>
+        </Grupo>
+        {ed.clases_que_reponen === "ABCD" && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+            Con todas las clases se sugiere comprar ~12.300 líneas más (unos $378 M) en vez de ~1.700
+            ($110 M). El motivo: para una clase D el nivel máximo teórico es una fracción de unidad y
+            el redondeo hacia arriba lo convierte en 1, así que en la práctica es{" "}
+            <strong>tener una unidad de casi todo lo que hoy está en cero</strong>, no reponer a un
+            máximo. Revisa el impacto antes de aplicarlo.
+          </div>
+        )}
       </Modulo>
 
       {/* MÓDULO · Lead time */}

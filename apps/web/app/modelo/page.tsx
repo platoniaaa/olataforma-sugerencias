@@ -271,15 +271,22 @@ export default function ModeloPage() {
           </Section>
 
           <Section id="sugerido" titulo="7 · El sugerido de compra">
-            <P>Con la demanda, el lead time y el colchón se calcula la necesidad y se descuenta lo que ya se tiene:</P>
+            <P>
+              Con la demanda, el lead time y el colchón se calcula el nivel que hay que mantener y se
+              descuenta lo que ya se tiene:
+            </P>
             <Formula>
-              Necesidad = Demanda diaria × (ciclo orden + lead time) + Stock seguridad − Stock actual − En tránsito
+              Nivel máximo = Demanda diaria × (ciclo orden + lead time) + Stock seguridad
+              <span className="block text-ink-500">(redondeado hacia arriba a unidades enteras)</span>
             </Formula>
+            <Formula>Sugerido = Nivel máximo − Stock actual − En tránsito</Formula>
             <ul className="max-w-3xl space-y-2 text-[14px] text-ink-700">
+              <Bullet><strong>Nivel máximo:</strong> las unidades que se busca tener. Es entero a propósito: “mi máximo son 2 unidades”, no 1,42. Está como columna en la grilla para poder auditar el número: “tengo 1 de 2, por eso pide 1”.</Bullet>
               <Bullet><strong>Stock actual:</strong> lo disponible hoy en la sucursal (sumando el grupo de reemplazos, Curifor + Frontera).</Bullet>
               <Bullet><strong>En tránsito:</strong> las OC pendientes que ya vienen en camino (nacional de reposición hasta 30 días, importado hasta 180, frontera hasta 30).</Bullet>
-              <Bullet><strong>Sugerido:</strong> esa necesidad (nunca negativa), pero solo se sugiere comprar en productos cuya clase que compra es A/B; los de baja clase quedan en 0.</Bullet>
-              <Bullet><strong>Punto de pedido = Demanda diaria × lead time + Stock seguridad.</strong> Indica <em>cuándo</em> reponer (no cuánto).</Bullet>
+              <Bullet><strong>Se repone siempre hasta el máximo</strong>, sin esperar a cruzar ningún umbral: si el máximo es 2 y se vendió 1, al día siguiente se sugiere 1. Antes el faltante se redondeaba y todo lo que fuera menos de media unidad quedaba en 0 (un SKU con máximo 1,42 y stock 1 no pedía nada).</Bullet>
+              <Bullet><strong>A qué productos alcanza:</strong> por defecto a los de clase que compra A/B, mirando la clase local <em>o</em> la agregada. Se puede abrir a todas las clases desde Configuración.</Bullet>
+              <Bullet><strong>Punto de pedido = Demanda diaria × lead time + Stock seguridad.</strong> Es solo informativo: indica a partir de qué nivel el stock ya está justo. <em>No condiciona el sugerido.</em></Bullet>
               <Bullet><strong>Pedir:</strong> la fila queda “Sí” cuando el sugerido es mayor que 0.</Bullet>
             </ul>
           </Section>
@@ -330,6 +337,7 @@ export default function ModeloPage() {
                 ["Escalar winsorización (k)", "3", "Qué tan estricto es el recorte de meses pico (antes 1)."],
                 ["Días hábiles por mes", "22", "Divisor para pasar de demanda mensual a diaria."],
                 ["Ciclo de orden", "5 días (directo y vía CD)", "Días de cobertura extra que se agregan al pedir."],
+                ["Reposición al nivel máximo", "Activada · clases A/B", "Si el SKU está bajo su máximo se repone entero, sin esperar umbral."],
                 ["Lead time por defecto", "8 días", "Cuando no hay proveedor ni historial de OC."],
                 ["Lead time CD → sucursal", "1 (RM) / 2 (resto)", "Días de traslado del CD a la sucursal."],
                 ["Vigencia de tránsito", "30 d nacional / 180 d importado", "Ventana para contar una OC como “en camino”."],

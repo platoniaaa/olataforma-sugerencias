@@ -43,6 +43,7 @@ LABELS: dict[str, str] = {
     "desv_std_mensual": "Desv Std Mensual",
     "stock_seguridad": "Stock Seguridad",
     "punto_de_pedido": "Punto de Pedido",
+    "nivel_maximo": "Nivel Maximo",
     "costo_unitario": "Costo Unitario",
     "pedir": "Pedir",
     "stock_activo_suc": "Stock Activo",
@@ -117,7 +118,7 @@ CLP_COLUMNS = {
 UNIDADES_COLUMNS = {
     "total_sugerido_suc", "sugerido_suc", "sugerido_compra_neto", "sugerido_traslado",
     "stock_activo_suc", "stock_en_transito_suc", "stock_en_cd", "unidades_pedidas",
-    "stock_seguridad", "punto_de_pedido",
+    "stock_seguridad", "punto_de_pedido", "nivel_maximo",
     "stock_linderos", "stock_curico", "stock_talca", "stock_rancagua",
     "stock_diez_de_julio_2", "stock_chillan", "stock_cd_repuestos", "stock_brasil_18",
     "stock_placilla", "stock_chillan_viejo", "stock_talca_2",

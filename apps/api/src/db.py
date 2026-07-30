@@ -126,6 +126,10 @@ def create_all() -> None:
         "ALTER TABLE configuracion_modelo ADD COLUMN IF NOT EXISTS abc_umbral_c_m6 INTEGER NOT NULL DEFAULT 3",
         "ALTER TABLE configuracion_modelo ADD COLUMN IF NOT EXISTS abc_umbral_c_m3 INTEGER NOT NULL DEFAULT 2",
         "ALTER TABLE configuracion_modelo ADD COLUMN IF NOT EXISTS abc_umbral_c_m12 INTEGER NOT NULL DEFAULT 6",
+        # 2026-07: reposicion al nivel maximo (el faltante ya no se redondea a cero).
+        "ALTER TABLE configuracion_modelo ADD COLUMN IF NOT EXISTS reponer_a_maximo BOOLEAN NOT NULL DEFAULT TRUE",
+        "ALTER TABLE configuracion_modelo ADD COLUMN IF NOT EXISTS clases_que_reponen VARCHAR NOT NULL DEFAULT 'AB'",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS nivel_maximo INTEGER",
     ]
     # SQLite NO soporta "ADD COLUMN IF NOT EXISTS" (error de sintaxis que se
     # tragaba el try, dejando bases locales viejas sin las columnas nuevas):
