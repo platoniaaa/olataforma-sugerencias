@@ -63,6 +63,24 @@ def _n(x: float) -> str:
     return f"{x:.0f}" if float(x).is_integer() else f"{x:.1f}"
 
 
+def _validar_producto(db: Session, producto: str) -> None:
+    """Rechaza codigos que no existen ni en el sugerido ni en el catalogo maestro.
+
+    El campo Producto del modal es texto libre (el autocomplete es una ayuda, no una
+    obligacion), asi que un codigo mal tipeado se guardaba igual. Despues no hay de
+    donde sacar descripcion, costo ni proveedor: la fila aparece entera en blanco en
+    la grilla y en el Excel, y no hay forma de saber que producto era. Mejor no
+    dejarla entrar."""
+    if not sugerido_service.producto_existe(db, producto):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"El codigo '{producto}' no existe en el catalogo ni en el sugerido. "
+                "Revisalo y eligelo de la lista que aparece al escribir."
+            ),
+        )
+
+
 def _desglose(d: dict) -> str:
     """Texto con las partes que cubren el nivel, omitiendo las que estan en cero.
 
@@ -145,6 +163,7 @@ def crear(
     db: Session = Depends(get_db),
     email: str = Depends(requiere_escritura),
 ):
+    _validar_producto(db, payload.producto)
     if payload.dias_inventario:
         d = sugerido_service.detalle_dias(
             db, payload.producto, payload.sucursal_id, payload.dias_inventario
@@ -321,6 +340,10 @@ def crear_recurrente(
     """Crea una regla recurrente y la aplica de inmediato (primera instancia)."""
     if payload.modo == "individual" and not (payload.producto and payload.sucursal_id):
         raise HTTPException(status_code=400, detail="Falta producto o sucursal.")
+    if payload.modo == "individual":
+        # Una recurrente crea una manual nueva cada N dias: un codigo invalido aca
+        # fabricaria una fila en blanco por ciclo, para siempre.
+        _validar_producto(db, payload.producto)
     if not payload.unidades and not payload.dias_inventario and not payload.stock_objetivo:
         raise HTTPException(
             status_code=400, detail="Falta unidades, dias_inventario o stock_objetivo."

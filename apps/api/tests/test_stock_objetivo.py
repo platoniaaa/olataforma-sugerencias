@@ -60,9 +60,10 @@ def test_nivel_ya_cubierto_no_crea_nada(client, db_session):
     assert "ya esta cubierto" in r.json()["detail"]
 
 
-def test_producto_fuera_del_sugerido_se_acepta(client):
+def test_producto_fuera_del_sugerido_se_acepta(client, en_catalogo):
     """Antes se rechazaba; es justo el caso donde mas se usa el modo (productos
     que el sistema no pide). Detalle completo en test_objetivo_sin_sugerido.py."""
+    en_catalogo("NO-ESTA-EN-SUGERIDO")
     r = client.post("/api/sugerencias-manuales", json={
         "producto": "NO-ESTA-EN-SUGERIDO", "sucursal_id": "LINDEROS", "stock_objetivo": 20,
     })
@@ -118,7 +119,8 @@ def test_recurrente_recalcula_contra_el_stock_del_momento(client, db_session):
     assert inst2.unidades == 7
 
 
-def test_recurrente_guarda_el_objetivo(client, db_session):
+def test_recurrente_guarda_el_objetivo(client, db_session, en_catalogo):
+    en_catalogo("REC-2")
     r = client.post("/api/sugerencias-manuales/recurrentes", json={
         "modo": "individual", "producto": "REC-2", "sucursal_id": "LINDEROS",
         "stock_objetivo": 15, "cada_dias": 7,

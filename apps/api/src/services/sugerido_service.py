@@ -436,9 +436,11 @@ def _stock_de_pares(db: Session, pares: set[tuple[str, str]]) -> dict[tuple[str,
     return {(p, s): float(t or 0) for p, s, t in filas}
 
 
-# Descripcion de reemplazo cuando la manual apunta a un codigo que ya no esta en el
-# catalogo maestro. Sin esto la fila sale entera en blanco y parece un bug de la
-# grilla, cuando el problema es el codigo.
+# Descripcion de reemplazo cuando el codigo no aparece en NINGUNA fuente (sugerido de
+# otra sucursal, dim_producto, catalogo). Sin esto la fila sale entera en blanco y
+# parece un bug de la grilla, cuando el problema es el codigo. Se aplica al final de
+# `_completar_filas_sinteticas`, no al construir la fila: puesto antes taparia la
+# descripcion real que el enriquecimiento si encuentra.
 SIN_CATALOGO = "(codigo no encontrado en el catalogo)"
 
 
@@ -461,7 +463,7 @@ def _fila_sintetica_manual(
         "id": -abs(hash((producto, sucursal_id))) % (10**9),
         "origen": origen,
         "producto": producto,
-        "descripcion": cat.glosa if cat else SIN_CATALOGO,
+        "descripcion": cat.glosa if cat else None,
         "sucursal_id": sucursal_id,
         "nombre_sucursal": sucursal_id,
         "empresa": None,
@@ -906,6 +908,13 @@ def _completar_filas_sinteticas(items: list[dict], db: Session) -> None:
             fila["total_valor_sugerido_clp"] = (
                 float(fila.get("total_sugerido_suc") or 0) * float(fila["costo_unitario"])
             )
+
+        # Ultimo recurso: ninguna de las cuatro fuentes conoce el codigo. Decirlo es
+        # mejor que dejar la celda vacia, que se lee como un error de la grilla
+        # cuando en realidad el codigo no existe (paso con `74 1324409TBW0000`,
+        # tipeado a mano antes de que el alta lo validara).
+        if fila.get("descripcion") is None:
+            fila["descripcion"] = SIN_CATALOGO
 
 
 def _enriquecer_con_catalogo(items: list[dict], db: Session) -> None:

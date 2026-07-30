@@ -16,8 +16,9 @@ def _stock(db_session, producto, sucursal_id, cantidad):
     db_session.commit()
 
 
-def test_producto_fuera_del_sugerido_pide_el_nivel_completo(client, db_session):
+def test_producto_fuera_del_sugerido_pide_el_nivel_completo(client, db_session, en_catalogo):
     """Sin stock ni sugerido: se pide todo el nivel."""
+    en_catalogo("83 1025100GH20A")
     r = client.post("/api/sugerencias-manuales", json={
         "producto": "83 1025100GH20A", "sucursal_id": "CD REPUESTOS",
         "stock_objetivo": 3, "motivo": "Campana movil",
@@ -60,8 +61,9 @@ def test_nivel_ya_cubierto_en_bodega_sigue_avisando(client, db_session):
     assert r.status_code == 409
 
 
-def test_la_sugerencia_aparece_en_el_listado_sin_buscarla(client, db_session):
+def test_la_sugerencia_aparece_en_el_listado_sin_buscarla(client, db_session, en_catalogo):
     """Si no se ve en la grilla, se compra a ciegas: tiene que salir en la pagina 1."""
+    en_catalogo("FUERA-1")
     client.post("/api/sugerencias-manuales", json={
         "producto": "FUERA-1", "sucursal_id": "CD REPUESTOS", "stock_objetivo": 4,
     })
@@ -72,8 +74,9 @@ def test_la_sugerencia_aparece_en_el_listado_sin_buscarla(client, db_session):
     assert fila["origen"] == "manual"
 
 
-def test_no_se_repite_en_cada_pagina(client, db_session):
+def test_no_se_repite_en_cada_pagina(client, db_session, en_catalogo):
     """Se agrega despues de paginar: si no se acotara a la pagina 1, saldria N veces."""
+    en_catalogo("FUERA-2")
     for i in range(3):
         db_session.add(Sugerido(
             tenant_id="curifor", producto=f"P-PAG-{i}", sucursal_id="LINDEROS",
@@ -88,9 +91,11 @@ def test_no_se_repite_en_cada_pagina(client, db_session):
     assert not any(i["producto"] == "FUERA-2" for i in pagina2)
 
 
-def test_respeta_el_acceso_por_sucursal(client, db_session):
+def test_respeta_el_acceso_por_sucursal(client, db_session, en_catalogo):
     """Un usuario restringido no puede ver manuales de sucursales ajenas."""
     import json
+
+    en_catalogo("AJENA-1")
 
     from src.main import app
     from src.models import Usuario
@@ -113,11 +118,12 @@ def test_respeta_el_acceso_por_sucursal(client, db_session):
         app.dependency_overrides[requiere_auth] = lambda: "test@curifor.com"
 
 
-def test_llega_al_excel_exportado(client, db_session):
+def test_llega_al_excel_exportado(client, db_session, en_catalogo):
     import io
 
     import openpyxl
 
+    en_catalogo("FUERA-XLS")
     client.post("/api/sugerencias-manuales", json={
         "producto": "FUERA-XLS", "sucursal_id": "CD REPUESTOS", "stock_objetivo": 6,
     })
@@ -130,8 +136,9 @@ def test_llega_al_excel_exportado(client, db_session):
     assert "FUERA-XLS" in productos
 
 
-def test_recurrente_sobre_producto_fuera_del_sugerido(client, db_session):
+def test_recurrente_sobre_producto_fuera_del_sugerido(client, db_session, en_catalogo):
     """El caso completo de la jefa: mantener 3 u y que se mantenga solo."""
+    en_catalogo("REC-FUERA")
     r = client.post("/api/sugerencias-manuales/recurrentes", json={
         "modo": "individual", "producto": "REC-FUERA", "sucursal_id": "CD REPUESTOS",
         "stock_objetivo": 3, "cada_dias": 7, "motivo": "Campana movil",

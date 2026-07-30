@@ -21,6 +21,7 @@ from src.main import app  # noqa: E402
 from src.models import (  # noqa: E402
     DimProducto,
     DimSucursal,
+    ProductoCatalogo,
     Sugerido,
     Usuario,
     VentaHistorica,
@@ -76,6 +77,26 @@ def _seed(session):
             periodo=mes, cantidad=cant,
         ))
     session.commit()
+
+
+@pytest.fixture()
+def en_catalogo(db_session):
+    """Registra un codigo en el maestro de productos.
+
+    Desde jul-2026 una sugerencia manual exige que el codigo exista en alguna fuente
+    (sugerido, catalogo o stock): un codigo tipeado a mano que no existe en ninguna
+    parte producia una fila entera en blanco en la grilla y en el Excel. Los tests que
+    prueban "producto que el sistema NO sugiere" tienen que darle al codigo la
+    existencia que en produccion le da el maestro (409k productos)."""
+
+    def _registrar(producto: str, glosa: str | None = None, costo: float | None = None):
+        db_session.add(ProductoCatalogo(
+            tenant_id="curifor", producto=producto,
+            glosa=glosa or f"Producto {producto}", costo=costo,
+        ))
+        db_session.commit()
+
+    return _registrar
 
 
 @pytest.fixture()
