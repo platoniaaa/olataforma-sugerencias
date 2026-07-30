@@ -13,6 +13,12 @@ interface DialogProps {
   className?: string;
 }
 
+// Diálogos abiertos, en orden de apertura. Con un diálogo dentro de otro (ej. la
+// confirmación de "sin fecha límite" sobre el modal de sugerencia manual) los dos
+// escuchan Escape en document: sin esta pila, una sola tecla cerraría ambos y el
+// usuario perdería el formulario que estaba llenando. Solo responde el de más arriba.
+const abiertos: string[] = [];
+
 /** Modal accesible minimo: overlay + panel centrado, cierra con Escape o backdrop. */
 export function Dialog({
   open,
@@ -22,12 +28,21 @@ export function Dialog({
   children,
   className,
 }: DialogProps) {
+  const id = React.useId();
+
   React.useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    abiertos.push(id);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && abiertos[abiertos.length - 1] === id) onClose();
+    };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      const i = abiertos.lastIndexOf(id);
+      if (i >= 0) abiertos.splice(i, 1);
+    };
+  }, [open, onClose, id]);
 
   if (!open) return null;
 

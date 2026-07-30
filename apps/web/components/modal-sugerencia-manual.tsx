@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Boxes, Layers, Package, Repeat, TriangleAlert } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -61,11 +61,18 @@ export function ModalSugerenciaManual({
   const [motivo, setMotivo] = useState("");
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Confirmación de "esto no vence nunca" antes de guardar sin fecha límite.
+  const [confirmarSinFecha, setConfirmarSinFecha] = useState(false);
+  const refFechaLimite = useRef<HTMLInputElement>(null);
 
   // Individual
   const [producto, setProducto] = useState("");
   const [sucursal, setSucursal] = useState("");
   const [sugerencias, setSugerencias] = useState<Producto[]>([]);
+  // El codigo escrito no aparece en ningun catalogo. Avisar mientras se escribe:
+  // guardarlo termina en una fila sin descripcion, proveedor ni costo (el backend
+  // lo rechaza, pero es mejor decirlo antes que al apretar Guardar).
+  const [codigoDesconocido, setCodigoDesconocido] = useState(false);
 
   // Grupo
   const [gSucursales, setGSucursales] = useState<string[]>([]);
@@ -108,8 +115,10 @@ export function ModalSugerenciaManual({
       setFechaLimite("");
       setMotivo("");
       setError(null);
+      setConfirmarSinFecha(false);
       setProducto(productoInicial ?? "");
       setSucursal(sucursalInicial ?? "");
+      setCodigoDesconocido(false);
       setGSucursales([]);
       setGProveedores([]);
       setGAbc([]);
@@ -125,14 +134,21 @@ export function ModalSugerenciaManual({
   useEffect(() => {
     if (modo !== "individual" || !producto || producto === productoInicial) {
       setSugerencias([]);
+      setCodigoDesconocido(false);
       return;
     }
     const t = setTimeout(async () => {
       try {
         const r = await api.productos(producto);
         setSugerencias(r.items.slice(0, 6));
+        // Ni una coincidencia parcial. Mientras se escribe un codigo valido siempre
+        // hay alguna, asi que cero resultados es señal de codigo inexistente y no
+        // ruido de tipeo.
+        setCodigoDesconocido(r.items.length === 0);
       } catch {
+        // Sin respuesta del servidor no se puede afirmar que el codigo no existe.
         setSugerencias([]);
+        setCodigoDesconocido(false);
       }
     }, 250);
     return () => clearTimeout(t);
@@ -194,19 +210,29 @@ export function ModalSugerenciaManual({
     return () => clearTimeout(t);
   }, [open, modo, filtrosModo]);
 
-  const guardar = async () => {
+  /** Primer problema del formulario, o null si está listo para guardar. */
+  const validar = (): string | null => {
+    const n = parseInt(cantidad, 10);
+    if (!n || n <= 0)
+      return tipoCantidad === "dias"
+        ? "Ingresa los días de inventario (entero positivo)."
+        : tipoCantidad === "objetivo"
+          ? "Ingresa el nivel de stock a mantener (entero positivo)."
+          : "Ingresa una cantidad de unidades (entero positivo).";
+    const cada = parseInt(cadaDias, 10);
+    if (recurrente && (!cada || cada <= 0))
+      return "Para repetir, indica cada cuántos días (entero positivo).";
+    if (modo === "individual" && (!producto || !sucursal))
+      return "Completa producto y sucursal.";
+    if (modo !== "individual" && (!conteo || conteo === 0))
+      return "Ningun producto cumple ese criterio. Ajusta el grupo.";
+    return null;
+  };
+
+  const ejecutarGuardado = async () => {
+    setConfirmarSinFecha(false);
     setError(null);
     const n = parseInt(cantidad, 10);
-    if (!n || n <= 0) {
-      setError(
-        tipoCantidad === "dias"
-          ? "Ingresa los días de inventario (entero positivo)."
-          : tipoCantidad === "objetivo"
-            ? "Ingresa el nivel de stock a mantener (entero positivo)."
-            : "Ingresa una cantidad de unidades (entero positivo)."
-      );
-      return;
-    }
     const cantidadPayload =
       tipoCantidad === "dias"
         ? { dias_inventario: n }
@@ -217,23 +243,8 @@ export function ModalSugerenciaManual({
     // recurrencias controlan su fin con "Hasta (fecha)".
     const expiraEn = !recurrente && fechaLimite ? fechaLimite : undefined;
     const dias = parseInt(cadaDias, 10);
-    if (recurrente && (!dias || dias <= 0)) {
-      setError("Para repetir, indica cada cuántos días (entero positivo).");
-      return;
-    }
     setGuardando(true);
     try {
-      if (modo === "individual" && (!producto || !sucursal)) {
-        setError("Completa producto y sucursal.");
-        setGuardando(false);
-        return;
-      }
-      if (modo !== "individual" && (!conteo || conteo === 0)) {
-        setError("Ningun producto cumple ese criterio. Ajusta el grupo.");
-        setGuardando(false);
-        return;
-      }
-
       if (recurrente) {
         // Regla recurrente (se aplica de inmediato y se repite cada N días).
         await api.crearRecurrente(
@@ -285,6 +296,23 @@ export function ModalSugerenciaManual({
     } finally {
       setGuardando(false);
     }
+  };
+
+  const guardar = () => {
+    const problema = validar();
+    if (problema) {
+      setError(problema);
+      return;
+    }
+    setError(null);
+    // Sin fecha límite la sugerencia no vence: sigue sumando las mismas unidades a la
+    // compra todos los días hasta que alguien la borre a mano, y no se apaga cuando
+    // llega la mercadería. Es el default más caro, así que hay que confirmarlo.
+    if (!recurrente && !fechaLimite) {
+      setConfirmarSinFecha(true);
+      return;
+    }
+    void ejecutarGuardado();
   };
 
   const tabs: { id: Modo; icon: React.ReactNode; label: string; sub: string }[] = [
@@ -372,6 +400,15 @@ export function ModalSugerenciaManual({
                     </button>
                   ))}
                 </div>
+              )}
+              {codigoDesconocido && (
+                <p className="mt-1 flex items-start gap-1.5 text-[11.5px] text-amber-700">
+                  <TriangleAlert size={13} className="mt-px shrink-0" />
+                  <span>
+                    Ese código no existe en el catálogo. Revísalo: si lo guardas así, la
+                    fila queda sin descripción, proveedor ni costo.
+                  </span>
+                </p>
               )}
             </div>
             <div>
@@ -633,18 +670,30 @@ export function ModalSugerenciaManual({
         {/* Fecha límite: hasta cuándo la sugerencia sigue vigente (no aplica a recurrentes). */}
         {!recurrente && (
           <div>
-            <Label htmlFor="fechalim">Fecha límite (opcional)</Label>
+            <Label htmlFor="fechalim">Fecha límite (recomendada)</Label>
             <Input
               id="fechalim"
+              ref={refFechaLimite}
               type="date"
               min={hoyISO}
               value={fechaLimite}
               onChange={(e) => setFechaLimite(e.target.value)}
             />
-            <p className="mt-1 text-[11px] text-slate-500">
-              Hasta esa fecha (incluida) la sugerencia suma a la compra; al día
-              siguiente se archiva automáticamente. Déjalo vacío para que no venza.
-            </p>
+            {fechaLimite ? (
+              <p className="mt-1 text-[11px] text-slate-500">
+                Hasta esa fecha (incluida) la sugerencia suma a la compra; al día
+                siguiente se archiva sola.
+              </p>
+            ) : (
+              <p className="mt-1 flex items-start gap-1.5 text-[11.5px] text-amber-700">
+                <TriangleAlert size={13} className="mt-px shrink-0" />
+                <span>
+                  Sin fecha no vence: sigue pidiendo las mismas unidades{" "}
+                  <b>todos los días</b> hasta que la borres a mano, aunque ya hayas
+                  comprado.
+                </span>
+              </p>
+            )}
           </div>
         )}
 
@@ -732,6 +781,57 @@ export function ModalSugerenciaManual({
             {etiquetaBoton}
           </Button>
         </div>
+
+        {/* Última barrera antes de crear algo que no se apaga solo. Va dentro del panel
+            del modal para que cerrarlo (Escape o backdrop) no descarte el formulario. */}
+        <Dialog
+          open={confirmarSinFecha}
+          onClose={() => setConfirmarSinFecha(false)}
+          title="Esto no va a vencer nunca"
+          description="Le falta la fecha límite."
+          className="max-w-md"
+        >
+          <div className="space-y-3">
+            <div className="flex items-start gap-2 rounded-md bg-amber-50 px-3 py-2.5 text-[12.5px] text-amber-800">
+              <TriangleAlert size={16} className="mt-px shrink-0" />
+              <div className="space-y-1.5">
+                <p>
+                  {modo === "individual"
+                    ? "Esta sugerencia va a sumarse"
+                    : `Las ${formatoNumero(conteo ?? 0)} sugerencias van a sumarse`}{" "}
+                  a la compra <b>todos los días</b>, siempre con las mismas unidades,
+                  hasta que alguien las elimine a mano.
+                </p>
+                <p>
+                  Tampoco se apagan cuando llegue la mercadería: el número queda
+                  congelado y se sigue pidiendo encima de lo que sugiere el sistema.
+                </p>
+              </div>
+            </div>
+            <p className="text-[12.5px] text-slate-600">
+              Si es una compra puntual, pon el último día en que la quieras comprar: se
+              archiva sola al día siguiente y no queda pidiéndose para siempre.
+            </p>
+            <div className="flex flex-col-reverse gap-2 border-t border-slate-100 pt-3 sm:flex-row sm:justify-end">
+              <Button
+                variant="outline"
+                onClick={() => void ejecutarGuardado()}
+                disabled={guardando}
+              >
+                {guardando ? "Guardando…" : "Guardar sin fecha límite"}
+              </Button>
+              <Button
+                onClick={() => {
+                  setConfirmarSinFecha(false);
+                  // El input sigue montado detrás; el foco espera al re-render.
+                  setTimeout(() => refFechaLimite.current?.focus(), 0);
+                }}
+              >
+                Volver y poner fecha
+              </Button>
+            </div>
+          </div>
+        </Dialog>
       </div>
     </Dialog>
   );
