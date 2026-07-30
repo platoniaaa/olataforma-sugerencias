@@ -209,6 +209,77 @@ def test_el_filtro_de_sucursal_con_tilde_no_apaga_la_regla(client, db_session):
     assert f["instock_agregado"] == 2
 
 
+def test_la_fila_sin_sugerido_sale_con_sus_columnas(client, db_session, en_catalogo):
+    """Una fila que el BI no trae ya no sale en blanco.
+
+    Lo que describe al PRODUCTO (proveedor, marca, importado, precios) se copia de
+    la fila del mismo producto en otra sucursal; el stock sale de bodega. Lo que
+    depende de la sucursal (ABC local, demanda) NO se copia: seria inventarlo.
+    """
+    from src.models import StockUnificado
+
+    # El producto existe en el sugerido de Linderos, pero no en el de Curicó.
+    _sug(db_session, "INS-COL", sucursal_id="LINDEROS", proveedor="Gildemeister",
+         filtro1_final="HYUNDAI", tipo_origen="Importado", es_importado=True,
+         unidad_medida="UNIDAD", clasificacion_abc="A", clasificacion_abc_agregada="B",
+         demanda_mensual=9.0, costo_unitario=4000.0, stock_activo_suc=50)
+    db_session.add(StockUnificado(
+        tenant_id="curifor", producto="INS-COL", bodega="CURICO",
+        sucursal_id="CURICO", stock=1,
+    ))
+    db_session.commit()
+    _instock(db_session, "INS-COL")
+
+    f = _fila(client, "INS-COL", "CURICO", solo_pedir=False)
+    assert f["origen"] == "instock"
+    # Copiado del mismo producto en Linderos:
+    assert f["proveedor"] == "Gildemeister"
+    assert f["filtro1_final"] == "HYUNDAI"
+    assert f["tipo_origen"] == "Importado"
+    assert f["es_importado"] is True
+    assert f["unidad_medida"] == "UNIDAD"
+    assert f["clasificacion_abc_agregada"] == "B"
+    assert f["costo_unitario"] == 4000
+    # Stock real de Curicó (1) y de la otra bodega, desde stock_unificado:
+    assert f["stock_activo_suc"] == 1
+    assert f["stock_curico"] == 1
+    # Falta 1 para llegar a 2, valorizado con el costo heredado:
+    assert f["instock_agregado"] == 1
+    assert f["total_valor_sugerido_clp"] == 4000
+    # Lo que depende de la sucursal NO se copia de Linderos.
+    assert f["clasificacion_abc"] is None
+    assert f["demanda_mensual"] is None
+
+
+def test_la_manual_de_un_producto_fuera_del_sugerido_sale_completa(client, db_session):
+    """Mismo trato para una sugerencia manual: es el caso que usa Mary a diario."""
+    from src.models import ProductoCatalogo, SugerenciaManual
+
+    _sug(db_session, "MAN-COL", sucursal_id="LINDEROS", proveedor="Ford Motor Company Chile",
+         filtro1_final="FORD", costo_unitario=2500.0)
+    db_session.add(ProductoCatalogo(
+        tenant_id="curifor", producto="MAN-COL", glosa="Filtro de aceite",
+        procedencia="NACIONAL", unidad="UNIDAD",
+    ))
+    db_session.add(SugerenciaManual(
+        tenant_id="curifor", producto="MAN-COL", sucursal_id="TALCA",
+        unidades=3, creado_por="mramos@curifor.com",
+    ))
+    db_session.commit()
+
+    f = _fila(client, "MAN-COL", "TALCA", solo_pedir=False)
+    assert f["origen"] == "manual"
+    assert f["proveedor"] == "Ford Motor Company Chile"
+    assert f["filtro1_final"] == "FORD"
+    # La descripcion la pone el catalogo al armar la fila; el relleno no la pisa.
+    assert f["descripcion"] == "Filtro de aceite"
+    assert f["tipo_origen"] == "NACIONAL"
+    assert f["unidad_medida"] == "UNIDAD"
+    assert f["costo_unitario"] == 2500
+    assert f["total_sugerido_suc"] == 3
+    assert f["total_valor_sugerido_clp"] == 7500
+
+
 def test_sin_lista_instock_nada_cambia(client, db_session):
     """La regla es opt-in: sin repuestos cargados, el sugerido queda igual."""
     _sug(db_session, "SIN-INS", total_sugerido_suc=7, pedir="Si", pedir_flag="Si")

@@ -22,6 +22,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Session
 
 from ..models import (
+    DimProducto,
     ProductoCatalogo,
     StockUnificado,
     Sugerido,
@@ -759,6 +760,154 @@ def _aplicar_regla_stock_sin_venta(
         it["pedir_flag"] = "No"
 
 
+# Columna de stock por bodega del sugerido que corresponde a cada sucursal.
+# Espejo de las columnas fisicas del modelo (ver models/sugerido.py): si se agrega
+# una sucursal alla, hay que agregarla aca tambien.
+COLUMNA_STOCK_SUCURSAL = {
+    "LINDEROS": "stock_linderos",
+    "CURICO": "stock_curico",
+    "TALCA": "stock_talca",
+    "RANCAGUA": "stock_rancagua",
+    "DIEZ DE JULIO (2)": "stock_diez_de_julio_2",
+    "CHILLAN": "stock_chillan",
+    "CD REPUESTOS": "stock_cd_repuestos",
+    "BRASIL 18": "stock_brasil_18",
+    "PLACILLA": "stock_placilla",
+    "CHILLAN VIEJO": "stock_chillan_viejo",
+    "TALCA (2)": "stock_talca_2",
+}
+
+# Campos que describen al PRODUCTO, no a la sucursal: se pueden copiar desde la
+# fila del mismo producto en cualquier otra sucursal. Los que dependen de la
+# sucursal (clase ABC local, demanda, stock, sugerido, lead time efectivo) NO
+# entran aca: copiarlos seria inventar datos de una sucursal con los de otra.
+CAMPOS_DE_PRODUCTO = (
+    "descripcion", "proveedor", "filtro1_final", "tipo_origen", "es_importado",
+    "unidad_medida", "clasificacion_abc_agregada", "lead_time_dias", "lt_origen",
+    "costo_unitario", "reemplazos", "empresa",
+) + tuple(c.name for c in Sugerido.__table__.columns if c.name.startswith("precio_"))
+
+# Filas que NO vienen del sugerido del BI y por lo tanto salen con las columnas
+# vacias si nadie las completa.
+ORIGENES_SINTETICOS = ("manual", "instock", "catalogo")
+
+
+def _completar_filas_sinteticas(items: list[dict], db: Session) -> None:
+    """Rellena las columnas de las filas que el sugerido del BI no trae.
+
+    Una sugerencia manual sobre un producto que el modelo no pide (o un repuesto
+    InStock sin fila) salia practicamente en blanco: sin proveedor, sin marca, sin
+    clase, sin precios y sin stock por bodega. En la grilla y en el Excel se veia
+    como un error, y el comprador no tenia con que decidir.
+
+    De donde sale cada cosa, en orden de confianza:
+
+    1. **Otra fila del MISMO producto en el sugerido** (cualquier sucursal): es la
+       mejor fuente para lo que describe al producto —proveedor, marca, si es
+       importado, precios de lista—, porque ya paso por el motor. Lo que depende de
+       la sucursal no se copia (ver `CAMPOS_DE_PRODUCTO`).
+    2. **`dim_producto`**: marca, unidad, costo y proveedor del maestro del motor.
+    3. **`producto_catalogo`**: glosa, procedencia, unidad, costo y reemplazos.
+    4. **`stock_unificado`**: el stock real por sucursal, que llena tanto las
+       columnas por bodega como el stock de la propia sucursal de la fila.
+
+    Nunca pisa un valor que la fila ya traiga. Muta `items` in-place.
+    """
+    filas = [
+        it for it in items
+        if it.get("origen") in ORIGENES_SINTETICOS and it.get("producto")
+    ]
+    if not filas:
+        return
+    productos = {it["producto"] for it in filas}
+
+    def _rellenar(fila: dict, campo: str, valor) -> None:
+        if valor is not None and fila.get(campo) is None:
+            fila[campo] = valor
+
+    # 1) Fila del mismo producto en otra sucursal (la de mayor sugerido, que suele
+    #    ser la mas representativa).
+    desde_sugerido: dict[str, Sugerido] = {}
+    for s in db.scalars(
+        select(Sugerido)
+        .where(Sugerido.producto.in_(productos))
+        .order_by(Sugerido.producto, Sugerido.total_sugerido_suc.desc().nullslast())
+    ).all():
+        desde_sugerido.setdefault(s.producto, s)
+
+    # 2) dim_producto (maestro del motor).
+    try:
+        dim = {
+            d.producto: d
+            for d in db.scalars(
+                select(DimProducto).where(DimProducto.producto.in_(productos))
+            ).all()
+        }
+    except Exception:  # noqa: BLE001 - tabla ausente en despliegues viejos
+        db.rollback()
+        dim = {}
+
+    # 3) catalogo maestro.
+    cat = {
+        c.producto: c
+        for c in db.scalars(
+            select(ProductoCatalogo).where(ProductoCatalogo.producto.in_(productos))
+        ).all()
+    }
+
+    # 4) stock real por sucursal, en una query.
+    stock: dict[str, dict[str, float]] = {}
+    try:
+        for p, suc, total in db.execute(
+            select(
+                StockUnificado.producto,
+                StockUnificado.sucursal_id,
+                func.coalesce(func.sum(StockUnificado.stock), 0),
+            )
+            .where(StockUnificado.producto.in_(productos))
+            .group_by(StockUnificado.producto, StockUnificado.sucursal_id)
+        ).all():
+            stock.setdefault(p, {})[suc or ""] = float(total or 0)
+    except Exception:  # noqa: BLE001
+        db.rollback()
+
+    for fila in filas:
+        p = fila["producto"]
+        base = desde_sugerido.get(p)
+        if base is not None:
+            for campo in CAMPOS_DE_PRODUCTO:
+                _rellenar(fila, campo, getattr(base, campo, None))
+        d = dim.get(p)
+        if d is not None:
+            _rellenar(fila, "descripcion", d.descripcion)
+            _rellenar(fila, "filtro1_final", d.filtro1_final)
+            _rellenar(fila, "unidad_medida", d.unidad_medida)
+            _rellenar(fila, "costo_unitario", d.costo_unitario)
+            _rellenar(fila, "proveedor", d.proveedor)
+            _rellenar(fila, "es_importado", d.es_importado)
+        c = cat.get(p)
+        if c is not None:
+            _rellenar(fila, "descripcion", c.glosa)
+            _rellenar(fila, "tipo_origen", c.procedencia)
+            _rellenar(fila, "unidad_medida", c.unidad)
+            _rellenar(fila, "costo_unitario", c.costo)
+            _rellenar(fila, "reemplazos", c.reemplazo)
+
+        por_suc = stock.get(p, {})
+        for suc, columna in COLUMNA_STOCK_SUCURSAL.items():
+            if suc in por_suc:
+                _rellenar(fila, columna, int(por_suc[suc]))
+        _rellenar(fila, "stock_en_cd", por_suc.get("CD REPUESTOS"))
+        if fila.get("sucursal_id"):
+            _rellenar(fila, "stock_activo_suc", por_suc.get(fila["sucursal_id"]))
+
+        # Valorizar ahora que puede haber aparecido un costo.
+        if fila.get("costo_unitario") and fila.get("total_valor_sugerido_clp") is None:
+            fila["total_valor_sugerido_clp"] = (
+                float(fila.get("total_sugerido_suc") or 0) * float(fila["costo_unitario"])
+            )
+
+
 def _enriquecer_con_catalogo(items: list[dict], db: Session) -> None:
     """Agrega campos del ProductoCatalogo que NO vienen del modelo Sugerido.
 
@@ -910,6 +1059,11 @@ def listar(
     # el modelo Sugerido. Las filas que ya vienen del catalogo o sinteticas no
     # se tocan: el helper salta cuando ya hay 'reemplazos' en la fila.
     _enriquecer_con_catalogo(items, db)
+    # Las filas que el sugerido del BI no trae (manuales, InStock, catalogo) salen
+    # con casi todo en blanco: se completan con lo que se sepa del producto en
+    # otras fuentes. Va antes del margen y de InStock porque de aca puede salir el
+    # costo y el stock, que los dos necesitan.
+    _completar_filas_sinteticas(items, db)
     # Regla InStock (jul-2026): marca los repuestos de pauta y completa el minimo
     # en las sucursales con taller. Va antes del margen para que el margen del
     # sugerido incluya las unidades que agrega la regla.
@@ -1032,21 +1186,30 @@ def _aporte_instock(db: Session, f: SugeridoFiltros, ins: dict) -> dict:
     filas = 0
     productos: set[str] = set()
 
-    # Costos: los de las filas del BI ya vienen resueltos; el resto sale del catalogo.
+    # Costos. Tienen que salir de las MISMAS fuentes y en el mismo orden que usa
+    # `_completar_filas_sinteticas` para la grilla, o las tarjetas dejan de cuadrar
+    # con la tabla: una fila sin fila propia en el BI igual hereda el costo del
+    # mismo producto en otra sucursal, y el KPI tiene que valorizarla igual.
     costos = dict(ins["costos"])
     pares_valorizar = set(ins["solo_unidades"]) | set(ins["solas"])
     sin_costo = {par[0] for par in pares_valorizar if not costos.get(par)}
-    costo_cat: dict[str, float] = {}
+    costo_producto: dict[str, float] = {}
     if sin_costo:
-        costo_cat = {
-            c.producto: float(c.costo or 0)
-            for c in db.scalars(
-                select(ProductoCatalogo).where(ProductoCatalogo.producto.in_(sin_costo))
-            ).all()
-        }
+        # Mismo criterio que la grilla: la fila del producto con mayor sugerido.
+        for prod, costo in db.execute(
+            select(Sugerido.producto, Sugerido.costo_unitario)
+            .where(Sugerido.producto.in_(sin_costo))
+            .order_by(Sugerido.producto, Sugerido.total_sugerido_suc.desc().nullslast())
+        ).all():
+            costo_producto.setdefault(prod, float(costo or 0))
+        for c in db.scalars(
+            select(ProductoCatalogo).where(ProductoCatalogo.producto.in_(sin_costo))
+        ).all():
+            if not costo_producto.get(c.producto):
+                costo_producto[c.producto] = float(c.costo or 0)
 
     def _costo(par: tuple[str, str]) -> float:
-        return costos.get(par) or costo_cat.get(par[0], 0.0)
+        return costos.get(par) or costo_producto.get(par[0], 0.0)
 
     for par, falta in ins["solo_unidades"].items():
         clp = falta * _costo(par)
