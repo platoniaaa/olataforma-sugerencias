@@ -82,6 +82,22 @@ class SugerenciaManualOut(BaseModel):
     # Si vino de una regla que se repite (para distinguirla de una carga puntual).
     recurrente_id: str | None = None
 
+    # --- Contexto del producto, para poder LEER la lista ---
+    # La pantalla mostraba el codigo pelado ("74 1324409TBW0000") y habia que ir al
+    # catalogo a ver que repuesto era. Salen del mismo camino que llena la grilla
+    # (services/sugerido_service.contexto_de_pares), asi los dos dicen lo mismo.
+    # Todos opcionales: si el codigo no esta en ninguna fuente, quedan en None.
+    descripcion: str | None = None
+    nombre_sucursal: str | None = None
+    marca: str | None = None
+    proveedor: str | None = None
+    costo_unitario: float | None = None
+    # unidades x costo unitario: lo que cuesta esta sugerencia.
+    valor_clp: float | None = None
+    # Stock que hay hoy en esa sucursal, para juzgar si la sugerencia sigue teniendo
+    # sentido (se cargo hace un mes y quiza ya llego).
+    stock_actual: float | None = None
+
 
 class RecurrenteCreate(BaseModel):
     modo: Literal["individual", "grupo"]

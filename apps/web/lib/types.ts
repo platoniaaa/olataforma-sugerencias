@@ -196,6 +196,17 @@ export interface SugerenciaManual {
   stock_objetivo?: number | null;
   /** Si vino de una regla que se repite sola. */
   recurrente_id?: string | null;
+  // Contexto del producto: sale del mismo camino que llena la grilla del sugerido.
+  // Null si el código no está en ninguna fuente.
+  descripcion?: string | null;
+  nombre_sucursal?: string | null;
+  marca?: string | null;
+  proveedor?: string | null;
+  costo_unitario?: number | null;
+  /** unidades × costo unitario. */
+  valor_clp?: number | null;
+  /** Stock que hay hoy en esa sucursal. */
+  stock_actual?: number | null;
 }
 
 /**

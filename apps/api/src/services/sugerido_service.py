@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from ..models import (
     DimProducto,
+    DimSucursal,
     ProductoCatalogo,
     StockUnificado,
     Sugerido,
@@ -915,6 +916,61 @@ def _completar_filas_sinteticas(items: list[dict], db: Session) -> None:
         # tipeado a mano antes de que el alta lo validara).
         if fila.get("descripcion") is None:
             fila["descripcion"] = SIN_CATALOGO
+
+
+def contexto_de_pares(
+    db: Session, pares: list[tuple[str, str]], unidades: list[float] | None = None
+) -> list[dict]:
+    """Datos del producto y de la sucursal para una lista de (producto, sucursal).
+
+    Lo usa la pantalla de sugerencias manuales: hasta ahora listaba el codigo
+    pelado ("74 1324409TBW0000") y habia que ir al catalogo a ver que repuesto era.
+
+    Reutiliza `_completar_filas_sinteticas`, que es el mismo camino por el que la
+    grilla llena esas filas: asi la lista y el sugerido muestran exactamente el
+    mismo proveedor, costo y stock, en vez de dos verdades distintas.
+
+    Devuelve una lista alineada con `pares` (misma posicion, mismo largo).
+    """
+    if not pares:
+        return []
+    filas = [
+        {
+            "origen": "manual",
+            "producto": p,
+            "sucursal_id": s,
+            "total_sugerido_suc": float(unidades[i]) if unidades else None,
+        }
+        for i, (p, s) in enumerate(pares)
+    ]
+    # Stock y clase de la fila EXACTA del par, cuando el sugerido la tiene. Va antes
+    # del relleno generico porque ese copia datos del producto en otra sucursal, y
+    # el stock es de esta: tiene que ser el mismo numero que muestra la grilla.
+    propias = {
+        (s.producto, s.sucursal_id): s for s in _filas_de_pares(db, set(pares))
+    }
+    for fila in filas:
+        propia = propias.get((fila["producto"], fila["sucursal_id"]))
+        if propia is not None:
+            fila["stock_activo_suc"] = propia.stock_activo_suc
+            fila["clasificacion_abc"] = propia.clasificacion_abc
+    _completar_filas_sinteticas(filas, db)
+    # Nombre de la sucursal ("Curicó" en vez de "CURICO").
+    try:
+        nombres = {
+            s: n or s
+            for s, n in db.execute(
+                select(DimSucursal.sucursal_id, DimSucursal.nombre).where(
+                    DimSucursal.sucursal_id.in_({s for _p, s in pares})
+                )
+            ).all()
+        }
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        nombres = {}
+    for fila, (_p, s) in zip(filas, pares):
+        fila["nombre_sucursal"] = nombres.get(s, s)
+    return filas
 
 
 def _enriquecer_con_catalogo(items: list[dict], db: Session) -> None:

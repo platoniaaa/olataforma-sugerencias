@@ -154,7 +154,36 @@ def listar(
     if solo_unicas:
         stmt = stmt.where(SugerenciaManual.recurrente_id.is_(None))
     stmt = stmt.order_by(SugerenciaManual.creado_en.desc())
-    return list(db.scalars(stmt).all())
+    filas = list(db.scalars(stmt).all())
+    return _con_contexto(db, filas)
+
+
+def _con_contexto(db: Session, filas: list[SugerenciaManual]) -> list[SugerenciaManualOut]:
+    """Agrega a cada sugerencia los datos del producto para poder leer la lista.
+
+    Sin esto la pantalla muestra el codigo pelado y hay que ir al catalogo a ver
+    que repuesto es, en que sucursal esta y cuanto cuesta. El contexto sale del
+    mismo camino que llena la grilla del sugerido, asi los dos dicen lo mismo.
+    """
+    if not filas:
+        return []
+    ctx = sugerido_service.contexto_de_pares(
+        db,
+        [(f.producto, f.sucursal_id) for f in filas],
+        [float(f.unidades) for f in filas],
+    )
+    salida: list[SugerenciaManualOut] = []
+    for f, c in zip(filas, ctx):
+        out = SugerenciaManualOut.model_validate(f)
+        out.descripcion = c.get("descripcion")
+        out.nombre_sucursal = c.get("nombre_sucursal")
+        out.marca = c.get("filtro1_final")
+        out.proveedor = c.get("proveedor")
+        out.costo_unitario = c.get("costo_unitario")
+        out.valor_clp = c.get("total_valor_sugerido_clp")
+        out.stock_actual = c.get("stock_activo_suc")
+        salida.append(out)
+    return salida
 
 
 @router.post("", response_model=SugerenciaManualOut, status_code=201)

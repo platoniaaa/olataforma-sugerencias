@@ -5,7 +5,7 @@ import { Boxes, ChevronDown, ChevronRight, Layers, Lock, Repeat, Trash2, Wrench 
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api-client";
-import { formatoFecha, formatoFechaHora, formatoNumero } from "@/lib/formato";
+import { formatoCLP, formatoFecha, formatoFechaHora, formatoNumero } from "@/lib/formato";
 import type { InstockResumen, Recurrente, SugerenciaManual } from "@/lib/types";
 
 type Tab = "unicas" | "recurrentes";
@@ -178,6 +178,33 @@ export default function SugerenciasManualesPage() {
   );
 }
 
+/**
+ * Qué repuesto es y cuánto cuesta la sugerencia. La lista mostraba solo el código
+ * ("74 1324409TBW0000") y había que ir al catálogo a averiguar el resto; con esto
+ * se puede revisar lo cargado sin salir de la pantalla.
+ */
+function FichaProducto({ m }: { m: SugerenciaManual }) {
+  const datos = [
+    m.marca,
+    m.proveedor,
+    typeof m.stock_actual === "number"
+      ? `stock ${formatoNumero(m.stock_actual)} u`
+      : null,
+    typeof m.valor_clp === "number" && m.valor_clp > 0
+      ? formatoCLP(m.valor_clp)
+      : null,
+  ].filter(Boolean);
+  if (!m.descripcion && datos.length === 0) return null;
+  return (
+    <p className="mt-0.5 text-[13px] text-slate-700">
+      {m.descripcion ?? <span className="text-slate-400">sin descripción</span>}
+      {datos.length > 0 && (
+        <span className="text-slate-500"> · {datos.join(" · ")}</span>
+      )}
+    </p>
+  );
+}
+
 /** Enumera en castellano: "Linderos, Rancagua, Curicó y Chillán". */
 function enumerar(xs: string[]): string {
   if (xs.length <= 1) return xs[0] ?? "";
@@ -295,13 +322,16 @@ function SeccionUnicas({
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-semibold text-slate-900">{s.producto}</span>
                 <span className="text-[13px] text-slate-500">·</span>
-                <span className="text-[13px] text-slate-600">{s.sucursal_id}</span>
+                <span className="text-[13px] text-slate-600">
+                  {s.nombre_sucursal ?? s.sucursal_id}
+                </span>
                 <Badge className="bg-emerald-50 text-emerald-700">
                   +{formatoNumero(s.unidades)} u
                 </Badge>
                 <EtiquetaTipo m={s} />
                 {s.expira_en && <BadgeVencimiento expiraEn={s.expira_en} />}
               </div>
+              <FichaProducto m={s} />
               <p className="mt-1 text-[12px] text-slate-500">
                 {s.creado_por && <>{s.creado_por} · </>}
                 {formatoFechaHora(s.creado_en)}
@@ -390,11 +420,18 @@ function LoteCard({
                 <div className="min-w-0 flex-1">
                   <span className="font-medium text-slate-900">{s.producto}</span>
                   <span className="text-slate-400"> · </span>
-                  <span className="text-slate-600">{s.sucursal_id}</span>
+                  <span className="text-slate-600">
+                    {s.nombre_sucursal ?? s.sucursal_id}
+                  </span>
                   <span className="text-slate-400"> · </span>
                   <span className="font-mono text-emerald-700">
                     +{formatoNumero(s.unidades)} u
                   </span>
+                  {s.descripcion && (
+                    <span className="block truncate text-[12px] text-slate-500">
+                      {s.descripcion}
+                    </span>
+                  )}
                 </div>
                 <button
                   onClick={() => onEliminarUna(s.id)}
