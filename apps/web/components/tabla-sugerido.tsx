@@ -81,6 +81,16 @@ function ProductoCelda(p: { value: unknown; data?: SugeridoRow }) {
   );
 }
 
+/** Celda de una columna Sí/No: "Sí" destacado, "—" cuando no. */
+function SiNoCelda(p: { value: unknown }) {
+  if (!p.value) return <span className="text-ink-400">—</span>;
+  return (
+    <span className="rounded bg-amber-50 px-1.5 py-px text-[11px] font-semibold text-amber-700">
+      Sí
+    </span>
+  );
+}
+
 /**
  * Encabezado custom de AG Grid: réplica del header por defecto (click para ordenar,
  * indicador de orden, botón de filtro) MÁS un icono de info que muestra el detalle
@@ -210,10 +220,14 @@ function colDef(def: DefColumna): ColDef {
   base.headerComponentParams = { info: def.info };
 
   if (def.tipo === "si_no") {
-    // Alineada a la izquierda como el texto, pero destacando el "Sí": la columna
-    // InStock se lee de un vistazo mientras se recorre la grilla.
+    // AG Grid 32 deduce el tipo de la columna desde el dato, y para un booleano
+    // usa su renderer propio: pinta un CHECKBOX y descarta el valueFormatter. En
+    // la grilla se veia una casilla vacia en cada fila, como si fuera algo que
+    // marcar. `cellDataType: false` apaga esa deduccion y devuelve el control al
+    // formateador; el cellRenderer lo deja amarrado aunque la deduccion cambie.
+    base.cellDataType = false;
     base.valueFormatter = formateador(def);
-    base.cellStyle = (p) => (p.value ? { color: "#b45309", fontWeight: 600 } : null);
+    base.cellRenderer = SiNoCelda;
     base.minWidth = 90;
     // El multi-select del filtro lee el valor crudo: sin esto ofrece "true/false"
     // en vez de "Sí/No", que es lo que el usuario ve en la celda.
