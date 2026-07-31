@@ -280,6 +280,38 @@ def test_la_manual_de_un_producto_fuera_del_sugerido_sale_completa(client, db_se
     assert f["total_valor_sugerido_clp"] == 7500
 
 
+def test_el_resumen_describe_la_regla_para_la_pantalla(client, db_session):
+    """La pestaña "Recurrentes" la muestra como una regla más, así que necesita
+    saber cuántos repuestos cubre, el mínimo y en qué sucursales rige."""
+    _instock(db_session, "RES-1", marca="FORD", modelos="Ranger")
+    _instock(db_session, "RES-2", marca="FORD", modelos="F-150")
+    _instock(db_session, "RES-3", marca="HYUNDAI", modelos="i20")
+
+    r = client.get("/api/instock/resumen")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["activo"] is True
+    assert d["n_repuestos"] == 3
+    assert d["minimo"] == 2
+    assert d["minimo_uniforme"] is True
+    assert d["por_marca"] == {"FORD": 2, "HYUNDAI": 1}
+    # El id es "LINDEROS" pero la sucursal se llama "Linderos": la pantalla
+    # muestra el nombre.
+    assert "Linderos" in d["sucursales"]
+    assert len(d["sucursales"]) == len(SUCURSALES_INSTOCK)
+
+
+def test_el_resumen_avisa_cuando_la_regla_no_esta_cargada(client, db_session):
+    """Sin repuestos la regla existe en el codigo pero no pide nada: la pantalla
+    tiene que decirlo en vez de mostrar una regla vacia como si operara."""
+    r = client.get("/api/instock/resumen")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["activo"] is False
+    assert d["n_repuestos"] == 0
+    assert d["por_marca"] == {}
+
+
 def test_sin_lista_instock_nada_cambia(client, db_session):
     """La regla es opt-in: sin repuestos cargados, el sugerido queda igual."""
     _sug(db_session, "SIN-INS", total_sugerido_suc=7, pedir="Si", pedir_flag="Si")

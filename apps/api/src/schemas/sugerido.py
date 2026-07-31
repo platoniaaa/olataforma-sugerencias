@@ -125,6 +125,19 @@ class SugeridoKpis(BaseModel):
     valor_instock_clp: float = 0
 
 
+class InstockResumen(BaseModel):
+    """Descripcion de la regla InStock para mostrarla en Sugerencias manuales."""
+
+    # False cuando no hay repuestos cargados: la regla existe pero no hace nada.
+    activo: bool = False
+    n_repuestos: int = 0
+    minimo: int = 2
+    # False si algun repuesto tiene un minimo distinto (hoy son todos iguales).
+    minimo_uniforme: bool = True
+    sucursales: list[str] = Field(default_factory=list)
+    por_marca: dict[str, int] = Field(default_factory=dict)
+
+
 class AgrupadoRow(BaseModel):
     """Fila de agregacion (para graficos): un grupo con sus sumas."""
 

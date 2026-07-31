@@ -24,7 +24,7 @@ import math
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import RepuestoInstock
+from ..models import DimSucursal, RepuestoInstock
 
 # Sucursales con taller de mantención: son las únicas donde el mínimo obliga a
 # comprar. Decisión de Abastecimiento (jul-2026). Mismo criterio de comparación
@@ -64,6 +64,52 @@ def catalogo(db: Session) -> dict[str, dict]:
     return {
         p: {"minimo": int(m or MINIMO_DEFECTO), "marca": marca, "modelos": modelos}
         for p, m, marca, modelos in filas
+    }
+
+
+def resumen(db: Session) -> dict:
+    """Descripcion de la regla para mostrarla junto a las sugerencias recurrentes.
+
+    La regla InStock no es una sugerencia que alguien cargo: es una regla del
+    sistema. Pero desde el punto de vista del comprador hace lo mismo que una
+    recurrente de "mantener N unidades" y no vence nunca, asi que tiene que verse
+    donde el equipo las busca. Es de solo lectura: se cambia recargando la lista
+    desde las pautas (`jobs/cargar_instock.py`), no borrandola de la pantalla.
+    """
+    try:
+        filas = db.execute(
+            select(RepuestoInstock.marca, RepuestoInstock.minimo)
+            .where(RepuestoInstock.activo.is_(True))
+        ).all()
+    except Exception:  # noqa: BLE001 - tabla ausente: la regla no esta activa
+        db.rollback()
+        filas = []
+    por_marca: dict[str, int] = {}
+    for marca, _m in filas:
+        por_marca[marca or "(sin marca)"] = por_marca.get(marca or "(sin marca)", 0) + 1
+    minimos = sorted({int(m or MINIMO_DEFECTO) for _marca, m in filas})
+    # Nombres bonitos para la pantalla: el id es "CURICO" y la sucursal se llama
+    # "Curicó". Si falta la dimension, se muestra el id (mejor eso que nada).
+    try:
+        nombres = {
+            s: n or s
+            for s, n in db.execute(
+                select(DimSucursal.sucursal_id, DimSucursal.nombre)
+                .where(DimSucursal.sucursal_id.in_(SUCURSALES_INSTOCK))
+            ).all()
+        }
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        nombres = {}
+    return {
+        # Sin repuestos cargados la regla existe en el codigo pero no hace nada:
+        # conviene decirlo en pantalla en vez de mostrar una regla vacia.
+        "activo": bool(filas),
+        "n_repuestos": len(filas),
+        "minimo": minimos[0] if len(minimos) == 1 else (minimos[0] if minimos else MINIMO_DEFECTO),
+        "minimo_uniforme": len(minimos) <= 1,
+        "sucursales": [nombres.get(s, s) for s in SUCURSALES_INSTOCK],
+        "por_marca": por_marca,
     }
 
 

@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Boxes, ChevronDown, ChevronRight, Layers, Repeat, Trash2 } from "lucide-react";
+import { Boxes, ChevronDown, ChevronRight, Layers, Lock, Repeat, Trash2, Wrench } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api-client";
 import { formatoFecha, formatoFechaHora, formatoNumero } from "@/lib/formato";
-import type { Recurrente, SugerenciaManual } from "@/lib/types";
+import type { InstockResumen, Recurrente, SugerenciaManual } from "@/lib/types";
 
 type Tab = "unicas" | "recurrentes";
 
@@ -47,6 +47,7 @@ export default function SugerenciasManualesPage() {
   const [tab, setTab] = useState<Tab>("unicas");
   const [unicas, setUnicas] = useState<SugerenciaManual[] | null>(null);
   const [recurrentes, setRecurrentes] = useState<Recurrente[] | null>(null);
+  const [instock, setInstock] = useState<InstockResumen | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const cargar = useCallback(async () => {
@@ -60,6 +61,13 @@ export default function SugerenciasManualesPage() {
       setRecurrentes(r);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error al cargar");
+    }
+    // La regla InStock va aparte: si el backend todavia no la expone (despliegue
+    // viejo), la pantalla tiene que seguir mostrando las sugerencias igual.
+    try {
+      setInstock(await api.instockResumen());
+    } catch {
+      setInstock(null);
     }
   }, []);
 
@@ -158,12 +166,71 @@ export default function SugerenciasManualesPage() {
       )}
 
       {tab === "recurrentes" && (
-        <SeccionRecurrentes
-          items={recurrentes}
-          onEliminar={eliminarRecurrente}
-        />
+        <>
+          <TarjetaInstock resumen={instock} />
+          <SeccionRecurrentes
+            items={recurrentes}
+            onEliminar={eliminarRecurrente}
+          />
+        </>
       )}
     </div>
+  );
+}
+
+/** Enumera en castellano: "Linderos, Rancagua, Curicó y Chillán". */
+function enumerar(xs: string[]): string {
+  if (xs.length <= 1) return xs[0] ?? "";
+  return `${xs.slice(0, -1).join(", ")} y ${xs[xs.length - 1]}`;
+}
+
+/**
+ * La regla InStock entre las recurrentes. No la creó nadie desde la interfaz —sale
+ * de las pautas del fabricante— pero para el comprador hace lo mismo que una
+ * recurrente de "mantener N unidades" que no vence nunca, así que tiene que verse
+ * donde el equipo las busca. Es de solo lectura: se cambia recargando la lista.
+ */
+function TarjetaInstock({ resumen }: { resumen: InstockResumen | null }) {
+  if (!resumen) return null;
+  const marcas = Object.entries(resumen.por_marca).sort((a, b) => b[1] - a[1]);
+  return (
+    <Card className="border-amber-200 bg-amber-50/40">
+      <CardContent className="py-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Wrench size={15} className="shrink-0 text-amber-700" />
+          <span className="font-semibold text-slate-900">InStock · repuestos de pauta</span>
+          <Badge className="bg-emerald-50 text-emerald-700">
+            mantener {formatoNumero(resumen.minimo)} u
+          </Badge>
+          <Badge className="bg-slate-100 text-slate-600">permanente</Badge>
+          {!resumen.activo && (
+            <Badge className="bg-amber-100 text-amber-800">sin cargar</Badge>
+          )}
+          <span className="ml-auto inline-flex shrink-0 items-center gap-1 text-[11px] text-slate-500">
+            <Lock size={11} /> regla del sistema
+          </span>
+        </div>
+        {resumen.activo ? (
+          <p className="mt-1.5 text-[13px] leading-relaxed text-slate-600">
+            <b>{formatoNumero(resumen.n_repuestos)} repuestos</b>
+            {marcas.length > 0 && (
+              <> ({marcas.map(([m, n]) => `${m} ${formatoNumero(n)}`).join(" · ")})</>
+            )}{" "}
+            de las pautas de mantención nunca bajan de{" "}
+            {formatoNumero(resumen.minimo)} unidades en{" "}
+            <b>{enumerar(resumen.sucursales)}</b>, las sucursales con taller. Si el
+            stock, el tránsito y el sugerido no llegan a esa cifra, el sugerido se
+            completa solo. Se revisa en cada consulta, no en una fecha.
+          </p>
+        ) : (
+          <p className="mt-1.5 text-[13px] leading-relaxed text-slate-600">
+            Todavía no hay repuestos cargados, así que la regla no está pidiendo nada.
+            La lista se genera desde las pautas del fabricante y se carga con el job{" "}
+            <code className="rounded bg-slate-100 px-1 text-[12px]">cargar_instock</code>.
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

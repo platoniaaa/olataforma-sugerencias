@@ -22,6 +22,7 @@ from .routers import (
     cron,
     health,
     incidencias,
+    instock,
     inventario,
     productos,
     sugerencias_manuales,
@@ -80,6 +81,7 @@ _protegido = [Depends(requiere_auth)]
 app.include_router(sugerido.router, dependencies=_protegido)
 app.include_router(productos.router, dependencies=_protegido)
 app.include_router(sugerencias_manuales.router, dependencies=_protegido)
+app.include_router(instock.router, dependencies=_protegido)
 app.include_router(compras.router, dependencies=_protegido)
 app.include_router(catalogo.router, dependencies=_protegido)
 app.include_router(auditoria.router, dependencies=_protegido)

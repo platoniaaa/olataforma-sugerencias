@@ -7,6 +7,7 @@ from .sugerido import (
     ColumnaFiltro,
     ExportRequest,
     AgrupadoRow,
+    InstockResumen,
     VentaMes,
     VentasResponse,
 )
@@ -56,6 +57,7 @@ __all__ = [
     "ColumnaFiltro",
     "ExportRequest",
     "AgrupadoRow",
+    "InstockResumen",
     "VentaMes",
     "VentasResponse",
     "SugerenciaManualOut",

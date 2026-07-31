@@ -198,6 +198,23 @@ export interface SugerenciaManual {
   recurrente_id?: string | null;
 }
 
+/**
+ * Regla InStock: repuestos de pauta que no pueden faltar en las sucursales con
+ * taller. No la crea nadie desde la interfaz —sale de las pautas del fabricante—,
+ * pero se muestra junto a las recurrentes porque hace lo mismo que una de
+ * "mantener N unidades" y no vence nunca.
+ */
+export interface InstockResumen {
+  /** false cuando no hay repuestos cargados: la regla existe pero no hace nada. */
+  activo: boolean;
+  n_repuestos: number;
+  minimo: number;
+  /** false si algún repuesto tiene un mínimo distinto. */
+  minimo_uniforme: boolean;
+  sucursales: string[];
+  por_marca: Record<string, number>;
+}
+
 /** Vista previa del modo "mantener stock": de dónde sale el número. */
 export interface PreviewObjetivo {
   objetivo: number;

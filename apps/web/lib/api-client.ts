@@ -11,6 +11,7 @@ import type {
   CatalogoPage,
   DimensionAgrupado,
   EstadoActualizacion,
+  InstockResumen,
   NotificacionesResponse,
   Producto,
   Sucursal,
@@ -298,6 +299,10 @@ export const api = {
 
   async recurrentes(): Promise<Recurrente[]> {
     return getJSON("/api/sugerencias-manuales/recurrentes");
+  },
+
+  async instockResumen(): Promise<InstockResumen> {
+    return getJSON("/api/instock/resumen");
   },
 
   async eliminarRecurrente(id: string): Promise<void> {
