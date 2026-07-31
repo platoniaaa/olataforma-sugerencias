@@ -10,6 +10,7 @@ import type {
   CatalogoOpciones,
   CatalogoPage,
   DimensionAgrupado,
+  EstadoActualizacion,
   NotificacionesResponse,
   Producto,
   Sucursal,
@@ -117,7 +118,8 @@ export const api = {
     setSession(data.token, data.email, data.nombre ?? null, Boolean(data.es_admin), Boolean(data.solo_lectura),
       // Si la API todavia no manda el campo (ventana de despliegue), no degradar a
       // un admin: se cae a es_admin en vez de escribir un false que persiste.
-      Boolean(data.puede_calibrar ?? data.es_admin));
+      Boolean(data.puede_calibrar ?? data.es_admin),
+      Boolean(data.puede_actualizar ?? data.es_admin));
   },
 
   async health(): Promise<{ status: string }> {
@@ -376,6 +378,21 @@ export const api = {
 
   async ultimaSincronizacion(): Promise<{ creado_en: string | null; detalle: string | null }> {
     return getJSON("/api/ultima-sincronizacion");
+  },
+
+  /** Como va la ultima solicitud de "Actualizar ahora". Lo puede consultar cualquiera. */
+  async actualizacionEstado(): Promise<EstadoActualizacion> {
+    return getJSON("/api/actualizacion/estado");
+  },
+
+  /** Deja pedido el recalculo. No recalcula aca: lo toma el agente del PC con los Excel. */
+  async solicitarActualizacion(): Promise<EstadoActualizacion & { ya_en_curso: boolean }> {
+    const res = await req("/api/actualizacion/solicitar", { method: "POST" });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail ?? "No se pudo pedir la actualización");
+    }
+    return res.json();
   },
 
   async marcarLeidas(ids?: string[]): Promise<{ actualizadas: number }> {

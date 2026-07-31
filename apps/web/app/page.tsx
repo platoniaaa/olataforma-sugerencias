@@ -11,7 +11,8 @@ import { TablaSugerido, type TablaSugeridoHandle } from "@/components/tabla-suge
 import { ConfigurarColumnas } from "@/components/configurar-columnas";
 import { ModalSugerenciaManual } from "@/components/modal-sugerencia-manual";
 import { api } from "@/lib/api-client";
-import { getEsAdmin, getSoloLectura } from "@/lib/auth";
+import { SincronizacionManual } from "@/components/sincronizacion-manual";
+import { getEsAdmin, getPuedeActualizar, getSoloLectura } from "@/lib/auth";
 import { columnasPorDefectoVista } from "@/lib/columnas";
 import { formatoFechaHora, formatoNumero } from "@/lib/formato";
 import { STORAGE_KEYS, guardar, leer } from "@/lib/persistencia-dashboard";
@@ -76,12 +77,14 @@ export default function DashboardPage() {
 
   const [esAdmin, setEsAdmin] = useState(false);
   const [soloLectura, setSoloLectura] = useState(false);
+  const [puedeActualizar, setPuedeActualizar] = useState(false);
 
   // Las tabs de vista solo se muestran a admin. El botón de sugerencia manual se
   // oculta a los usuarios de solo lectura. Detectamos al montar (localStorage).
   useEffect(() => {
     setEsAdmin(getEsAdmin());
     setSoloLectura(getSoloLectura());
+    setPuedeActualizar(getPuedeActualizar());
   }, []);
   const [rows, setRows] = useState<SugeridoRow[]>([]);
   // KPIs exactos del backend (agregan sobre TODO el set filtrado, incluidos los
@@ -312,6 +315,12 @@ export default function DashboardPage() {
           })}
         </div>
       )}
+
+      {/* Recalcular el sugerido con los Excel del PC de quien mantiene los datos. Solo
+          lo ve quien puede dispararlo (admin o EMAILS_ACTUALIZAR): republica lo que ve
+          todo el equipo. Distinto del boton "Actualizar" de arriba, que solo recarga
+          la tabla con lo ya publicado. */}
+      {puedeActualizar && <SincronizacionManual compacto />}
 
       <KpiCards kpis={kpis} cargando={cargando} />
 

@@ -6,6 +6,7 @@ const NOMBRE = "sugerido_nombre";
 const ES_ADMIN = "sugerido_es_admin";
 const SOLO_LECTURA = "sugerido_solo_lectura";
 const PUEDE_CALIBRAR = "sugerido_puede_calibrar";
+const PUEDE_ACTUALIZAR = "sugerido_puede_actualizar";
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -46,9 +47,20 @@ export function getPuedeCalibrar(): boolean {
   return v === "1";
 }
 
+/** True si puede apretar "Actualizar ahora" (admin o autorizado en EMAILS_ACTUALIZAR).
+ *  Lo decide el BACKEND y viaja en el login; el gate real es el 403 del servidor. */
+export function getPuedeActualizar(): boolean {
+  if (typeof window === "undefined") return false;
+  const v = localStorage.getItem(PUEDE_ACTUALIZAR);
+  // Sesion abierta antes de que existiera el flag: caer a es_admin (mismo criterio
+  // que Calibracion) para no esconderle el boton a un admin que ya estaba dentro.
+  if (v === null) return getEsAdmin();
+  return v === "1";
+}
+
 export function setSession(
   token: string, email: string, nombre: string | null, esAdmin = false, soloLectura = false,
-  puedeCalibrar = false
+  puedeCalibrar = false, puedeActualizar = false
 ) {
   localStorage.setItem(TOKEN, token);
   localStorage.setItem(EMAIL, email);
@@ -57,6 +69,7 @@ export function setSession(
   localStorage.setItem(ES_ADMIN, esAdmin ? "1" : "0");
   localStorage.setItem(SOLO_LECTURA, soloLectura ? "1" : "0");
   localStorage.setItem(PUEDE_CALIBRAR, puedeCalibrar ? "1" : "0");
+  localStorage.setItem(PUEDE_ACTUALIZAR, puedeActualizar ? "1" : "0");
 }
 
 export function clearSession() {
@@ -66,6 +79,7 @@ export function clearSession() {
   localStorage.removeItem(ES_ADMIN);
   localStorage.removeItem(SOLO_LECTURA);
   localStorage.removeItem(PUEDE_CALIBRAR);
+  localStorage.removeItem(PUEDE_ACTUALIZAR);
 }
 
 export function estaAutenticado(): boolean {

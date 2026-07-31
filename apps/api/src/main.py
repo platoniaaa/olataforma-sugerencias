@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import get_settings
 from .db import create_all
 from .routers import (
+    actualizacion,
     admin,
     auditoria,
     auth,
@@ -70,6 +71,9 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(cron.router)  # protegido por secreto propio (X-Cron-Secret)
+# Mezcla endpoints de usuario y del agente que corre el motor (X-Agente-Secret), asi
+# que el gate va por endpoint y no en el include: el agente no tiene login.
+app.include_router(actualizacion.router)
 
 # Protegidos (requieren sesion):
 _protegido = [Depends(requiere_auth)]

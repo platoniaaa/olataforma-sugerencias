@@ -18,6 +18,7 @@ from .venta_historica import VentaHistorica
 from .configuracion_modelo import ConfiguracionModelo
 from .lead_time_proveedor import LeadTimeProveedorSucursal
 from .repuesto_instock import RepuestoInstock
+from .solicitud_actualizacion import SolicitudActualizacion
 
 __all__ = [
     "Sugerido",
@@ -39,4 +40,5 @@ __all__ = [
     "ConfiguracionModelo",
     "LeadTimeProveedorSucursal",
     "RepuestoInstock",
+    "SolicitudActualizacion",
 ]

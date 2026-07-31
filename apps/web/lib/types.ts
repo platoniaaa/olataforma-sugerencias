@@ -692,3 +692,18 @@ export interface VentasHistoricasResp {
   por_periodo: { periodo: string; cantidad: number; neto: number }[];
   por_sucursal: { sucursal: string; cantidad: number; neto: number }[];
 }
+
+/** Estado del boton "Actualizar ahora". El recalculo lo corre un agente instalado en
+ *  el PC que tiene los Excel; la web solo deja pedido y consulta como va. */
+export interface EstadoActualizacion {
+  id: string | null;
+  /** pendiente | en_curso | ok | error | expirada, o null si nunca se ha pedido. */
+  estado: "pendiente" | "en_curso" | "ok" | "error" | "expirada" | null;
+  /** Resultado en lenguaje de usuario: se muestra tal cual. */
+  mensaje: string | null;
+  solicitado_por: string | null;
+  creado_en: string | null;
+  terminado_en: string | null;
+  ultima_sincronizacion: string | null;
+  puede_actualizar: boolean;
+}

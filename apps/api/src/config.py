@@ -41,6 +41,18 @@ class Settings(BaseSettings):
     # como secret del repo en GitHub.
     cron_secret: str = ""
 
+    # Clave del agente que corre el motor en el PC donde estan los Excel. Ese agente no
+    # es una persona: no tiene login, se identifica con la cabecera 'X-Agente-Secret'.
+    # Si queda vacia, los endpoints del agente rechazan todo (y el boton "Actualizar
+    # ahora" queda sin quien lo atienda). Definir AGENTE_SECRET en Render y el mismo
+    # valor en el .env del PC que corre el motor.
+    agente_secret: str = ""
+
+    # Emails no-admin que pueden pedir "Actualizar ahora" desde la web. Es una accion
+    # que cambia lo que ve TODO el equipo, por eso no la tiene cualquiera. Los admin
+    # siempre pueden. Separados por coma.
+    emails_actualizar: str = ""
+
     # Origenes permitidos por CORS (separados por coma).
     cors_origins: str = "http://localhost:3000"
 
@@ -170,6 +182,10 @@ SUMMARIZECOLUMNS(
     @property
     def emails_calibracion_set(self) -> set[str]:
         return {e.strip().lower() for e in self.emails_calibracion.split(",") if e.strip()}
+
+    @property
+    def emails_actualizar_set(self) -> set[str]:
+        return {e.strip().lower() for e in self.emails_actualizar.split(",") if e.strip()}
 
     @property
     def powerbi_configurado(self) -> bool:

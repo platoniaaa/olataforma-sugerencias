@@ -158,3 +158,26 @@ def requiere_calibracion(email: str = Depends(requiere_auth), db=Depends(get_db)
     if puede_calibrar(email, db):
         return email
     raise HTTPException(status_code=403, detail="No autorizado para calibrar el modelo")
+
+
+def puede_actualizar(email: str, db) -> bool:
+    """True si el email puede pedir "Actualizar ahora": admin o en EMAILS_ACTUALIZAR.
+
+    Recalcular republica el sugerido de todas las sucursales, asi que no lo puede
+    disparar cualquiera. Se separa de `es_admin` a proposito: quien mantiene los Excel
+    al dia no tiene por que administrar la plataforma (ni al reves)."""
+    from ..models import Usuario  # import local para evitar ciclo
+
+    user = db.get(Usuario, email)
+    if user and user.es_admin:
+        return True
+    return (email or "").lower() in settings.emails_actualizar_set
+
+
+def requiere_actualizar(email: str = Depends(requiere_auth), db=Depends(get_db)) -> str:
+    """Autoriza pedir una actualizacion: admin o email en EMAILS_ACTUALIZAR."""
+    if puede_actualizar(email, db):
+        return email
+    raise HTTPException(
+        status_code=403, detail="No autorizado para actualizar los datos de la plataforma"
+    )
