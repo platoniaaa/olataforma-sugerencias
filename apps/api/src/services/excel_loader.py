@@ -360,8 +360,20 @@ def persistir_filas(
     def _bulk(model, registros: list[dict], chunk: int = 500) -> None:
         for i in range(0, len(registros), chunk):
             lote = registros[i : i + chunk]
-            if lote:
-                db.execute(insert(model).values(lote))
+            if not lote:
+                continue
+            # Todas las filas del lote tienen que traer las MISMAS claves: el
+            # INSERT multi-fila arma un unico VALUES y SQLAlchemy no sabe que
+            # poner donde a una fila le falta una columna (CompileError). Los
+            # servicios que enriquecen la carga (nivel_maximo, instock) tocan
+            # solo algunas filas, asi que es facil dejar el lote disparejo sin
+            # darse cuenta: ya rompio la tarea diaria del 31-jul al 03-ago-2026
+            # con un 500 sin detalle. Se nivela aca en vez de confiar en que
+            # cada servicio se acuerde.
+            claves = set().union(*(r.keys() for r in lote))
+            if any(len(r) != len(claves) for r in lote):
+                lote = [{k: r.get(k) for k in claves} for r in lote]
+            db.execute(insert(model).values(lote))
 
     # Reemplazo total (snapshot) en una sola transaccion: si cualquier insert falla
     # (corte de red, timeout del pooler), el rollback conserva el snapshot anterior.

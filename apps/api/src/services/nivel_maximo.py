@@ -190,9 +190,15 @@ def aplicar(filas: list[dict], config: dict) -> dict:
 
     for fila in filas:
         nivel = nivel_de(fila, config)
+        # La clave se escribe SIEMPRE, aunque el nivel sea None. El insert de la
+        # carga es multi-fila (un solo VALUES por lote de 500) y exige que todos
+        # los dicts traigan las mismas claves: si una fila sin demanda se quedaba
+        # sin `nivel_maximo`, SQLAlchemy abortaba con CompileError y la carga
+        # entera moria con un 500 opaco. Rompio la tarea diaria del 31-jul al
+        # 03-ago sin que nadie se enterara.
+        fila["nivel_maximo"] = nivel
         if nivel is None:
             continue
-        fila["nivel_maximo"] = nivel
         resumen["filas_evaluadas"] += 1
         if not activa or not _aplica_a(fila, clases):
             continue
