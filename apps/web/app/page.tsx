@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { BarChart3, ChevronDown, Columns3, Download, Plus, RefreshCw } from "lucide-react";
+import { AlertTriangle, BarChart3, ChevronDown, Columns3, Download, Plus, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { KpiCards } from "@/components/kpi-cards";
 import { GraficosDashboard } from "@/components/graficos-dashboard";
@@ -93,6 +93,11 @@ export default function DashboardPage() {
   const [total, setTotal] = useState(0);
   // Fecha/hora de la última carga de datos desde Power BI (para todos los usuarios).
   const [ultimaSync, setUltimaSync] = useState<string | null>(null);
+  // El sugerido puede quedar viejo sin que nadie se entere: la tarea diaria falla
+  // o no llega a correr y la etiqueta gris de "datos actualizados" pasa
+  // desapercibida. Pasó del 31-jul al 03-ago-2026. El servidor decide cuándo
+  // avisar (cuenta días hábiles) y acá solo se muestra.
+  const [syncViejo, setSyncViejo] = useState<{ dias: number } | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -156,7 +161,10 @@ export default function DashboardPage() {
   useEffect(() => {
     api
       .ultimaSincronizacion()
-      .then((r) => setUltimaSync(r.creado_en))
+      .then((r) => {
+        setUltimaSync(r.creado_en);
+        setSyncViejo(r.desactualizado ? { dias: r.dias_habiles ?? 0 } : null);
+      })
       .catch(() => {
         /* el backend puede no estar arriba todavia */
       });
@@ -270,9 +278,17 @@ export default function DashboardPage() {
             {cargando ? "Cargando…" : `${formatoNumero(nFiltradas)} filas`}
             {detalleFilas}
           </p>
-          {ultimaSync && (
+          {ultimaSync && !syncViejo && (
             <p className="mt-1 text-[12px] text-ink-400">
               Datos actualizados el {formatoFechaHora(ultimaSync)}
+            </p>
+          )}
+          {ultimaSync && syncViejo && (
+            <p className="mt-1 flex items-center gap-1.5 rounded-sm border border-amber-300 bg-amber-50 px-2 py-1 text-[12px] font-medium text-amber-800">
+              <AlertTriangle size={13} className="shrink-0" />
+              El sugerido no se actualiza desde el {formatoFechaHora(ultimaSync)} (
+              {syncViejo.dias} {syncViejo.dias === 1 ? "día hábil" : "días hábiles"}). Lo
+              que veas puede estar desactualizado.
             </p>
           )}
         </div>

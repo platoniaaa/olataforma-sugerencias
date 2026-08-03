@@ -1,4 +1,6 @@
 """Endpoints de auditoria (log de acciones) y notificaciones in-app."""
+from datetime import date, datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
@@ -20,6 +22,31 @@ router = APIRouter(tags=["auditoria"])
 settings = get_settings()
 
 
+def _dias_habiles_entre(desde: date, hasta: date) -> int:
+    """Dias habiles transcurridos entre dos fechas (sabados y domingos no cuentan).
+
+    Se cuenta en dias HABILES y no en horas porque la tarea corre de lunes a
+    viernes: contando horas, todos los lunes avisaria que los datos son "de hace
+    3 dias" cuando en realidad la ultima corrida fue la que correspondia. Un aviso
+    que se equivoca todos los lunes es un aviso que nadie mira.
+    """
+    if hasta <= desde:
+        return 0
+    dias = 0
+    cursor = desde
+    while cursor < hasta:
+        cursor += timedelta(days=1)
+        if cursor.weekday() < 5:  # 0=lunes .. 4=viernes
+            dias += 1
+    return dias
+
+
+# A partir de cuantos dias habiles sin cargar se considera desactualizado. Con 2
+# se avisa recien cuando se perdio una corrida completa: el dia siguiente a una
+# carga normal da 1 y no molesta.
+DIAS_HABILES_PARA_AVISAR = 2
+
+
 @router.get("/api/ultima-sincronizacion")
 def ultima_sync(db: Session = Depends(get_db)):
     """Timestamp de la ultima carga del sugerido, sea cual sea su origen.
@@ -27,7 +54,14 @@ def ultima_sync(db: Session = Depends(get_db)):
     Acepta el sello nuevo del motor (`datos_sincronizados`) y el historico del
     Power BI (`powerbi_sincronizado`), y devuelve el mas reciente. Asi la etiqueta
     "Datos actualizados" refleja la carga real y no queda pegada en la ultima
-    corrida del BI."""
+    corrida del BI.
+
+    Devuelve ademas `desactualizado`: la tarea diaria puede fallar —o no llegar a
+    correr— sin que nadie se entere, y el equipo sigue comprando sobre datos
+    viejos. Paso del 31-jul al 03-ago-2026: dos dias habiles con el sugerido
+    congelado en la foto del 30-jul. El aviso se calcula aca, del lado del
+    servidor, para que no dependa de que el job que fallo alcance a avisar.
+    """
     log = db.scalars(
         select(AuditoriaLog)
         .where(
@@ -38,8 +72,15 @@ def ultima_sync(db: Session = Depends(get_db)):
         .limit(1)
     ).first()
     if not log:
-        return {"creado_en": None, "detalle": None}
-    return {"creado_en": log.creado_en, "detalle": log.detalle}
+        return {"creado_en": None, "detalle": None,
+                "dias_habiles": None, "desactualizado": False}
+    dias = _dias_habiles_entre(log.creado_en.date(), datetime.now(timezone.utc).date())
+    return {
+        "creado_en": log.creado_en,
+        "detalle": log.detalle,
+        "dias_habiles": dias,
+        "desactualizado": dias >= DIAS_HABILES_PARA_AVISAR,
+    }
 
 
 @router.get("/api/auditoria", response_model=AuditoriaPage)

@@ -381,7 +381,14 @@ export const api = {
     );
   },
 
-  async ultimaSincronizacion(): Promise<{ creado_en: string | null; detalle: string | null }> {
+  async ultimaSincronizacion(): Promise<{
+    creado_en: string | null;
+    detalle: string | null;
+    /** Días hábiles desde la última carga (sábado y domingo no cuentan). */
+    dias_habiles?: number | null;
+    /** El servidor considera que el sugerido quedó viejo (la tarea diaria falló o no corrió). */
+    desactualizado?: boolean;
+  }> {
     return getJSON("/api/ultima-sincronizacion");
   },
 
