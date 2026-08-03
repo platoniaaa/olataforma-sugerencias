@@ -26,6 +26,14 @@ export const COLUMNAS: DefColumna[] = [
     info: "Código del producto (SKU maestro del grupo de reemplazos)." },
   { key: "descripcion", label: "Descripcion", tipo: "texto", visiblePorDefecto: true, pin: "left",
     info: "Descripción del producto según el catálogo maestro." },
+  // Frecuencia de venta: en cuantos de los ultimos N meses se vendio. Es lo que
+  // mira un comprador para decidir rapido, y de aca sale la clase ABC.
+  { key: "meses_con_venta_3m", label: "Meses c/Venta 3m", tipo: "numero", visiblePorDefecto: false,
+    info: "De los últimos 3 meses, en cuántos se vendió este repuesto en esta sucursal. Mide frecuencia, no volumen: 3 de 3 se mueve siempre, 1 de 3 es esporádico." },
+  { key: "meses_con_venta_6m", label: "Meses c/Venta 6m", tipo: "numero", visiblePorDefecto: false,
+    info: "Ídem sobre los últimos 6 meses. Es el que define la clase ABC: 5 o más es A, 4 es B." },
+  { key: "meses_con_venta_12m", label: "Meses c/Venta 12m", tipo: "numero", visiblePorDefecto: false,
+    info: "Ídem sobre los últimos 12 meses. Distingue el repuesto que se mueve poco pero constante del que se vendió una sola vez." },
   { key: "clasificacion_abc", label: "ABC", tipo: "abc", visiblePorDefecto: true,
     info: "Clase ABC de la sucursal según en cuántos meses hubo venta (A = más frecuente … D = esporádica). Define la ventana de demanda y el nivel de servicio." },
   { key: "clasificacion_abc_agregada", label: "ABC Agregada", tipo: "abc", visiblePorDefecto: false,

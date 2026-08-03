@@ -10,6 +10,7 @@ import {
   BookOpen,
   Boxes,
   ClipboardList,
+  ClipboardPaste,
   Database,
   FileText,
   FlaskConical,
@@ -36,6 +37,7 @@ type NavItem = {
 const NAV: NavItem[] = [
   { href: "/", label: "Sugerido", icon: BarChart3 },
   { href: "/compras", label: "Compras", icon: ShoppingCart },
+  { href: "/requerimiento", label: "Requerimiento", icon: ClipboardPaste, ocultarSoloLectura: true },
   { href: "/catalogo", label: "Catálogo", icon: BookOpen },
   { href: "/sugerencias-manuales", label: "Sugerencias", icon: ClipboardList, ocultarSoloLectura: true },
   { href: "/ventas-historicas", label: "Ventas", icon: History },

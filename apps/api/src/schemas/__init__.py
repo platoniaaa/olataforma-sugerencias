@@ -41,6 +41,17 @@ from .auditoria import (
     NotificacionesResponse,
     MarcarLeidasRequest,
 )
+from .requerimiento import (
+    AnalizarLineasRequest,
+    AnalizarTextoRequest,
+    ArchivoPortalRequest,
+    LineaPegada,
+    LineaRequerimiento,
+    RequerimientoResponse,
+    ResumenRequerimiento,
+    SkuProveedorCarga,
+    SkuProveedorFila,
+)
 from .incidencia import (
     IncidenciaOut,
     IncidenciaCreate,
@@ -50,6 +61,15 @@ from .incidencia import (
 from .config_modelo import ConfigModeloUpdate
 
 __all__ = [
+    "AnalizarLineasRequest",
+    "AnalizarTextoRequest",
+    "ArchivoPortalRequest",
+    "LineaPegada",
+    "LineaRequerimiento",
+    "RequerimientoResponse",
+    "ResumenRequerimiento",
+    "SkuProveedorCarga",
+    "SkuProveedorFila",
     "SugeridoRow",
     "SugeridoPage",
     "SugeridoKpis",

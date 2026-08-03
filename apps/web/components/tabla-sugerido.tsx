@@ -43,6 +43,8 @@ interface Props {
   /** Notifica al padre los filtros de columna activos, traducidos del multi-select,
    *  para mandarlos al backend (KPIs, conteo y Excel exactos sobre el total). */
   onFiltrosColumnaChange?: (filtros: ColumnaFiltro[]) => void;
+  /** Modo pantalla completa: la grilla se queda con casi todo el alto. */
+  grande?: boolean;
 }
 
 export interface TablaSugeridoHandle {
@@ -277,7 +279,7 @@ function traducirFilterModel(model: Record<string, unknown>): ColumnaFiltro[] {
 }
 
 export const TablaSugerido = forwardRef<TablaSugeridoHandle, Props>(function TablaSugerido(
-  { rows, columnasVisibles, vista, onRowClick, onKpisVisiblesChange, onFiltrosColumnaChange },
+  { rows, columnasVisibles, vista, onRowClick, onKpisVisiblesChange, onFiltrosColumnaChange, grande },
   ref
 ) {
   const gridRef = useRef<AgGridReact<SugeridoRow>>(null);
@@ -654,8 +656,19 @@ export const TablaSugerido = forwardRef<TablaSugeridoHandle, Props>(function Tab
 
   return (
     <div
-      className="ag-theme-quartz"
-      style={{ width: "100%", height: "calc(100vh - 290px)", minHeight: 380 }}
+      /* `flex-1 min-h-0` es lo que hace que en pantalla completa la grilla se
+         estire de verdad: el contenedor padre es flex column, y sin min-h-0 el
+         hijo no puede achicarse por debajo de su contenido y el alto calculado
+         queda corto. */
+      className={`ag-theme-quartz${grande ? " min-h-0 flex-1" : ""}`}
+      /* En modo pantalla completa se esconden titulo, tarjetas, graficos y filtros,
+         asi que la grilla se queda con casi todo el alto: pasa de ~19 filas a la
+         vista a ~28, que es de lo que se trata "agrandar". */
+      style={{
+        width: "100%",
+        height: grande ? undefined : "calc(100vh - 290px)",
+        minHeight: 380,
+      }}
       // Bloquea el menu nativo del navegador dentro del grid: el preventDefault
       // de AG Grid no siempre alcanza (sobre celdas con cellRenderer custom,
       // padding o cuando el target real es un span hijo). Esto lo cubre todo.

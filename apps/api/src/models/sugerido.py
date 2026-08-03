@@ -27,6 +27,14 @@ class Sugerido(Base):
 
     # --- Clasificacion / origen ---
     clasificacion_abc: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    # Meses CON venta de los ultimos 3/6/12 (la frecuencia con que se mueve el
+    # repuesto en esa sucursal). Es de donde sale la clase ABC, y es el dato con
+    # el que un comprador decide rapido: 6 de 12 meses se compra, 1 de 12 no.
+    # El motor las venia publicando desde siempre y la carga las descartaba con
+    # un "Columnas ignoradas (sin mapeo)" que nadie leyo.
+    meses_con_venta_3m: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    meses_con_venta_6m: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    meses_con_venta_12m: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Clase ABC del producto a nivel AGREGADO (todas las sucursales), no local.
     clasificacion_abc_agregada: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     proveedor: Mapped[str | None] = mapped_column(String, nullable=True, index=True)

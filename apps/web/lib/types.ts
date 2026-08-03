@@ -9,6 +9,10 @@ export interface SugeridoRow {
   nombre_sucursal: string | null;
   empresa: string | null;
   clasificacion_abc: string | null;
+  /** Meses CON venta de los últimos 3/6/12: la frecuencia con que se mueve. */
+  meses_con_venta_3m: number | null;
+  meses_con_venta_6m: number | null;
+  meses_con_venta_12m: number | null;
   proveedor: string | null;
   filtro1_final: string | null;
   tipo_origen: string | null;
@@ -817,4 +821,46 @@ export interface DetalleSugerencia {
     usuario_email: string | null;
     detalle: string | null;
   }[];
+}
+
+/** Una línea del requerimiento de sucursal, con todo lo necesario para decidir. */
+export interface LineaRequerimiento {
+  producto: string;
+  texto_original: string | null;
+  cantidad: number | null;
+  /** en_sugerido = el modelo ya lo pide acá · sin_venta_local = existe pero nunca
+   *  se vendió en esta sucursal · no_existe = error de tipeo. */
+  estado: "en_sugerido" | "sin_venta_local" | "no_existe";
+  duplicado: boolean;
+  descripcion: string | null;
+  proveedor: string | null;
+  costo_unitario: number | null;
+  reemplazos: string | null;
+  nombre_sucursal: string | null;
+  stock_sucursal: number | null;
+  stock_cd: number | null;
+  stock_nacional: number | null;
+  meses_con_venta_3m: number | null;
+  meses_con_venta_6m: number | null;
+  meses_con_venta_12m: number | null;
+  clasificacion_abc: string | null;
+  total_sugerido_suc: number | null;
+  /** Cuando no se vende en esta sucursal: dónde sí se vende. */
+  frecuencia_otra_sucursal: {
+    sucursal_id: string;
+    nombre_sucursal: string;
+    meses_con_venta_12m: number;
+    clasificacion_abc: string | null;
+  } | null;
+}
+
+export interface RequerimientoResponse {
+  lineas: LineaRequerimiento[];
+  resumen: {
+    total: number;
+    en_sugerido: number;
+    sin_venta_local: number;
+    no_existe: number;
+    duplicados: number;
+  };
 }

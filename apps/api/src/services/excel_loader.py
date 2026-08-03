@@ -49,6 +49,10 @@ HEADER_ALIASES: dict[str, str] = {
     "nombre_sucursal": "nombre_sucursal",
     "empresa": "empresa",
     "clasificacion_abc": "clasificacion_abc",
+    # El motor las manda como "Meses con Venta 3m" -> _norm -> meses_con_venta_3m.
+    "meses_con_venta_3m": "meses_con_venta_3m",
+    "meses_con_venta_6m": "meses_con_venta_6m",
+    "meses_con_venta_12m": "meses_con_venta_12m",
     "abc": "clasificacion_abc",
     "clasificacion_abc_agregada": "clasificacion_abc_agregada",
     "abc_agregada": "clasificacion_abc_agregada",
@@ -131,6 +135,7 @@ HEADER_ALIASES: dict[str, str] = {
 INT_FIELDS = {
     "lead_time_dias", "lt_efectivo", "lt_cd_a_sucursal_dias", "prioridad_cd",
     "stock_seguridad", "punto_de_pedido",
+    "meses_con_venta_3m", "meses_con_venta_6m", "meses_con_venta_12m",
     "stock_linderos", "stock_curico", "stock_talca", "stock_rancagua",
     "stock_diez_de_julio_2", "stock_chillan", "stock_cd_repuestos",
     "stock_brasil_18", "stock_placilla", "stock_chillan_viejo", "stock_talca_2",
@@ -357,7 +362,15 @@ def persistir_filas(
     # Inserts en multi-fila (un INSERT con muchas VALUES por lote). Con pg8000 esto es
     # MUCHO mas rapido que executemany (que iria fila por fila por la red). chunk=500
     # mantiene los parametros por debajo del limite de Postgres (~65k).
-    def _bulk(model, registros: list[dict], chunk: int = 500) -> None:
+    def _bulk(model, registros: list[dict], chunk: int | None = None) -> None:
+        # El tope de parametros por sentencia lo pone el driver (Postgres ~65k,
+        # SQLite ~32k) y se gasta en columnas x filas. Con un lote fijo de 500 el
+        # margen se comia solo al agregar columnas: con 67 columnas son 33.500
+        # parametros y SQLite ya revienta con "too many SQL variables". Se calcula
+        # segun el ancho real de la fila en vez de confiar en un numero magico.
+        if chunk is None:
+            columnas = max((len(r) for r in registros), default=1)
+            chunk = max(1, 30_000 // max(columnas, 1))
         for i in range(0, len(registros), chunk):
             lote = registros[i : i + chunk]
             if not lote:

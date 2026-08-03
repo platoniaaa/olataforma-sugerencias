@@ -130,6 +130,10 @@ def create_all() -> None:
         "ALTER TABLE configuracion_modelo ADD COLUMN IF NOT EXISTS reponer_a_maximo BOOLEAN NOT NULL DEFAULT TRUE",
         "ALTER TABLE configuracion_modelo ADD COLUMN IF NOT EXISTS clases_que_reponen VARCHAR NOT NULL DEFAULT 'AB'",
         "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS nivel_maximo INTEGER",
+        # 2026-08: frecuencia de venta (meses con venta de los ultimos 3/6/12).
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS meses_con_venta_3m INTEGER",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS meses_con_venta_6m INTEGER",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS meses_con_venta_12m INTEGER",
     ]
     # SQLite NO soporta "ADD COLUMN IF NOT EXISTS" (error de sintaxis que se
     # tragaba el try, dejando bases locales viejas sin las columnas nuevas):

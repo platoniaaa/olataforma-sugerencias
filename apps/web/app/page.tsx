@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, BarChart3, ChevronDown, Columns3, Download, Plus, RefreshCw } from "lucide-react";
+import { AlertTriangle, BarChart3, ChevronDown, Columns3, Download, Maximize2, Minimize2, Plus, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { KpiCards } from "@/components/kpi-cards";
 import { GraficosDashboard } from "@/components/graficos-dashboard";
@@ -114,6 +114,10 @@ export default function DashboardPage() {
   // Ref al grid (para limpiar sus filtros de columna desde "Limpiar filtros").
   const tablaRef = useRef<TablaSugeridoHandle>(null);
   const [exportando, setExportando] = useState(false);
+  // Modo pantalla completa de la tabla: esconde titulo, tarjetas, graficos y
+  // filtros para que entren muchas mas filas a la vista. El comprador revisa
+  // listas largas y en el alto normal solo ve un puñado.
+  const [tablaGrande, setTablaGrande] = useState(false);
   const [mostrarGraficos, setMostrarGraficos] = useState(false);
   // Filtros de columna del grid (traducidos del multi-select). Se mandan al backend
   // para que KPIs, conteo y Excel sean EXACTOS sobre el total (no solo las 5.000
@@ -233,6 +237,13 @@ export default function DashboardPage() {
     return () => clearTimeout(t);
   }, [cargarKpis]);
 
+  useEffect(() => {
+    if (!tablaGrande) return;
+    const salir = (e: KeyboardEvent) => e.key === "Escape" && setTablaGrande(false);
+    window.addEventListener("keydown", salir);
+    return () => window.removeEventListener("keydown", salir);
+  }, [tablaGrande]);
+
   const nombresSucursales = useMemo(
     () => sucursales.map((s) => s.nombre ?? s.sucursal_id),
     [sucursales]
@@ -267,18 +278,29 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="space-y-4">
+    <div
+      className={
+        tablaGrande
+          ? "fixed inset-0 z-40 flex flex-col gap-3 overflow-auto bg-paper-50 p-4"
+          : "space-y-4"
+      }
+    >
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="kicker mb-1">Reposición</p>
-          <h1 className="editorial-rule font-display text-[28px] font-medium leading-none tracking-tight text-ink-900">
-            Sugerido de compras
-          </h1>
-          <p className="mt-3 text-[13px] text-ink-500">
+          {/* En pantalla completa el titulo y la fecha se van: son ~120px que
+              valen 5 filas mas de tabla, que es para lo que se entra a este modo.
+              El conteo de filas se queda, porque es lo unico que se sigue mirando. */}
+          {!tablaGrande && <p className="kicker mb-1">Reposición</p>}
+          {!tablaGrande && (
+            <h1 className="editorial-rule font-display text-[28px] font-medium leading-none tracking-tight text-ink-900">
+              Sugerido de compras
+            </h1>
+          )}
+          <p className={`text-[13px] text-ink-500 ${tablaGrande ? "" : "mt-3"}`}>
             {cargando ? "Cargando…" : `${formatoNumero(nFiltradas)} filas`}
-            {detalleFilas}
+            {!tablaGrande && detalleFilas}
           </p>
-          {ultimaSync && !syncViejo && (
+          {ultimaSync && !syncViejo && !tablaGrande && (
             <p className="mt-1 text-[12px] text-ink-400">
               Datos actualizados el {formatoFechaHora(ultimaSync)}
             </p>
@@ -295,6 +317,15 @@ export default function DashboardPage() {
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={cargar}>
             <RefreshCw size={15} /> Actualizar
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setTablaGrande((v) => !v)}
+            title={tablaGrande ? "Volver a la vista normal (Esc)" : "Ver la tabla en pantalla completa"}
+          >
+            {tablaGrande ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+            {tablaGrande ? "Salir" : "Agrandar"}
           </Button>
           <Button variant="outline" size="sm" onClick={() => setModalCols(true)}>
             <Columns3 size={15} /> Columnas
@@ -336,11 +367,11 @@ export default function DashboardPage() {
           lo ve quien puede dispararlo (admin o EMAILS_ACTUALIZAR): republica lo que ve
           todo el equipo. Distinto del boton "Actualizar" de arriba, que solo recarga
           la tabla con lo ya publicado. */}
-      {puedeActualizar && <SincronizacionManual compacto />}
+      {puedeActualizar && !tablaGrande && <SincronizacionManual compacto />}
 
-      <KpiCards kpis={kpis} cargando={cargando} />
+      {!tablaGrande && <KpiCards kpis={kpis} cargando={cargando} />}
 
-      <div>
+      <div className={tablaGrande ? "hidden" : undefined}>
         <button
           onClick={() => setMostrarGraficos((v) => !v)}
           className="flex items-center gap-1.5 text-[13px] font-medium text-slate-600 hover:text-slate-900"
@@ -375,6 +406,7 @@ export default function DashboardPage() {
 
       <TablaSugerido
         ref={tablaRef}
+        grande={tablaGrande}
         rows={rows}
         columnasVisibles={colsVisibles}
         vista={filtros.vista ?? "todas"}

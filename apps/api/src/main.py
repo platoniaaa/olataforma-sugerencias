@@ -25,6 +25,7 @@ from .routers import (
     instock,
     inventario,
     productos,
+    requerimiento,
     sugerencias_manuales,
     sugerido,
     ventas_historicas,
@@ -83,6 +84,7 @@ app.include_router(productos.router, dependencies=_protegido)
 app.include_router(sugerencias_manuales.router, dependencies=_protegido)
 app.include_router(instock.router, dependencies=_protegido)
 app.include_router(compras.router, dependencies=_protegido)
+app.include_router(requerimiento.router, dependencies=_protegido)
 app.include_router(catalogo.router, dependencies=_protegido)
 app.include_router(auditoria.router, dependencies=_protegido)
 app.include_router(ventas_historicas.router, dependencies=_protegido)

@@ -21,6 +21,10 @@ class SugeridoRow(BaseModel):
     nombre_sucursal: str | None = None
     empresa: str | None = None
     clasificacion_abc: str | None = None
+    # Meses con venta de los ultimos 3/6/12: la frecuencia con que se mueve.
+    meses_con_venta_3m: int | None = None
+    meses_con_venta_6m: int | None = None
+    meses_con_venta_12m: int | None = None
     proveedor: str | None = None
     filtro1_final: str | None = None
     tipo_origen: str | None = None

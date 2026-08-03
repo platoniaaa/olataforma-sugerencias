@@ -18,6 +18,7 @@ import type {
   Sucursal,
   SugerenciaManual,
   SugeridoFiltros,
+  RequerimientoResponse,
   SugeridoKpis,
   SugeridoPage,
   Recurrente,
@@ -53,6 +54,16 @@ async function req(path: string, init: RequestInit = {}): Promise<Response> {
 async function getJSON<T>(path: string): Promise<T> {
   const res = await req(path);
   if (!res.ok) throw new Error(`Error ${res.status} en ${path}`);
+  return res.json() as Promise<T>;
+}
+
+async function postJSON<T>(path: string, body: unknown): Promise<T> {
+  const res = await req(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await mensajeError(res, `Error ${res.status} en ${path}`));
   return res.json() as Promise<T>;
 }
 
@@ -209,6 +220,49 @@ export const api = {
     a.download = nombre;
     a.click();
     URL.revokeObjectURL(url);
+  },
+
+  // --- Requerimiento de sucursal: pegar la lista, decidir, bajar el archivo ---
+
+  async analizarRequerimiento(
+    sucursalId: string,
+    texto: string
+  ): Promise<RequerimientoResponse> {
+    return postJSON("/api/requerimiento/analizar", { sucursal_id: sucursalId, texto });
+  },
+
+  async reanalizarRequerimiento(
+    sucursalId: string,
+    lineas: { producto: string; cantidad: number | null }[]
+  ): Promise<RequerimientoResponse> {
+    return postJSON("/api/requerimiento/reanalizar", { sucursal_id: sucursalId, lineas });
+  },
+
+  /** Descarga el CSV del portal. Devuelve cuántas líneas quedaron fuera. */
+  async archivoPortal(
+    proveedor: "FORD" | "GILDEMEISTER",
+    sucursalId: string | null,
+    lineas: { producto: string; cantidad: number | null }[]
+  ): Promise<number> {
+    const res = await req("/api/requerimiento/archivo-portal", {
+      method: "POST",
+      body: JSON.stringify({ proveedor, sucursal_id: sucursalId, lineas }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail ?? "No se pudo generar el archivo");
+    }
+    const descartadas = Number(res.headers.get("X-Lineas-Descartadas") ?? 0);
+    const cd = res.headers.get("Content-Disposition") ?? "";
+    const nombre = /filename="?([^"]+)"?/.exec(cd)?.[1] ?? "pedido.csv";
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = nombre;
+    a.click();
+    URL.revokeObjectURL(url);
+    return descartadas;
   },
 
   async productos(q: string): Promise<{ items: Producto[] }> {
