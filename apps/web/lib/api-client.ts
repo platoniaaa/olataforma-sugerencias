@@ -13,8 +13,12 @@ import type {
   DimensionAgrupado,
   EstadoActualizacion,
   InstockResumen,
+  MisSucursales,
   NotificacionesResponse,
   Producto,
+  ProductoBuscado,
+  Requerimiento,
+  RequerimientosPage,
   Sucursal,
   SugerenciaManual,
   SugeridoFiltros,
@@ -132,7 +136,9 @@ export const api = {
       // Si la API todavia no manda el campo (ventana de despliegue), no degradar a
       // un admin: se cae a es_admin en vez de escribir un false que persiste.
       Boolean(data.puede_calibrar ?? data.es_admin),
-      Boolean(data.puede_actualizar ?? data.es_admin));
+      Boolean(data.puede_actualizar ?? data.es_admin),
+      Boolean(data.es_vendedor),
+      Array.isArray(data.sucursales) ? data.sucursales : []);
   },
 
   async health(): Promise<{ status: string }> {
@@ -246,6 +252,7 @@ export const api = {
   ): Promise<number> {
     const res = await req("/api/requerimiento/archivo-portal", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ proveedor, sucursal_id: sucursalId, lineas }),
     });
     if (!res.ok) {
@@ -263,6 +270,66 @@ export const api = {
     a.click();
     URL.revokeObjectURL(url);
     return descartadas;
+  },
+
+  // --- Bandeja de requerimientos (vendedor de sucursal <-> comprador) --- //
+
+  /** Sucursales por las que puede pedir el usuario. El vendedor nunca las escribe. */
+  async misSucursales(): Promise<MisSucursales> {
+    return getJSON("/api/requerimientos/mis-sucursales");
+  },
+
+  /** Buscador del carro: solo productos de la lista de precios de Curifor. */
+  async buscarProductos(q: string, sucursalId?: string | null): Promise<ProductoBuscado[]> {
+    const p = new URLSearchParams({ q });
+    if (sucursalId) p.set("sucursal_id", sucursalId);
+    return getJSON(`/api/requerimientos/buscar?${p.toString()}`);
+  },
+
+  /** Lista pegada -> líneas del carro, resueltas contra la lista de precios. */
+  async pegarLista(
+    texto: string,
+    sucursalId?: string | null
+  ): Promise<(ProductoBuscado & { cantidad: number | null; encontrado: boolean; texto_original: string | null })[]> {
+    return postJSON("/api/requerimientos/pegar", { texto, sucursal_id: sucursalId });
+  },
+
+  /** La bandeja. El vendedor recibe los suyos; el comprador, todos. */
+  async requerimientos(estados: string[] = []): Promise<RequerimientosPage> {
+    const p = new URLSearchParams();
+    estados.forEach((e) => p.append("estado", e));
+    const qs = p.toString();
+    return getJSON(`/api/requerimientos${qs ? `?${qs}` : ""}`);
+  },
+
+  async requerimiento(id: number): Promise<Requerimiento> {
+    return getJSON(`/api/requerimientos/${id}`);
+  },
+
+  async crearRequerimiento(body: {
+    sucursal_id?: string | null;
+    nota?: string | null;
+    lineas: { producto: string; cantidad: number; comentario?: string | null }[];
+  }): Promise<Requerimiento> {
+    return postJSON("/api/requerimientos", body);
+  },
+
+  /** Decisión del comprador: cantidades aprobadas, nota y estado final. */
+  async actualizarRequerimiento(
+    id: number,
+    body: {
+      estado?: string;
+      nota_comprador?: string | null;
+      cantidades?: { linea_id: number; cantidad: number | null }[];
+    }
+  ): Promise<Requerimiento> {
+    const res = await req(`/api/requerimientos/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo guardar"));
+    return res.json() as Promise<Requerimiento>;
   },
 
   async productos(q: string): Promise<{ items: Producto[] }> {

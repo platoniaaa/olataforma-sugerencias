@@ -128,6 +128,62 @@ def sucursales_permitidas(email: str = Depends(requiere_auth), db=Depends(get_db
     return vals or None
 
 
+# --------------------------- vendedor de sucursal --------------------------- #
+def es_vendedor(email: str, db) -> bool:
+    """True si el usuario es un vendedor de sucursal (no de abastecimiento)."""
+    from ..models import Usuario  # import local para evitar ciclo
+
+    user = db.get(Usuario, email)
+    return bool(user and getattr(user, "es_vendedor", False))
+
+
+def requiere_vendedor(email: str = Depends(requiere_auth), db=Depends(get_db)) -> str:
+    """Endpoints que solo tienen sentido para un vendedor (armar su requerimiento).
+
+    El admin tambien pasa: si no, nadie podria probar la vista sin crearse un
+    usuario aparte.
+    """
+    from ..models import Usuario  # import local para evitar ciclo
+
+    user = db.get(Usuario, email)
+    if user and (user.es_vendedor or user.es_admin):
+        return email
+    raise HTTPException(status_code=403, detail="Solo para vendedores de sucursal")
+
+
+def requiere_comprador(email: str = Depends(requiere_auth), db=Depends(get_db)) -> str:
+    """Bloquea al vendedor en todo lo que es de abastecimiento.
+
+    El vendedor entra a la misma plataforma que el comprador, asi que esconder el
+    menu no alcanza: la URL sigue existiendo. Este es el gate de verdad.
+    """
+    if es_vendedor(email, db):
+        raise HTTPException(
+            status_code=403,
+            detail="Tu usuario es de sucursal: solo puede crear y ver requerimientos.",
+        )
+    return email
+
+
+def sucursales_del_vendedor(email: str, db) -> list[str]:
+    """Sucursales por las que un vendedor puede pedir.
+
+    Sale de `sucursales_permitidas`: el vendedor NUNCA escribe su sucursal, se la
+    da el usuario. Un vendedor sin sucursales asignadas esta mal configurado y no
+    puede pedir por ninguna (mejor eso que dejarlo pedir por todas).
+    """
+    from ..models import Usuario  # import local para evitar ciclo
+
+    user = db.get(Usuario, email)
+    if not user or not user.sucursales_permitidas:
+        return []
+    try:
+        vals = json.loads(user.sucursales_permitidas)
+    except (ValueError, TypeError):
+        return []
+    return [str(v) for v in vals if v] if isinstance(vals, list) else []
+
+
 def requiere_ver_accesos(email: str = Depends(requiere_auth), db=Depends(get_db)) -> str:
     """Autoriza la vista de accesos (quien entro y cuando): admin o email en la lista."""
     from ..models import Usuario  # import local para evitar ciclo

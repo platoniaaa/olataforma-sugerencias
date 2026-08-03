@@ -15,13 +15,23 @@ import {
   FileText,
   FlaskConical,
   History,
+  Inbox,
   LogOut,
+  PlusCircle,
   ShoppingCart,
   Sigma,
   SlidersHorizontal,
   X,
 } from "lucide-react";
-import { getEmail, getEsAdmin, getNombre, getPuedeCalibrar, getSoloLectura, logout } from "@/lib/auth";
+import {
+  getEmail,
+  getEsAdmin,
+  getEsVendedor,
+  getNombre,
+  getPuedeCalibrar,
+  getSoloLectura,
+  logout,
+} from "@/lib/auth";
 
 type NavItem = {
   href: string;
@@ -34,10 +44,19 @@ type NavItem = {
   ocultarSoloLectura?: boolean;
 };
 
+// Menu del vendedor de sucursal. No es el menu completo con cosas escondidas: es
+// OTRO menu, con las dos unicas cosas que tiene que hacer. Un vendedor que ve
+// catorce secciones que no le sirven se equivoca de una; con dos, no.
+const NAV_VENDEDOR: NavItem[] = [
+  { href: "/mis-requerimientos/nuevo", label: "Nuevo requerimiento", icon: PlusCircle },
+  { href: "/mis-requerimientos", label: "Mis requerimientos", icon: ClipboardList },
+];
+
 const NAV: NavItem[] = [
   { href: "/", label: "Sugerido", icon: BarChart3 },
   { href: "/compras", label: "Compras", icon: ShoppingCart },
-  { href: "/requerimiento", label: "Requerimiento", icon: ClipboardPaste, ocultarSoloLectura: true },
+  { href: "/requerimientos", label: "Requerimientos", icon: Inbox, ocultarSoloLectura: true },
+  { href: "/requerimiento", label: "Pegar lista", icon: ClipboardPaste, ocultarSoloLectura: true },
   { href: "/catalogo", label: "Catálogo", icon: BookOpen },
   { href: "/sugerencias-manuales", label: "Sugerencias", icon: ClipboardList, ocultarSoloLectura: true },
   { href: "/ventas-historicas", label: "Ventas", icon: History },
@@ -62,12 +81,15 @@ export function Sidebar({ open, onClose }: Props) {
   const esAdmin = getEsAdmin();
   const soloLectura = getSoloLectura();
   const puedeCalibrar = getPuedeCalibrar();
-  const items = NAV.filter(
-    (n) =>
-      (!n.soloAdmin || esAdmin) &&
-      (!n.soloCalibracion || puedeCalibrar) &&
-      (!n.ocultarSoloLectura || !soloLectura)
-  );
+  const esVendedor = getEsVendedor();
+  const items = esVendedor
+    ? NAV_VENDEDOR
+    : NAV.filter(
+        (n) =>
+          (!n.soloAdmin || esAdmin) &&
+          (!n.soloCalibracion || puedeCalibrar) &&
+          (!n.ocultarSoloLectura || !soloLectura)
+      );
 
   // Cerrar con ESC.
   useEffect(() => {

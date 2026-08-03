@@ -19,6 +19,7 @@ from .venta_historica import VentaHistorica
 from .configuracion_modelo import ConfiguracionModelo
 from .lead_time_proveedor import LeadTimeProveedorSucursal
 from .repuesto_instock import RepuestoInstock
+from .requerimiento import Requerimiento, RequerimientoLinea
 from .solicitud_actualizacion import SolicitudActualizacion
 
 __all__ = [
@@ -42,5 +43,7 @@ __all__ = [
     "ConfiguracionModelo",
     "LeadTimeProveedorSucursal",
     "RepuestoInstock",
+    "Requerimiento",
+    "RequerimientoLinea",
     "SolicitudActualizacion",
 ]

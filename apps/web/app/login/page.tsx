@@ -5,7 +5,10 @@ import { useRouter } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api-client";
-import { estaAutenticado } from "@/lib/auth";
+import { estaAutenticado, getEsVendedor } from "@/lib/auth";
+
+/** El vendedor de sucursal no entra al sugerido: entra a lo suyo. */
+const INICIO = () => (getEsVendedor() ? "/mis-requerimientos" : "/");
 
 export default function LoginPage() {
   const router = useRouter();
@@ -15,7 +18,7 @@ export default function LoginPage() {
   const [entrando, setEntrando] = useState(false);
 
   useEffect(() => {
-    if (estaAutenticado()) router.replace("/");
+    if (estaAutenticado()) router.replace(INICIO());
   }, [router]);
 
   const ingresar = async (e: React.FormEvent) => {
@@ -24,7 +27,7 @@ export default function LoginPage() {
     setEntrando(true);
     try {
       await api.login(email.trim().toLowerCase(), password);
-      router.replace("/");
+      router.replace(INICIO());
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo iniciar sesión");
     } finally {

@@ -864,3 +864,73 @@ export interface RequerimientoResponse {
     duplicados: number;
   };
 }
+
+// --------------------------------------------------------------------------- //
+// Bandeja de requerimientos: el vendedor arma el carro, el comprador lo resuelve.
+// --------------------------------------------------------------------------- //
+
+/** Una fila del buscador del carro. Solo sale lo que está en la lista de precios. */
+export interface ProductoBuscado {
+  producto: string;
+  descripcion: string | null;
+  precio: number | null;
+  stock_sucursal: number | null;
+  stock_nacional: number | null;
+  familia: string | null;
+}
+
+/** Una línea del carro del vendedor antes de enviarlo (vive solo en el navegador).
+ *  Ojo: `LineaCarro` a secas ya existe y es otra cosa (el carro de compra del
+ *  comprador, por proveedor). */
+export interface LineaCarroRequerimiento {
+  producto: string;
+  descripcion: string | null;
+  precio: number | null;
+  stock_sucursal: number | null;
+  stock_nacional: number | null;
+  cantidad: number;
+  comentario: string | null;
+}
+
+/** Una línea ya guardada. `analisis` solo llega en la vista del comprador. */
+export interface LineaGuardada {
+  id: number;
+  producto: string;
+  descripcion: string | null;
+  precio_lista: number | null;
+  cantidad_pedida: number;
+  cantidad_aprobada: number | null;
+  comentario: string | null;
+  analisis: LineaRequerimiento | null;
+}
+
+export type EstadoRequerimiento = "enviado" | "en_revision" | "procesado" | "rechazado";
+
+export interface Requerimiento {
+  id: number;
+  sucursal_id: string;
+  nombre_sucursal: string | null;
+  creado_por: string;
+  creado_por_nombre: string | null;
+  creado_en: string;
+  estado: EstadoRequerimiento;
+  nota: string | null;
+  revisado_por: string | null;
+  revisado_en: string | null;
+  nota_comprador: string | null;
+  n_lineas: number;
+  total_estimado: number | null;
+  lineas: LineaGuardada[];
+}
+
+export interface RequerimientosPage {
+  items: Requerimiento[];
+  total: number;
+  sin_revisar: number;
+}
+
+export interface MisSucursales {
+  sucursales: string[];
+  es_vendedor: boolean;
+  puede_elegir: boolean;
+}

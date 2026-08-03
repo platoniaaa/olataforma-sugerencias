@@ -26,11 +26,17 @@ from .routers import (
     inventario,
     productos,
     requerimiento,
+    requerimientos,
     sugerencias_manuales,
     sugerido,
     ventas_historicas,
 )
-from .services.auth import requiere_admin, requiere_auth, requiere_calibracion
+from .services.auth import (
+    requiere_admin,
+    requiere_auth,
+    requiere_calibracion,
+    requiere_comprador,
+)
 
 settings = get_settings()
 
@@ -79,16 +85,22 @@ app.include_router(actualizacion.router)
 
 # Protegidos (requieren sesion):
 _protegido = [Depends(requiere_auth)]
-app.include_router(sugerido.router, dependencies=_protegido)
-app.include_router(productos.router, dependencies=_protegido)
-app.include_router(sugerencias_manuales.router, dependencies=_protegido)
-app.include_router(instock.router, dependencies=_protegido)
-app.include_router(compras.router, dependencies=_protegido)
-app.include_router(requerimiento.router, dependencies=_protegido)
-app.include_router(catalogo.router, dependencies=_protegido)
+# Solo Abastecimiento: el vendedor de sucursal entra a la MISMA plataforma, asi que
+# esconderle el menu no alcanza (la URL sigue existiendo). Este es el gate real.
+_abastecimiento = [Depends(requiere_comprador)]
+app.include_router(sugerido.router, dependencies=_abastecimiento)
+app.include_router(productos.router, dependencies=_abastecimiento)
+app.include_router(sugerencias_manuales.router, dependencies=_abastecimiento)
+app.include_router(instock.router, dependencies=_abastecimiento)
+app.include_router(compras.router, dependencies=_abastecimiento)
+app.include_router(requerimiento.router, dependencies=_abastecimiento)
+# Bandeja de requerimientos: la comparten vendedor y comprador (el rol se resuelve
+# dentro, porque cada uno ve una cosa distinta del mismo dato).
+app.include_router(requerimientos.router, dependencies=_protegido)
+app.include_router(catalogo.router, dependencies=_abastecimiento)
 app.include_router(auditoria.router, dependencies=_protegido)
-app.include_router(ventas_historicas.router, dependencies=_protegido)
-app.include_router(inventario.router, dependencies=_protegido)
+app.include_router(ventas_historicas.router, dependencies=_abastecimiento)
+app.include_router(inventario.router, dependencies=_abastecimiento)
 # Incidencias: todos reportan y ven lo suyo; gestionar exige admin en el endpoint.
 app.include_router(incidencias.router, dependencies=_protegido)
 # Admin: requiere flag es_admin (no solo estar logueado).

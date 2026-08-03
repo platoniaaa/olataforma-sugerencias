@@ -26,4 +26,9 @@ class Usuario(Base):
     # Usuario de solo lectura: ve todo (dentro de sus sucursales) pero NO puede
     # crear/editar/borrar sugerencias manuales (el backend da 403 en esas rutas).
     solo_lectura: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Vendedor de sucursal: NO es un usuario de abastecimiento. Solo arma
+    # requerimientos de compra para su sucursal y ve los suyos; el sugerido, las
+    # compras y el resto de la plataforma no le corresponden (el backend da 403).
+    # Es lo contrario de un permiso extra: recorta lo que ya existe.
+    es_vendedor: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

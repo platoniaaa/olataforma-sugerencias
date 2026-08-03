@@ -12,7 +12,7 @@ import { ConfigurarColumnas } from "@/components/configurar-columnas";
 import { ModalSugerenciaManual } from "@/components/modal-sugerencia-manual";
 import { api } from "@/lib/api-client";
 import { SincronizacionManual } from "@/components/sincronizacion-manual";
-import { getEsAdmin, getPuedeActualizar, getSoloLectura } from "@/lib/auth";
+import { getEsAdmin, getEsVendedor, getPuedeActualizar, getSoloLectura } from "@/lib/auth";
 import { columnasPorDefectoVista } from "@/lib/columnas";
 import { formatoFechaHora, formatoNumero } from "@/lib/formato";
 import { STORAGE_KEYS, guardar, leer } from "@/lib/persistencia-dashboard";
@@ -49,6 +49,13 @@ function leerColumnasVista(vista: string): string[] {
 
 export default function DashboardPage() {
   const router = useRouter();
+
+  // El vendedor de sucursal no tiene nada que hacer en el sugerido (el backend le
+  // da 403 igual): se le manda a lo suyo en vez de mostrarle una pantalla rota.
+  const esVendedor = getEsVendedor();
+  useEffect(() => {
+    if (esVendedor) router.replace("/mis-requerimientos");
+  }, [esVendedor, router]);
 
   // Lazy init: leemos localStorage (namespaced por email) ANTES del primer render
   // para que el efecto de fetch arranque ya con los filtros buenos. Si guardáramos

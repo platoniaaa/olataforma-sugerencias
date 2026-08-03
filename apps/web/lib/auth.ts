@@ -7,6 +7,8 @@ const ES_ADMIN = "sugerido_es_admin";
 const SOLO_LECTURA = "sugerido_solo_lectura";
 const PUEDE_CALIBRAR = "sugerido_puede_calibrar";
 const PUEDE_ACTUALIZAR = "sugerido_puede_actualizar";
+const ES_VENDEDOR = "sugerido_es_vendedor";
+const SUCURSALES = "sugerido_sucursales";
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -58,9 +60,30 @@ export function getPuedeActualizar(): boolean {
   return v === "1";
 }
 
+/** True si el usuario es un vendedor de sucursal: la plataforma se le recorta a
+ *  armar y seguir sus requerimientos. El gate real es el 403 del backend
+ *  (`requiere_comprador`); esto solo decide que se le muestra. */
+export function getEsVendedor(): boolean {
+  if (typeof window === "undefined") return false;
+  return localStorage.getItem(ES_VENDEDOR) === "1";
+}
+
+/** Sucursales del usuario. Para el vendedor son por las que puede pedir: nunca
+ *  las escribe a mano, que es lo que evita el requerimiento cargado a la sucursal
+ *  equivocada. */
+export function getSucursales(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const v = JSON.parse(localStorage.getItem(SUCURSALES) ?? "[]");
+    return Array.isArray(v) ? (v as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 export function setSession(
   token: string, email: string, nombre: string | null, esAdmin = false, soloLectura = false,
-  puedeCalibrar = false, puedeActualizar = false
+  puedeCalibrar = false, puedeActualizar = false, esVendedor = false, sucursales: string[] = []
 ) {
   localStorage.setItem(TOKEN, token);
   localStorage.setItem(EMAIL, email);
@@ -70,6 +93,8 @@ export function setSession(
   localStorage.setItem(SOLO_LECTURA, soloLectura ? "1" : "0");
   localStorage.setItem(PUEDE_CALIBRAR, puedeCalibrar ? "1" : "0");
   localStorage.setItem(PUEDE_ACTUALIZAR, puedeActualizar ? "1" : "0");
+  localStorage.setItem(ES_VENDEDOR, esVendedor ? "1" : "0");
+  localStorage.setItem(SUCURSALES, JSON.stringify(sucursales ?? []));
 }
 
 export function clearSession() {
@@ -80,6 +105,8 @@ export function clearSession() {
   localStorage.removeItem(SOLO_LECTURA);
   localStorage.removeItem(PUEDE_CALIBRAR);
   localStorage.removeItem(PUEDE_ACTUALIZAR);
+  localStorage.removeItem(ES_VENDEDOR);
+  localStorage.removeItem(SUCURSALES);
 }
 
 export function estaAutenticado(): boolean {
