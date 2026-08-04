@@ -103,97 +103,135 @@ def _leer_csv(path: Path) -> list[dict]:
         return [f for f in csv.DictReader(fh, delimiter=";") if (f.get("part_number") or "").strip()]
 
 
+def cargar_en(db, pautas: list[dict]) -> dict:
+    """Resuelve las pautas contra ESTA base y reemplaza la lista InStock.
+
+    Recibe la sesion en vez de abrirla: asi la misma logica sirve para el job de
+    linea de comandos (que se conecta directo a la base) y para el endpoint de
+    administracion, que corre dentro de la API. Sin esto, cargar la lista en la
+    nube exigia tener la cadena de conexion a Supabase a mano, y por eso la
+    plataforma estuvo con la regla desplegada pero la tabla vacia.
+
+    Devuelve el detalle del cruce (que se marco, que se descarto, que no calzo)
+    para poder mostrarlo tanto en la consola como en la respuesta HTTP.
+    """
+    tenant = get_settings().default_tenant_id
+    indice = _indice_de_codigos(db)
+
+    # Contexto para desempatar cuando un part number cae en varios rubros.
+    candidatos: set[str] = set()
+    for fila in pautas:
+        candidatos |= indice.get(_norm(fila["part_number"].strip()), set())
+    en_sugerido = {
+        p for (p,) in db.execute(
+            select(distinct(Sugerido.producto)).where(Sugerido.producto.in_(candidatos))
+        ).all()
+    } if candidatos else set()
+    stock: dict[str, float] = {}
+    if candidatos:
+        for p, total in db.execute(
+            select(StockUnificado.producto, func.coalesce(func.sum(StockUnificado.stock), 0))
+            .where(StockUnificado.producto.in_(candidatos))
+            .group_by(StockUnificado.producto)
+        ).all():
+            stock[p] = float(total or 0)
+
+    registros: dict[str, dict] = {}
+    sin_codigo: list[dict] = []
+    descartados: list[tuple[str, str, list[str]]] = []
+    for fila in pautas:
+        part = (fila.get("part_number") or "").strip()
+        codigos = indice.get(_norm(part))
+        if not codigos:
+            sin_codigo.append(fila)
+            continue
+        producto = elegir_codigo(codigos, en_sugerido, stock)
+        otros = sorted(c for c in codigos if c != producto)
+        if otros:
+            descartados.append((part, producto, otros))
+        # Un producto puede venir de dos pautas (mismo repuesto en dos
+        # modelos): se queda con la primera y se acumulan los modelos.
+        previo = registros.get(producto)
+        if previo:
+            modelos = {m.strip() for m in (previo["modelos"] or "").split(",") if m.strip()}
+            modelos |= {m.strip() for m in (fila.get("modelos") or "").split(",") if m.strip()}
+            previo["modelos"] = ", ".join(sorted(modelos))
+            continue
+        registros[producto] = {
+            "tenant_id": tenant,
+            "producto": producto,
+            "part_number": part,
+            "marca": (fila.get("marca") or "").strip() or None,
+            "modelos": (fila.get("modelos") or "").strip() or None,
+            "operacion": (fila.get("operacion") or "").strip() or None,
+            "detalle": (fila.get("detalle") or "").strip() or None,
+            "minimo": MINIMO_DEFECTO,
+            "activo": True,
+        }
+
+    db.execute(delete(RepuestoInstock).where(RepuestoInstock.tenant_id == tenant))
+    if registros:
+        db.execute(insert(RepuestoInstock).values(list(registros.values())))
+    db.commit()
+
+    return {
+        "pautas_leidas": len(pautas),
+        "productos": len(registros),
+        "sin_codigo": len(sin_codigo),
+        "part_numbers_en_maestro": len(indice),
+        # Detalle para revisar con Repuestos, no para la operacion del dia a dia.
+        "sin_codigo_detalle": [
+            {
+                "marca": f.get("marca"),
+                "part_number": f.get("part_number"),
+                "operacion": f.get("operacion"),
+                "modelos": f.get("modelos"),
+            }
+            for f in sin_codigo
+        ],
+        "varios_rubros": [
+            {"part_number": part, "se_marca": elegido, "se_descarta": otros}
+            for part, elegido, otros in descartados
+        ],
+        "sin_stock": sorted(p for p in registros if p not in stock),
+        "_en_sugerido": en_sugerido,
+        "_stock": stock,
+        "_registros": registros,
+    }
+
+
 def cargar(path: Path = DEFAULT_PATH) -> dict:
-    settings = get_settings()
-    tenant = settings.default_tenant_id
+    """Version de linea de comandos: abre su propia sesion y cuenta lo que hizo."""
     pautas = _leer_csv(path)
     print(f"Pautas leídas: {len(pautas)} part numbers ({path.name})")
 
     create_all()
     db = SessionLocal()
     try:
-        indice = _indice_de_codigos(db)
-        print(f"Códigos en el maestro: {len(indice)} part numbers distintos")
-
-        # Contexto para desempatar cuando un part number cae en varios rubros.
-        candidatos: set[str] = set()
-        for fila in pautas:
-            candidatos |= indice.get(_norm(fila["part_number"].strip()), set())
-        en_sugerido = {
-            p for (p,) in db.execute(
-                select(distinct(Sugerido.producto)).where(Sugerido.producto.in_(candidatos))
-            ).all()
-        } if candidatos else set()
-        stock: dict[str, float] = {}
-        if candidatos:
-            for p, total in db.execute(
-                select(StockUnificado.producto, func.coalesce(func.sum(StockUnificado.stock), 0))
-                .where(StockUnificado.producto.in_(candidatos))
-                .group_by(StockUnificado.producto)
-            ).all():
-                stock[p] = float(total or 0)
-
-        registros: dict[str, dict] = {}
-        sin_codigo: list[dict] = []
-        descartados: list[tuple[str, str, list[str]]] = []
-        for fila in pautas:
-            part = (fila.get("part_number") or "").strip()
-            codigos = indice.get(_norm(part))
-            if not codigos:
-                sin_codigo.append(fila)
-                continue
-            producto = elegir_codigo(codigos, en_sugerido, stock)
-            otros = sorted(c for c in codigos if c != producto)
-            if otros:
-                descartados.append((part, producto, otros))
-            # Un producto puede venir de dos pautas (mismo repuesto en dos
-            # modelos): se queda con la primera y se acumulan los modelos.
-            previo = registros.get(producto)
-            if previo:
-                modelos = {m.strip() for m in (previo["modelos"] or "").split(",") if m.strip()}
-                modelos |= {m.strip() for m in (fila.get("modelos") or "").split(",") if m.strip()}
-                previo["modelos"] = ", ".join(sorted(modelos))
-                continue
-            registros[producto] = {
-                "tenant_id": tenant,
-                "producto": producto,
-                "part_number": part,
-                "marca": (fila.get("marca") or "").strip() or None,
-                "modelos": (fila.get("modelos") or "").strip() or None,
-                "operacion": (fila.get("operacion") or "").strip() or None,
-                "detalle": (fila.get("detalle") or "").strip() or None,
-                "minimo": MINIMO_DEFECTO,
-                "activo": True,
-            }
-
-        db.execute(delete(RepuestoInstock).where(RepuestoInstock.tenant_id == tenant))
-        if registros:
-            db.execute(insert(RepuestoInstock).values(list(registros.values())))
-        db.commit()
-
-        print(f"Productos marcados InStock: {len(registros)}")
-        if descartados:
-            print(f"\nPart numbers que existen bajo varios rubros ({len(descartados)}): "
+        r = cargar_en(db, pautas)
+        print(f"Códigos en el maestro: {r['part_numbers_en_maestro']} part numbers distintos")
+        print(f"Productos marcados InStock: {r['productos']}")
+        if r["varios_rubros"]:
+            print(f"\nPart numbers que existen bajo varios rubros ({len(r['varios_rubros'])}): "
                   "se marca UNO solo, si no el minimo se pediria una vez por rubro.")
-            for part, elegido, otros in descartados:
-                marca_stock = f"stock={stock.get(elegido, 0):.0f}"
-                en_sug = "en el sugerido" if elegido in en_sugerido else "fuera del sugerido"
-                print(f"  {part}: se marca {elegido} ({en_sug}, {marca_stock}); "
-                      f"se descarta {', '.join(otros)}")
+            for d in r["varios_rubros"]:
+                elegido = d["se_marca"]
+                marca_stock = f"stock={r['_stock'].get(elegido, 0):.0f}"
+                en_sug = "en el sugerido" if elegido in r["_en_sugerido"] else "fuera del sugerido"
+                print(f"  {d['part_number']}: se marca {elegido} ({en_sug}, {marca_stock}); "
+                      f"se descarta {', '.join(d['se_descarta'])}")
         # Codigos elegidos que Curifor no stockea hoy: no es un error del cruce, pero
         # conviene revisarlos con Repuestos (puede ser un codigo que se dejo de usar).
-        sin_stock = [p for p in registros if p not in stock]
-        if sin_stock:
-            print(f"\nCodigos marcados que NO aparecen en el stock de Curifor ({len(sin_stock)}):")
-            for p in sorted(sin_stock):
-                r = registros[p]
-                print(f"  {p:<24} {r['marca']:<8} {r['operacion']} · {r['modelos']}")
-        if sin_codigo:
-            print(f"\nSin código en el maestro ({len(sin_codigo)}), no se marcan:")
-            for fila in sin_codigo:
-                print(f"  - {fila.get('marca')} {fila.get('part_number')} · "
-                      f"{fila.get('operacion')} · {fila.get('modelos')}")
-        return {"productos": len(registros), "sin_codigo": len(sin_codigo)}
+        if r["sin_stock"]:
+            print(f"\nCodigos marcados que NO aparecen en el stock de Curifor ({len(r['sin_stock'])}):")
+            for p in r["sin_stock"]:
+                reg = r["_registros"][p]
+                print(f"  {p:<24} {reg['marca']:<8} {reg['operacion']} · {reg['modelos']}")
+        if r["sin_codigo_detalle"]:
+            print(f"\nSin código en el maestro ({r['sin_codigo']}), no se marcan:")
+            for f in r["sin_codigo_detalle"]:
+                print(f"  - {f['marca']} {f['part_number']} · {f['operacion']} · {f['modelos']}")
+        return {"productos": r["productos"], "sin_codigo": r["sin_codigo"]}
     finally:
         db.close()
 

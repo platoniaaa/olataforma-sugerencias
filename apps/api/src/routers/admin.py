@@ -76,6 +76,42 @@ def publicar_stock_unificado(
     return resumen
 
 
+@router.post("/cargar-instock")
+def cargar_instock(db: Session = Depends(get_db)) -> dict:
+    """Carga la lista InStock (repuestos de pauta) desde el CSV que viene desplegado.
+
+    La lista sale de las pautas del fabricante y vive en `src/data/pautas_instock.csv`,
+    versionado con el codigo. El cruce part number -> codigo del ERP se resuelve
+    contra ESTA base, asi que hay que correrlo donde estan los datos.
+
+    Existe este endpoint porque hasta ahora la unica forma de cargarla era un
+    script de consola conectado directo a la base: la regla quedo desplegada en
+    produccion pero con la tabla vacia durante semanas, pidiendo cero unidades sin
+    que nadie lo notara. Con esto se recarga desde la plataforma cada vez que
+    cambien las pautas.
+
+    Reemplaza la lista completa (no acumula), igual que el resto de las cargas.
+    """
+    from ..jobs import cargar_instock as job
+
+    try:
+        pautas = job._leer_csv(job.DEFAULT_PATH)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    r = job.cargar_en(db, pautas)
+    # Las claves con "_" son contexto para imprimir en consola, no para la API.
+    salida = {k: v for k, v in r.items() if not k.startswith("_")}
+    auditoria_service.registrar(
+        db,
+        accion="instock_cargado",
+        entidad="sistema",
+        detalle=f"InStock: {r['productos']} repuestos marcados, {r['sin_codigo']} sin codigo",
+    )
+    db.commit()
+    return salida
+
+
 @router.post("/cargar-sugerido")
 async def cargar_sugerido(file: UploadFile = File(...), db: Session = Depends(get_db)):
     """Recibe el Excel/CSV exportado del Power BI y reemplaza la tabla `sugerido`."""
