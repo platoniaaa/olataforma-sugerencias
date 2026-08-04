@@ -40,7 +40,13 @@ from ..schemas import (
     SugerenciaManualOut,
     SugerenciaManualUpdate,
 )
-from ..services import auditoria_service, recurrentes_service, sugerido_service
+from ..services import (
+    auditoria_service,
+    detalle_sugerencia_service,
+    excel_export,
+    recurrentes_service,
+    sugerido_service,
+)
 from ..services.auth import requiere_escritura
 
 
@@ -98,6 +104,71 @@ def _desglose(d: dict) -> str:
     if d["sugerido_sistema"]:
         partes.append(f"{_n(d['sugerido_sistema'])} que ya sugiere el sistema")
     return " + ".join(partes) + f" = {_n(d['cubierto'])} u"
+
+
+# --------------------------------------------------------------------------- #
+# Detalle de una sugerencia: que productos toca y cuanto aporta cada uno.
+# Va ANTES del catch-all `/{id}` de mas abajo, si no FastAPI enruta "detalle"
+# como si fuera el id de una sugerencia.
+# --------------------------------------------------------------------------- #
+@router.get("/detalle/{tipo}/{id_}/excel")
+def detalle_a_excel(tipo: str, id_: str, db: Session = Depends(get_db)):
+    """La misma lista del detalle, en Excel, para mandarsela a alguien."""
+    from fastapi.responses import StreamingResponse
+
+    d = detalle_sugerencia_service.detalle(db, tipo, id_)
+    columnas = [
+        "producto", "descripcion", "nombre_sucursal", "clasificacion_abc", "proveedor",
+        "stock_actual", "stock_transito", "sugerido_modelo", "aporta",
+        "total_con_sugerencia", "costo_unitario", "valor_aporte_clp",
+        "estado", "motivo_sin_efecto",
+    ]
+    contenido = excel_export.generar_excel(d["lineas"], columnas)
+    nombre = f"sugerencia_{tipo}_{_sanear(id_)}.xlsx"
+    return StreamingResponse(
+        iter([contenido]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="{nombre}"',
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        },
+    )
+
+
+def _sanear(texto: str) -> str:
+    """Id usable en un nombre de archivo."""
+    return "".join(c if c.isalnum() or c in "-_" else "_" for c in texto)[:40]
+
+
+@router.get("/detalle/{tipo}/{id_}")
+def detalle_sugerencia(tipo: str, id_: str, db: Session = Depends(get_db)) -> dict:
+    """Cabecera + lineas de una sugerencia (`unica`, `lote`, `recurrente`, `instock`)."""
+    return detalle_sugerencia_service.detalle(db, tipo, id_)
+
+
+@router.patch("/recurrentes/{id}/activa")
+def pausar_recurrente(
+    id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    email: str = Depends(requiere_escritura),
+) -> dict:
+    """Pausa o reactiva una regla recurrente sin borrarla.
+
+    Antes la unica accion era eliminar: para suspenderla un mes habia que borrarla
+    y recrearla, perdiendo el historial y el motivo original.
+    """
+    activa = bool(payload.get("activa"))
+    r = detalle_sugerencia_service.pausar(db, id, activa, usuario_email=email)
+    auditoria_service.registrar(
+        db,
+        accion="recurrente_reactivada" if activa else "recurrente_pausada",
+        entidad="sugerencia_recurrente",
+        entidad_id=id,
+        usuario_email=email,
+    )
+    db.commit()
+    return r
 
 
 @router.get("/previsualizar-objetivo")

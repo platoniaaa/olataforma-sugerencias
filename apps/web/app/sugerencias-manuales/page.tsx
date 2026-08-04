@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Boxes, ChevronDown, ChevronRight, Layers, Lock, Repeat, Trash2, Wrench } from "lucide-react";
+import Link from "next/link";
+import { Boxes, ChevronDown, ChevronRight, ChevronsRight, Layers, Lock, Repeat, Trash2, Wrench } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api-client";
@@ -9,6 +10,25 @@ import { formatoCLP, formatoFecha, formatoFechaHora, formatoNumero } from "@/lib
 import type { InstockResumen, Recurrente, SugerenciaManual } from "@/lib/types";
 
 type Tab = "unicas" | "recurrentes";
+
+/**
+ * Enlace al detalle de una sugerencia.
+ *
+ * La tarjeta muestra el titular; el detalle responde si eso esta aportando algo.
+ * Va como enlace explicito y no como card clickeable entera porque la card ya
+ * tiene botones (borrar, expandir) y un click que a veces navega y a veces no
+ * es justo el tipo de ambiguedad que hay que evitar.
+ */
+function VerDetalle({ tipo, id }: { tipo: string; id: string }) {
+  return (
+    <Link
+      href={`/sugerencias-manuales/${tipo}/${encodeURIComponent(id)}`}
+      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[12px] font-medium text-slate-600 transition-colors hover:border-brand hover:text-brand"
+    >
+      Ver detalle <ChevronsRight size={13} />
+    </Link>
+  );
+}
 
 // expira_en apunta a la medianoche del día SIGUIENTE a la fecha límite elegida
 // (la sugerencia vive todo ese día). Para mostrar la fecha límite inclusive se
@@ -236,6 +256,7 @@ function TarjetaInstock({ resumen }: { resumen: InstockResumen | null }) {
           <span className="ml-auto inline-flex shrink-0 items-center gap-1 text-[11px] text-slate-500">
             <Lock size={11} /> regla del sistema
           </span>
+          <VerDetalle tipo="instock" id="instock" />
         </div>
         {resumen.activo ? (
           <p className="mt-1.5 text-[13px] leading-relaxed text-slate-600">
@@ -338,13 +359,16 @@ function SeccionUnicas({
                 {s.motivo && <> · {s.motivo}</>}
               </p>
             </div>
-            <button
-              onClick={() => onEliminar(s.id)}
-              className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
-              aria-label="Eliminar sugerencia"
-            >
-              <Trash2 size={16} />
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              <VerDetalle tipo="unica" id={s.id} />
+              <button
+                onClick={() => onEliminar(s.id)}
+                className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                aria-label="Eliminar sugerencia"
+              >
+                <Trash2 size={16} />
+              </button>
+            </div>
           </CardContent>
         </Card>
       ))}
@@ -402,12 +426,15 @@ function LoteCard({
               </p>
             </span>
           </button>
-          <button
-            onClick={() => onEliminarLote(loteId, filas.length)}
-            className="flex items-center gap-1 rounded-md border border-red-200 bg-white px-3 py-1.5 text-[12px] font-medium text-red-600 hover:bg-red-50"
-          >
-            <Trash2 size={14} /> Eliminar las {formatoNumero(filas.length)}
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <VerDetalle tipo="lote" id={loteId} />
+            <button
+              onClick={() => onEliminarLote(loteId, filas.length)}
+              className="flex items-center gap-1 rounded-md border border-red-200 bg-white px-3 py-1.5 text-[12px] font-medium text-red-600 hover:bg-red-50"
+            >
+              <Trash2 size={14} /> Eliminar las {formatoNumero(filas.length)}
+            </button>
+          </div>
         </div>
 
         {expandido && (
@@ -502,13 +529,16 @@ function SeccionRecurrentes({
                 {r.motivo && <> · {r.motivo}</>}
               </p>
             </div>
-            <button
-              onClick={() => onEliminar(r.id)}
-              className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
-              aria-label="Eliminar recurrencia"
-            >
-              <Trash2 size={16} />
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              <VerDetalle tipo="recurrente" id={r.id} />
+              <button
+                onClick={() => onEliminar(r.id)}
+                className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                aria-label="Eliminar recurrencia"
+              >
+                <Trash2 size={16} />
+              </button>
+            </div>
           </CardContent>
         </Card>
       ))}

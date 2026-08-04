@@ -9,6 +9,7 @@ import type {
   CatalogoFiltros,
   CatalogoOpciones,
   CatalogoPage,
+  DetalleSugerencia,
   DimensionAgrupado,
   EstadoActualizacion,
   InstockResumen,
@@ -173,6 +174,41 @@ export const api = {
 
   async sucursales(): Promise<Sucursal[]> {
     return getJSON("/api/sucursales");
+  },
+
+  // --- Detalle de una sugerencia manual --- //
+
+  /** Qué productos toca una sugerencia y cuánto aporta cada uno. */
+  async detalleSugerencia(tipo: string, id: string): Promise<DetalleSugerencia> {
+    return getJSON(`/api/sugerencias-manuales/detalle/${tipo}/${encodeURIComponent(id)}`);
+  },
+
+  /** Pausa o reactiva una regla recurrente sin borrarla. */
+  async pausarRecurrente(id: string, activa: boolean): Promise<{ activa: boolean }> {
+    const res = await req(`/api/sugerencias-manuales/recurrentes/${id}/activa`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ activa }),
+    });
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo cambiar el estado"));
+    return res.json() as Promise<{ activa: boolean }>;
+  },
+
+  /** Baja la lista del detalle en Excel. */
+  async detalleSugerenciaExcel(tipo: string, id: string): Promise<void> {
+    const res = await req(
+      `/api/sugerencias-manuales/detalle/${tipo}/${encodeURIComponent(id)}/excel`
+    );
+    if (!res.ok) throw new Error("No se pudo generar el Excel");
+    const blob = await res.blob();
+    const cd = res.headers.get("Content-Disposition") ?? "";
+    const nombre = /filename="?([^"]+)"?/.exec(cd)?.[1] ?? `sugerencia_${tipo}.xlsx`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = nombre;
+    a.click();
+    URL.revokeObjectURL(url);
   },
 
   async productos(q: string): Promise<{ items: Producto[] }> {

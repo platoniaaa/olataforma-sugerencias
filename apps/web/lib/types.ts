@@ -735,3 +735,86 @@ export interface EstadoActualizacion {
   ultima_sincronizacion: string | null;
   puede_actualizar: boolean;
 }
+
+// --------------------------------------------------------------------------- //
+// Detalle de una sugerencia manual: qué productos toca y cuánto aporta cada uno.
+// --------------------------------------------------------------------------- //
+
+export type TipoSugerencia = "unica" | "lote" | "recurrente" | "instock";
+
+/** Una línea del detalle. `aporta` es lo que esta sugerencia agrega a la compra:
+ *  las manuales son aditivas (siempre aportan), InStock completa hasta un mínimo
+ *  y puede aportar 0. */
+export interface LineaDetalleSugerencia {
+  id: string;
+  producto: string;
+  descripcion: string | null;
+  sucursal_id: string;
+  nombre_sucursal: string | null;
+  proveedor: string | null;
+  clasificacion_abc: string | null;
+  costo_unitario: number | null;
+  stock_actual: number | null;
+  stock_transito: number | null;
+  /** Lo que el modelo del BI pide por su cuenta, sin esta sugerencia. */
+  sugerido_modelo: number | null;
+  aporta: number;
+  total_con_sugerencia: number;
+  valor_aporte_clp: number | null;
+  estado: "aporta" | "sin_efecto" | "no_aplica";
+  /** Por qué no aporta, cuando no aporta. */
+  motivo_sin_efecto: string | null;
+  /** El modelo ya pide tanto o más que lo pedido a mano. */
+  redundante: boolean;
+  // Solo en las manuales.
+  motivo?: string | null;
+  creado_por?: string | null;
+  creado_en?: string | null;
+  expira_en?: string | null;
+  // Solo en InStock.
+  minimo?: number;
+  marca?: string | null;
+  modelos?: string | null;
+  operacion?: string | null;
+  part_number?: string | null;
+}
+
+export interface DetalleSugerencia {
+  tipo: TipoSugerencia;
+  id: string;
+  titulo: string;
+  subtitulo: string;
+  editable: boolean;
+  activa: boolean;
+  motivo: string | null;
+  creado_por: string | null;
+  creado_en: string | null;
+  expira_en?: string | null;
+  cada_dias?: number;
+  proxima_ejecucion?: string;
+  ultima_ejecucion?: string | null;
+  fecha_fin?: string | null;
+  totales: {
+    n_lineas: number;
+    n_aportan: number;
+    n_sin_efecto: number;
+    unidades: number;
+    valor_clp: number;
+    n_productos: number;
+    n_sucursales: number;
+  };
+  lineas: LineaDetalleSugerencia[];
+  /** Solo InStock: part numbers de la pauta que no existen en el maestro. */
+  pautas_sin_codigo?: {
+    part_number: string;
+    marca: string | null;
+    modelos: string | null;
+    operacion: string | null;
+  }[];
+  historial: {
+    creado_en: string;
+    accion: string;
+    usuario_email: string | null;
+    detalle: string | null;
+  }[];
+}
