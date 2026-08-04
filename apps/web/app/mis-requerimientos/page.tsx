@@ -30,16 +30,16 @@ export default function MisRequerimientosPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
         <div>
           <p className="kicker">Sucursal</p>
-          <h1 className="display text-[30px] leading-tight">Mis requerimientos</h1>
+          <h1 className="display text-[24px] leading-tight sm:text-[30px]">Mis requerimientos</h1>
           <p className="mt-1 text-[13.5px] text-ink-500">
             Todo lo que le pediste al comprador y en qué quedó cada uno.
           </p>
         </div>
-        <Link href="/mis-requerimientos/nuevo">
-          <Button>
+        <Link href="/mis-requerimientos/nuevo" className="block w-full sm:w-auto">
+          <Button className="h-11 w-full sm:h-9 sm:w-auto">
             <Plus size={15} /> Nuevo requerimiento
           </Button>
         </Link>
@@ -75,45 +75,79 @@ export default function MisRequerimientosPage() {
       )}
 
       {items !== null && items.length > 0 && (
-        <div className="overflow-x-auto rounded-sm border border-ink-200 bg-white shadow-card">
-          <table className="w-full min-w-[720px] text-[13px]">
-            <thead>
-              <tr className="border-b border-ink-200 bg-paper-50 text-left text-[11.5px] uppercase tracking-wide text-ink-500">
-                <th className="px-3 py-2">N°</th>
-                <th className="px-3 py-2">Enviado</th>
-                <th className="px-3 py-2 text-right">Repuestos</th>
-                <th className="px-3 py-2 text-right">Total aprox.</th>
-                <th className="px-3 py-2">Estado</th>
-                <th className="px-3 py-2">Respuesta del comprador</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((r) => (
-                <tr key={r.id} className="border-b border-ink-100 hover:bg-paper-50">
-                  <td className="px-3 py-2">
-                    <Link
-                      href={`/mis-requerimientos/${r.id}`}
-                      className="font-medium text-accent-700 hover:underline"
-                    >
-                      #{r.id}
-                    </Link>
-                  </td>
-                  <td className="px-3 py-2 text-ink-600">{formatoFechaHora(r.creado_en)}</td>
-                  <td className="px-3 py-2 text-right tabular">{formatoNumero(r.n_lineas)}</td>
-                  <td className="px-3 py-2 text-right tabular">
-                    {formatoCLP(r.total_estimado ?? 0)}
-                  </td>
-                  <td className="px-3 py-2">
+        <>
+          {/* Celular: una tarjeta por requerimiento. Una tabla de 6 columnas en
+              375px obliga a scroll lateral, y el vendedor entra desde el mesón. */}
+          <ul className="space-y-2 sm:hidden">
+            {items.map((r) => (
+              <li key={r.id}>
+                <Link
+                  href={`/mis-requerimientos/${r.id}`}
+                  className="block rounded-sm border border-ink-200 bg-white p-3 shadow-card transition-colors active:bg-paper-50"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-accent-700">#{r.id}</span>
                     <EstadoRequerimientoBadge estado={r.estado} />
-                  </td>
-                  <td className="max-w-[280px] truncate px-3 py-2 text-ink-500">
-                    {r.nota_comprador ?? <span className="text-ink-300">—</span>}
-                  </td>
+                  </div>
+                  <p className="mt-1 text-[13px] text-ink-600">
+                    {formatoNumero(r.n_lineas)}{" "}
+                    {r.n_lineas === 1 ? "repuesto" : "repuestos"} ·{" "}
+                    <span className="tabular">{formatoCLP(r.total_estimado ?? 0)}</span>
+                  </p>
+                  <p className="mt-0.5 text-[12px] text-ink-400">
+                    {formatoFechaHora(r.creado_en)}
+                  </p>
+                  {r.nota_comprador && (
+                    <p className="mt-1.5 border-t border-ink-100 pt-1.5 text-[12.5px] text-ink-600">
+                      {r.nota_comprador}
+                    </p>
+                  )}
+                </Link>
+              </li>
+            ))}
+          </ul>
+
+          {/* Escritorio: la tabla de siempre. */}
+          <div className="hidden overflow-x-auto rounded-sm border border-ink-200 bg-white shadow-card sm:block">
+            <table className="w-full min-w-[720px] text-[13px]">
+              <thead>
+                <tr className="border-b border-ink-200 bg-paper-50 text-left text-[11.5px] uppercase tracking-wide text-ink-500">
+                  <th className="px-3 py-2">N°</th>
+                  <th className="px-3 py-2">Enviado</th>
+                  <th className="px-3 py-2 text-right">Repuestos</th>
+                  <th className="px-3 py-2 text-right">Total aprox.</th>
+                  <th className="px-3 py-2">Estado</th>
+                  <th className="px-3 py-2">Respuesta del comprador</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {items.map((r) => (
+                  <tr key={r.id} className="border-b border-ink-100 hover:bg-paper-50">
+                    <td className="px-3 py-2">
+                      <Link
+                        href={`/mis-requerimientos/${r.id}`}
+                        className="font-medium text-accent-700 hover:underline"
+                      >
+                        #{r.id}
+                      </Link>
+                    </td>
+                    <td className="px-3 py-2 text-ink-600">{formatoFechaHora(r.creado_en)}</td>
+                    <td className="px-3 py-2 text-right tabular">{formatoNumero(r.n_lineas)}</td>
+                    <td className="px-3 py-2 text-right tabular">
+                      {formatoCLP(r.total_estimado ?? 0)}
+                    </td>
+                    <td className="px-3 py-2">
+                      <EstadoRequerimientoBadge estado={r.estado} />
+                    </td>
+                    <td className="max-w-[280px] truncate px-3 py-2 text-ink-500">
+                      {r.nota_comprador ?? <span className="text-ink-300">—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   );

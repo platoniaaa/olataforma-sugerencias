@@ -58,7 +58,7 @@ export default function MiRequerimientoPage() {
           <ArrowLeft size={14} /> Mis requerimientos
         </Link>
         <div className="mt-3 flex flex-wrap items-center gap-3">
-          <h1 className="display text-[30px] leading-tight">Requerimiento #{req.id}</h1>
+          <h1 className="display text-[24px] leading-tight sm:text-[30px]">Requerimiento #{req.id}</h1>
           <EstadoRequerimientoBadge estado={req.estado} />
         </div>
         <p className="mt-1 text-[13.5px] text-ink-500">
@@ -89,7 +89,56 @@ export default function MiRequerimientoPage() {
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-sm border border-ink-200 bg-white shadow-card">
+      {/* Celular: una tarjeta por línea. La tabla con 5 columnas no cabe en 375px. */}
+      <ul className="space-y-2 sm:hidden">
+        {req.lineas.map((l) => {
+          const aprobada = l.cantidad_aprobada;
+          const recortada = revisado && aprobada !== null && aprobada < l.cantidad_pedida;
+          return (
+            <li
+              key={l.id}
+              className="rounded-sm border border-ink-200 bg-white p-3 shadow-card"
+            >
+              <p className="font-mono text-[14px] font-medium text-ink-900">{l.producto}</p>
+              <p className="mt-0.5 text-[13px] leading-snug text-ink-600">
+                {l.descripcion ?? "—"}
+              </p>
+              {l.comentario && (
+                <p className="mt-0.5 text-[12.5px] text-ink-400">{l.comentario}</p>
+              )}
+              <div className="mt-2 flex items-center justify-between border-t border-ink-100 pt-2 text-[13px]">
+                <span className="text-ink-500">
+                  Pediste <b className="tabular text-ink-900">{formatoNumero(l.cantidad_pedida)}</b>
+                  {revisado && (
+                    <>
+                      {" · "}
+                      {aprobada === null ? (
+                        <span className="text-ink-300">sin revisar</span>
+                      ) : aprobada === 0 ? (
+                        <span className="font-medium text-red-700">no va</span>
+                      ) : (
+                        <span className={recortada ? "font-medium text-amber-700" : "text-ink-900"}>
+                          te aprobaron <b className="tabular">{formatoNumero(aprobada)}</b>
+                        </span>
+                      )}
+                    </>
+                  )}
+                </span>
+                <span className="tabular font-medium text-ink-900">
+                  {formatoCLP((aprobada ?? l.cantidad_pedida) * (l.precio_lista ?? 0))}
+                </span>
+              </div>
+            </li>
+          );
+        })}
+        <li className="flex items-center justify-between rounded-sm bg-paper-50 px-3 py-2 text-[14px] font-medium">
+          <span>Total</span>
+          <span className="tabular">{formatoCLP(req.total_estimado ?? 0)}</span>
+        </li>
+      </ul>
+
+      {/* Escritorio: la tabla. */}
+      <div className="hidden overflow-x-auto rounded-sm border border-ink-200 bg-white shadow-card sm:block">
         <table className="w-full min-w-[720px] text-[13px]">
           <thead>
             <tr className="border-b border-ink-200 bg-paper-50 text-left text-[11.5px] uppercase tracking-wide text-ink-500">
@@ -133,9 +182,7 @@ export default function MiRequerimientoPage() {
                     </td>
                   )}
                   <td className="px-3 py-2 text-right tabular text-ink-600">
-                    {formatoCLP(
-                      (aprobada ?? l.cantidad_pedida) * (l.precio_lista ?? 0)
-                    )}
+                    {formatoCLP((aprobada ?? l.cantidad_pedida) * (l.precio_lista ?? 0))}
                   </td>
                 </tr>
               );

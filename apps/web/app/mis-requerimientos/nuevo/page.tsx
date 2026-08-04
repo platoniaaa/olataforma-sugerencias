@@ -223,7 +223,7 @@ export default function NuevoRequerimientoPage() {
   const sinSucursal = permisos !== null && !sucursal && !permisos.puede_elegir;
 
   return (
-    <div className="space-y-5 pb-24">
+    <div className="space-y-5 pb-40 sm:pb-24">
       <div>
         <Link
           href="/mis-requerimientos"
@@ -232,7 +232,7 @@ export default function NuevoRequerimientoPage() {
           <ArrowLeft size={14} /> Mis requerimientos
         </Link>
         <p className="kicker mt-3">Sucursal</p>
-        <h1 className="display text-[30px] leading-tight">Nuevo requerimiento</h1>
+        <h1 className="display text-[24px] leading-tight sm:text-[30px]">Nuevo requerimiento</h1>
         <p className="mt-1 text-[13.5px] text-ink-500">
           Busca los repuestos que necesitas, arma la lista y envíala. El comprador la
           recibe al tiro, sin correo de por medio.
@@ -246,7 +246,7 @@ export default function NuevoRequerimientoPage() {
           <select
             value={sucursal}
             onChange={(e) => setSucursal(e.target.value)}
-            className="h-9 rounded-sm border border-ink-200 bg-paper-50 px-3 text-[13.5px]"
+            className="h-11 rounded-sm border border-ink-200 bg-paper-50 px-3 text-[16px] sm:h-9 sm:text-[13.5px]"
           >
             <option value="">Elige tu sucursal…</option>
             {(permisos?.sucursales ?? []).map((s) => (
@@ -284,7 +284,7 @@ export default function NuevoRequerimientoPage() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Ej: SZ6Z3B437B, filtro de aceite, 2723982…"
-              className="h-11 w-full rounded-sm border border-ink-200 bg-paper-50 pl-9 pr-9 text-[14px] focus-visible:border-accent-700 focus-visible:bg-white focus-visible:outline-none"
+              className="h-12 w-full rounded-sm border border-ink-200 bg-paper-50 pl-9 pr-10 text-[16px] focus-visible:border-accent-700 focus-visible:bg-white focus-visible:outline-none"
             />
             {buscando && (
               <Loader2
@@ -331,8 +331,11 @@ export default function NuevoRequerimientoPage() {
                         </span>
                       )}
                     </div>
-                    <p className="truncate text-[12.5px] text-ink-500">
+                    <p className="text-[12.5px] leading-snug text-ink-500">
                       {p.descripcion ?? "—"}
+                    </p>
+                    <p className="text-[12px] text-ink-400 sm:hidden">
+                      {formatoCLP(p.precio)} · stock acá {formatoNumero(p.stock_sucursal ?? 0)}
                     </p>
                   </div>
                   <div className="hidden shrink-0 text-right text-[12px] text-ink-500 sm:block">
@@ -341,8 +344,12 @@ export default function NuevoRequerimientoPage() {
                       stock acá: {formatoNumero(p.stock_sucursal ?? 0)}
                     </div>
                   </div>
-                  <Button size="sm" onClick={() => agregar(p)} className="shrink-0">
-                    <Plus size={14} /> Agregar
+                  <Button
+                    size="sm"
+                    onClick={() => agregar(p)}
+                    className="h-11 shrink-0 px-4 sm:h-8 sm:px-3"
+                  >
+                    <Plus size={15} /> Agregar
                   </Button>
                 </li>
               );
@@ -367,7 +374,7 @@ export default function NuevoRequerimientoPage() {
                 rows={5}
                 spellCheck={false}
                 placeholder={"Pega código y cantidad, como venga:\n19 SZ6Z3B437B\t4\n70 2723982\t2"}
-                className="w-full rounded-sm border border-ink-200 bg-paper-50 p-3 font-mono text-[13px] leading-relaxed placeholder:text-ink-300 focus-visible:border-accent-700 focus-visible:bg-white focus-visible:outline-none"
+                className="w-full rounded-sm border border-ink-200 bg-paper-50 p-3 font-mono text-[16px] leading-relaxed placeholder:text-ink-300 sm:text-[13px] focus-visible:border-accent-700 focus-visible:bg-white focus-visible:outline-none"
               />
               <div className="mt-2 flex items-center gap-2">
                 <Button size="sm" onClick={pegar} disabled={!textoPegado.trim()}>
@@ -418,78 +425,74 @@ export default function NuevoRequerimientoPage() {
             Todavía no agregas nada. Busca arriba el repuesto que necesitas.
           </p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-[13px]">
-              <thead>
-                <tr className="border-b border-ink-200 bg-paper-50 text-left text-[11.5px] uppercase tracking-wide text-ink-500">
-                  <th className="px-3 py-2">Código</th>
-                  <th className="px-3 py-2">Descripción</th>
-                  <th className="px-3 py-2 text-right">Stock acá</th>
-                  <th className="px-3 py-2 text-center">Cantidad</th>
-                  <th className="px-3 py-2 text-right">Subtotal</th>
-                  <th className="w-10 px-3 py-2"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {carro.map((l) => (
-                  <tr
-                    key={l.producto}
-                    className={`border-b border-ink-100 transition-colors ${
-                      resaltada === l.producto ? "bg-emerald-50" : ""
-                    }`}
-                  >
-                    <td className="px-3 py-2 font-mono font-medium">{l.producto}</td>
-                    <td className="max-w-[320px] truncate px-3 py-2 text-ink-600">
+          <ul className="divide-y divide-ink-100">
+            {carro.map((l) => (
+              <li
+                key={l.producto}
+                className={`p-3 transition-colors sm:px-4 ${
+                  resaltada === l.producto ? "bg-emerald-50" : ""
+                }`}
+              >
+                {/* Fila 1: que es y el boton de sacarlo. */}
+                <div className="flex items-start gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-mono text-[14px] font-medium text-ink-900">
+                      {l.producto}
+                    </p>
+                    <p className="mt-0.5 text-[13px] leading-snug text-ink-600">
                       {l.descripcion ?? "—"}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular text-ink-500">
+                    </p>
+                    <p className="mt-0.5 text-[12.5px] text-ink-400">
+                      {formatoCLP(l.precio ?? 0)} c/u · stock acá{" "}
                       {formatoNumero(l.stock_sucursal ?? 0)}
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="mx-auto flex w-[124px] items-center justify-center gap-1">
-                        <button
-                          onClick={() => cambiarCantidad(l.producto, l.cantidad - 1)}
-                          disabled={l.cantidad <= 1}
-                          className="flex h-7 w-7 items-center justify-center rounded-sm border border-ink-200 text-ink-600 hover:bg-ink-100 disabled:opacity-30"
-                          aria-label="Quitar uno"
-                        >
-                          <Minus size={13} />
-                        </button>
-                        <input
-                          type="number"
-                          min={1}
-                          value={l.cantidad}
-                          onChange={(e) =>
-                            cambiarCantidad(l.producto, Number(e.target.value) || 1)
-                          }
-                          className="h-7 w-14 rounded-sm border border-ink-200 bg-paper-50 text-center tabular text-[13px] focus-visible:border-accent-700 focus-visible:bg-white focus-visible:outline-none"
-                        />
-                        <button
-                          onClick={() => cambiarCantidad(l.producto, l.cantidad + 1)}
-                          className="flex h-7 w-7 items-center justify-center rounded-sm border border-ink-200 text-ink-600 hover:bg-ink-100"
-                          aria-label="Agregar uno"
-                        >
-                          <Plus size={13} />
-                        </button>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 text-right tabular">
-                      {formatoCLP(l.cantidad * (l.precio ?? 0))}
-                    </td>
-                    <td className="px-3 py-2">
-                      <button
-                        onClick={() => quitar(l.producto)}
-                        className="text-ink-300 transition-colors hover:text-red-700"
-                        aria-label={`Quitar ${l.producto}`}
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    </p>
+                  </div>
+                  {/* 44x44 de area tactil: en el celular esto se aprieta con el pulgar. */}
+                  <button
+                    onClick={() => quitar(l.producto)}
+                    className="-m-2 flex h-11 w-11 shrink-0 items-center justify-center text-ink-300 transition-colors hover:text-red-700"
+                    aria-label={`Quitar ${l.producto}`}
+                  >
+                    <Trash2 size={17} />
+                  </button>
+                </div>
+
+                {/* Fila 2: cantidad y subtotal. */}
+                <div className="mt-2 flex items-center justify-between gap-3">
+                  {/* 44x44 de área táctil y 16px en el input: con menos, iOS hace
+                      zoom al enfocar y se descuadra la pantalla. */}
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => cambiarCantidad(l.producto, l.cantidad - 1)}
+                      disabled={l.cantidad <= 1}
+                      className="flex h-11 w-11 items-center justify-center rounded-sm border border-ink-200 text-ink-600 transition-colors hover:bg-ink-100 disabled:opacity-30 sm:h-9 sm:w-9"
+                      aria-label="Quitar uno"
+                    >
+                      <Minus size={16} />
+                    </button>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      value={l.cantidad}
+                      onChange={(e) => cambiarCantidad(l.producto, Number(e.target.value) || 1)}
+                      className="h-11 w-16 rounded-sm border border-ink-200 bg-paper-50 text-center tabular text-[16px] focus-visible:border-accent-700 focus-visible:bg-white focus-visible:outline-none sm:h-9 sm:w-14 sm:text-[13px]"
+                    />
+                    <button
+                      onClick={() => cambiarCantidad(l.producto, l.cantidad + 1)}
+                      className="flex h-11 w-11 items-center justify-center rounded-sm border border-ink-200 text-ink-600 transition-colors hover:bg-ink-100 sm:h-9 sm:w-9"
+                      aria-label="Agregar uno"
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </div>
+                  <span className="tabular text-[14px] font-medium text-ink-900">
+                    {formatoCLP(l.cantidad * (l.precio ?? 0))}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
         )}
       </div>
 
@@ -504,7 +507,7 @@ export default function NuevoRequerimientoPage() {
               onChange={(e) => setNota(e.target.value)}
               rows={2}
               placeholder="Ej: es para una mantención del jueves, el cliente ya lo pagó."
-              className="w-full rounded-sm border border-ink-200 bg-paper-50 p-3 text-[13.5px] placeholder:text-ink-300 focus-visible:border-accent-700 focus-visible:bg-white focus-visible:outline-none"
+              className="w-full rounded-sm border border-ink-200 bg-paper-50 p-3 text-[16px] placeholder:text-ink-300 sm:text-[13.5px] focus-visible:border-accent-700 focus-visible:bg-white focus-visible:outline-none"
             />
           </label>
         </div>
@@ -512,8 +515,8 @@ export default function NuevoRequerimientoPage() {
 
       {/* Barra fija: el total y el envío siempre a la vista. */}
       {carro.length > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-ink-200 bg-white/95 backdrop-blur">
-          <div className="mx-auto flex max-w-[1600px] items-center gap-4 px-4 py-3">
+        <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-ink-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
+          <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
             <div className="text-[13px] text-ink-500">
               <strong className="text-ink-900">{carro.length}</strong>{" "}
               {carro.length === 1 ? "repuesto" : "repuestos"} ·{" "}
@@ -522,11 +525,15 @@ export default function NuevoRequerimientoPage() {
               </strong>{" "}
               unidades
             </div>
-            <div className="ml-auto text-[13px] text-ink-500">
+            <div className="text-[13px] text-ink-500 sm:ml-auto">
               Total aprox.{" "}
               <strong className="text-[15px] text-ink-900">{formatoCLP(total)}</strong>
             </div>
-            <Button onClick={() => setConfirmando(true)} disabled={!sucursal || enviando}>
+            <Button
+              onClick={() => setConfirmando(true)}
+              disabled={!sucursal || enviando}
+              className="h-11 w-full sm:h-9 sm:w-auto"
+            >
               <Send size={15} /> Enviar requerimiento
             </Button>
           </div>
