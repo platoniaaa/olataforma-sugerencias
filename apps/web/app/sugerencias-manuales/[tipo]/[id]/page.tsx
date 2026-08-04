@@ -621,16 +621,26 @@ aporta   = mínimo − cubierto      (nunca menos de 0)`}
             </>
           )}
 
-          <p className="border-t border-slate-100 pt-3 text-[12.5px] text-slate-500">
-            <b>No confundir con el stock de seguridad.</b> Ese es otro cálculo, del
-            modelo: alimenta el nivel máximo (
-            <span className="font-mono text-[11.5px]">
-              demanda diaria × (ciclo + lead time) + stock de seguridad
-            </span>
-            ) y sirve para decidir cuánto mantener de un repuesto{" "}
-            <b>que tiene venta</b>. {esInstock ? "La regla InStock" : "Una sugerencia manual"}{" "}
-            es lo contrario: existe para lo que el modelo no pediría solo.
-          </p>
+          <div className="space-y-2 border-t border-slate-100 pt-3 text-[12.5px] text-slate-500">
+            <p>
+              <b>¿Y el stock de seguridad?</b> No aparece en la resta de arriba, pero está
+              adentro igual: entra por «lo que el modelo ya pide». El modelo arma su
+              objetivo como{" "}
+              <span className="font-mono text-[11.5px]">
+                demanda diaria × (ciclo + lead time) + stock de seguridad
+              </span>{" "}
+              y le descuenta el stock y el tránsito. O sea que restar lo que ya tienes no
+              es algo de esta regla: es como funciona el modelo entero, en todas sus capas.
+            </p>
+            <p>
+              El stock de seguridad se calcula aparte, con la variabilidad de la venta (
+              <span className="font-mono text-[11.5px]">Z × σ × √((lead time + ciclo)/22)</span>
+              , con Z según la clase ABC), y responde una pregunta distinta: cuánto colchón
+              hace falta para no quebrar un repuesto <b>que sí se vende</b>.{" "}
+              {esInstock ? "La regla InStock" : "Una sugerencia manual"} existe justamente
+              para lo otro: lo que el modelo no pediría solo.
+            </p>
+          </div>
         </div>
       )}
     </div>
