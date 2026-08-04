@@ -22,6 +22,8 @@ import {
   AlertTriangle,
   ArrowLeft,
   Check,
+  ChevronDown,
+  ChevronRight,
   Download,
   Loader2,
   Lock,
@@ -54,6 +56,8 @@ export default function DetalleSugerenciaPage() {
   const [proveedor, setProveedor] = useState("");
   const [abc, setAbc] = useState("");
   const [filtro, setFiltro] = useState<Filtro>("todas");
+  // La explicación del cálculo va colapsada: se lee una vez y después estorba.
+  const [infoAbierta, setInfoAbierta] = useState(false);
 
   const cargar = async () => {
     try {
@@ -108,6 +112,16 @@ export default function DetalleSugerenciaPage() {
       ),
     }),
     [visibles]
+  );
+
+  /** Una línea de esta misma sugerencia para explicar el cálculo con datos reales.
+   *  Se prefiere una que NO aporte: es el caso que genera la duda. */
+  const ejemplo = useMemo(
+    () =>
+      lineas.find((l) => l.estado !== "aporta") ??
+      lineas.find((l) => l.estado === "aporta") ??
+      null,
+    [lineas]
   );
 
   const hayFiltro = !!(q || sucursal || proveedor || abc || filtro !== "todas");
@@ -249,6 +263,13 @@ export default function DetalleSugerenciaPage() {
         </div>
       )}
 
+      <ComoSeCalcula
+        abierta={infoAbierta}
+        onToggle={() => setInfoAbierta((v) => !v)}
+        esInstock={esInstock}
+        ejemplo={ejemplo}
+      />
+
       {/* Acciones */}
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="outline" size="sm" onClick={() => api.detalleSugerenciaExcel(tipo, id)}>
@@ -337,8 +358,18 @@ export default function DetalleSugerenciaPage() {
               <th className="px-3 py-2">ABC</th>
               <th className="px-3 py-2 text-right">Stock</th>
               <th className="px-3 py-2 text-right">Tránsito</th>
-              <th className="px-3 py-2 text-right">Pide el modelo</th>
-              <th className="px-3 py-2 text-right">Aporta esto</th>
+              <th
+                className="px-3 py-2 text-right"
+                title="Lo que el modelo del BI pide por su cuenta, sin esta sugerencia."
+              >
+                Pide el modelo
+              </th>
+              <th
+                className="px-3 py-2 text-right"
+                title="Unidades que esta sugerencia agrega a la compra. Ver «+ info» arriba."
+              >
+                Aporta esto
+              </th>
               <th className="px-3 py-2 text-right">Valorizado</th>
               {puedeBorrarLineas && <th className="w-10 px-3 py-2"></th>}
             </tr>
@@ -476,6 +507,130 @@ export default function DetalleSugerenciaPage() {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * "+ info": de dónde sale la columna «Aporta esto».
+ *
+ * Va colapsado a propósito. Es una explicación que se lee una vez y después
+ * estorba, pero sin ella la columna genera una duda razonable: por qué una
+ * sugerencia que está activa aporta cero.
+ *
+ * El ejemplo NO es genérico: se arma con una línea de la sugerencia que el
+ * usuario está mirando, porque ver la resta con sus propios números explica más
+ * que cualquier párrafo.
+ */
+function ComoSeCalcula({
+  abierta,
+  onToggle,
+  esInstock,
+  ejemplo,
+}: {
+  abierta: boolean;
+  onToggle: () => void;
+  esInstock: boolean;
+  ejemplo: LineaDetalleSugerencia | null;
+}) {
+  const stock = ejemplo?.stock_actual ?? 0;
+  const transito = ejemplo?.stock_transito ?? 0;
+  const modelo = ejemplo?.sugerido_modelo ?? 0;
+  const cubierto = stock + transito + modelo;
+  const minimo = ejemplo?.minimo ?? 0;
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-white">
+      <button
+        onClick={onToggle}
+        className="flex w-full items-center gap-1.5 px-4 py-2.5 text-left text-[13px] font-medium text-slate-600 transition-colors hover:text-brand"
+      >
+        {abierta ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+        {abierta ? "Ocultar" : "+ info"} · cómo se calcula la columna «Aporta esto»
+      </button>
+
+      {abierta && (
+        <div className="space-y-3 border-t border-slate-100 px-4 py-3 text-[13px] leading-relaxed text-slate-600">
+          {esInstock ? (
+            <>
+              <p>
+                Esta regla no suma unidades: <b>completa hasta un mínimo</b>. Antes de
+                pedir descuenta tres cosas —lo que hay en bodega, lo que viene en
+                tránsito y lo que el modelo ya está pidiendo por su cuenta— y solo pide
+                la diferencia. Si no descontara lo último, se compraría dos veces para
+                el mismo nivel.
+              </p>
+              <pre className="overflow-x-auto rounded bg-slate-50 px-3 py-2 font-mono text-[12px] text-slate-700">
+{`cubierto = stock + tránsito + lo que ya pide el modelo
+aporta   = mínimo − cubierto      (nunca menos de 0)`}
+              </pre>
+              {ejemplo && (
+                <div>
+                  <p className="text-[12.5px] text-slate-500">
+                    Con una línea de esta misma regla:
+                  </p>
+                  <pre className="mt-1 overflow-x-auto rounded bg-slate-50 px-3 py-2 font-mono text-[12px] text-slate-700">
+{`${ejemplo.producto} · ${ejemplo.nombre_sucursal ?? ejemplo.sucursal_id}
+
+  mínimo                        ${formatoNumero(minimo)}
+  stock en bodega               ${formatoNumero(stock)}
+  en tránsito                   ${formatoNumero(transito)}
+  ya lo pide el modelo          ${formatoNumero(modelo)}
+                              ─────
+  cubierto                      ${formatoNumero(cubierto)}
+  aporta = ${formatoNumero(minimo)} − ${formatoNumero(cubierto)}   →      ${formatoNumero(ejemplo.aporta)}`}
+                  </pre>
+                </div>
+              )}
+              <p>
+                Por eso una línea puede estar activa y aportar cero:{" "}
+                <b>no es que la regla falle, es que ese repuesto ya está cubierto</b>. Si
+                mañana se vende el stock, la misma línea vuelve a pedir sola.
+              </p>
+            </>
+          ) : (
+            <>
+              <p>
+                Una sugerencia manual en unidades directas <b>es aditiva</b>: sus unidades
+                se suman al sugerido del modelo siempre, sin descontar nada. Por eso acá
+                «aporta» es simplemente lo que se pidió.
+              </p>
+              <p>
+                Lo que sí conviene mirar es la columna <b>«Pide el modelo»</b>: si el
+                modelo ya está pidiendo tanto o más por su cuenta, la sugerencia quedó{" "}
+                <b>redundante</b> —sigue sumando, pero probablemente ya no hace falta—. Esas
+                líneas quedan marcadas debajo del código.
+              </p>
+              {ejemplo && ejemplo.sugerido_modelo !== null && (
+                <pre className="overflow-x-auto rounded bg-slate-50 px-3 py-2 font-mono text-[12px] text-slate-700">
+{`${ejemplo.producto} · ${ejemplo.nombre_sucursal ?? ejemplo.sucursal_id}
+
+  el modelo pide por su cuenta  ${formatoNumero(ejemplo.sugerido_modelo)}
+  esta sugerencia agrega        ${formatoNumero(ejemplo.aporta)}
+                              ─────
+  total a comprar               ${formatoNumero(ejemplo.total_con_sugerencia)}`}
+                </pre>
+              )}
+              <p>
+                Las sugerencias que se pidieron como <b>«mantener N unidades en stock»</b>{" "}
+                sí descuentan lo que hay: la brecha se calculó al crearlas, contra el
+                stock, el tránsito y lo que el modelo pedía en ese momento.
+              </p>
+            </>
+          )}
+
+          <p className="border-t border-slate-100 pt-3 text-[12.5px] text-slate-500">
+            <b>No confundir con el stock de seguridad.</b> Ese es otro cálculo, del
+            modelo: alimenta el nivel máximo (
+            <span className="font-mono text-[11.5px]">
+              demanda diaria × (ciclo + lead time) + stock de seguridad
+            </span>
+            ) y sirve para decidir cuánto mantener de un repuesto{" "}
+            <b>que tiene venta</b>. {esInstock ? "La regla InStock" : "Una sugerencia manual"}{" "}
+            es lo contrario: existe para lo que el modelo no pediría solo.
+          </p>
         </div>
       )}
     </div>
