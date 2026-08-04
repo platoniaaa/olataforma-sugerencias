@@ -29,6 +29,7 @@ from .routers import (
     requerimientos,
     sugerencias_manuales,
     sugerido,
+    usuarios,
     ventas_historicas,
 )
 from .services.auth import (
@@ -105,6 +106,9 @@ app.include_router(inventario.router, dependencies=_abastecimiento)
 app.include_router(incidencias.router, dependencies=_protegido)
 # Admin: requiere flag es_admin (no solo estar logueado).
 app.include_router(admin.router, dependencies=[Depends(requiere_admin)])
+# Usuarios: crear/editar/desactivar. Cada endpoint valida admin por su cuenta
+# para poder saber QUIEN lo hizo y dejarlo en la auditoria.
+app.include_router(usuarios.router, dependencies=[Depends(requiere_admin)])
 # Calibracion NO va bajo /api/admin: su permiso es admin O autorizado (Abastecimiento).
 app.include_router(calibracion.router, dependencies=[Depends(requiere_calibracion)])
 # Chatbot: disponible para todo usuario autenticado.

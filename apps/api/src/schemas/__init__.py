@@ -68,6 +68,7 @@ from .incidencia import (
     IncidenciasResponse,
 )
 from .config_modelo import ConfigModeloUpdate
+from .usuario import UsuarioCrear, UsuarioOut
 
 __all__ = [
     "AnalizarLineasRequest",
@@ -88,6 +89,8 @@ __all__ = [
     "ResumenRequerimiento",
     "SkuProveedorCarga",
     "SkuProveedorFila",
+    "UsuarioCrear",
+    "UsuarioOut",
     "SugeridoRow",
     "SugeridoPage",
     "SugeridoKpis",
