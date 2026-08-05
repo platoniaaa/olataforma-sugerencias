@@ -8,6 +8,7 @@ import json
 
 from src.main import app
 from src.models import Usuario
+from src.routers.usuarios import LARGO_MINIMO_CLAVE
 from src.services.auth import requiere_auth, verify_password
 
 
@@ -55,9 +56,22 @@ def test_un_vendedor_sin_sucursal_no_se_puede_crear(client, db_session):
 
 
 def test_una_clave_corta_se_rechaza(client, db_session):
-    r = client.post("/api/admin/usuarios", json={"email": "y@curifor.cl", "password": "1234"})
+    """El minimo vigente es 4 (ver `LARGO_MINIMO_CLAVE`). Se prueba UNA menos que
+    el minimo y no un largo fijo, para que el test siga diciendo la verdad si el
+    numero vuelve a cambiar."""
+    corta = "x" * (LARGO_MINIMO_CLAVE - 1)
+    r = client.post("/api/admin/usuarios", json={"email": "y@curifor.cl", "password": corta})
     assert r.status_code == 400
     assert "contraseña" in r.json()["detail"].lower()
+
+
+def test_una_clave_del_largo_minimo_se_acepta(client, db_session):
+    """La contracara: el minimo tiene que ser usable, no solo declarado."""
+    r = client.post("/api/admin/usuarios", json={
+        "email": "justa@curifor.cl", "password": "x" * LARGO_MINIMO_CLAVE,
+    })
+    assert r.status_code == 200, r.text[:200]
+    assert db_session.get(Usuario, "justa@curifor.cl") is not None
 
 
 def test_un_usuario_nuevo_sin_clave_se_rechaza(client, db_session):

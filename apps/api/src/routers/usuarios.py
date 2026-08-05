@@ -31,7 +31,14 @@ router = APIRouter(prefix="/api/admin/usuarios", tags=["usuarios"])
 
 # Suficiente para que no sea trivial y sin exigir un gestor de contrasenas a un
 # vendedor de sucursal que entra desde el mesón.
-LARGO_MINIMO_CLAVE = 8
+# Estaba en 8. Ignacio lo bajo a 4 el 05-ago-2026 sabiendo que aplica a TODAS las
+# cuentas y no solo a las de prueba: la plataforma es interna, se usa desde el
+# meson de la sucursal, y una clave larga termina anotada en un papel al lado del
+# computador, que es peor que una corta.
+#
+# Es una decision tomada, no un descuido. Si alguien lo ve y piensa en subirlo,
+# que lo converse antes.
+LARGO_MINIMO_CLAVE = 4
 
 
 def _a_out(u: Usuario) -> dict:
