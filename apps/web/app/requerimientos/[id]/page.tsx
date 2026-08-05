@@ -12,11 +12,21 @@
  * para poder cerrar el requerimiento sería inventarle un paso.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { AlertTriangle, ArrowLeft, Check, Download, Loader2, X } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Check,
+  ChevronRight,
+  Download,
+  Loader2,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { BotonColumnas, useColumnas } from "@/components/columnas-requerimiento";
+import { DetalleProductoRequerimiento } from "@/components/detalle-producto-requerimiento";
 import { EstadoRequerimientoBadge } from "@/components/estado-requerimiento";
 import { api } from "@/lib/api-client";
 import { formatoCLP, formatoFechaHora, formatoNumero } from "@/lib/formato";
@@ -44,6 +54,32 @@ function Frecuencia({ linea }: { linea: LineaGuardada }) {
   );
 }
 
+/**
+ * Meses que dura lo que hay (stock + lo que viene) al ritmo de venta REAL de la
+ * sucursal. Se usa `venta_12m` y no `venta_mensual` a propósito: la del modelo
+ * está winsorizada, y para "cuánto me dura" interesa lo que se vendió de verdad.
+ * `null` cuando no se vende acá: dividir por cero daría "infinito", que se lee
+ * como un dato cuando en realidad es la ausencia de uno.
+ */
+function coberturaMeses(l: LineaGuardada): number | null {
+  const a = l.analisis;
+  if (!a?.venta_12m) return null;
+  const porMes = a.venta_12m / 12;
+  if (porMes <= 0) return null;
+  return ((a.stock_sucursal ?? 0) + (a.transito_sucursal ?? 0)) / porMes;
+}
+
+/**
+ * Margen sobre el precio de lista con el que el vendedor armó el carro.
+ * Un costo en CERO no es un repuesto gratis: es que no tenemos el costo. Sin esa
+ * guarda la columna muestra 100% y se lee como el mejor negocio de la lista.
+ */
+function margenPct(l: LineaGuardada): number | null {
+  const costo = l.analisis?.costo_unitario;
+  if (!l.precio_lista || !costo) return null;
+  return ((l.precio_lista - costo) / l.precio_lista) * 100;
+}
+
 export default function RevisarRequerimientoPage() {
   const params = useParams<{ id: string }>();
   const id = Number(params?.id);
@@ -57,6 +93,12 @@ export default function RevisarRequerimientoPage() {
   /** Cantidades editadas en pantalla (por id de línea). */
   const [cantidades, setCantidades] = useState<Record<number, number>>({});
   const [nota, setNota] = useState("");
+  /** Línea con el detalle abierto. Una a la vez: dos paneles no se comparan igual. */
+  const [abierta, setAbierta] = useState<number | null>(null);
+  const columnas = useColumnas();
+  const ver = (id: Parameters<typeof columnas.alternar>[0]) => columnas.visibles.has(id);
+  // Fijas: la flecha, código, descripción, pidió, se compra y subtotal.
+  const nCols = 6 + columnas.visibles.size;
 
   useEffect(() => {
     if (!id) return;
@@ -189,34 +231,75 @@ export default function RevisarRequerimientoPage() {
       )}
 
       {/* La tabla de decisión: mismo contexto que la pantalla de pegar lista. */}
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[12.5px] text-ink-500">
+          Aprieta una línea para ver el consumo, lo que viene en camino y dónde está
+          el stock.
+        </p>
+        <BotonColumnas
+          visibles={columnas.visibles}
+          alternar={columnas.alternar}
+          restaurar={columnas.restaurar}
+        />
+      </div>
       <div className="overflow-x-auto rounded-sm border border-ink-200 bg-white shadow-card">
-        <table className="w-full min-w-[1240px] text-[13px]">
+        <table className="w-full text-[13px]" style={{ minWidth: `${560 + columnas.visibles.size * 92}px` }}>
           <thead>
             <tr className="border-b border-ink-200 bg-paper-50 text-left text-[11.5px] uppercase tracking-wide text-ink-500">
+              <th className="w-8 px-1 py-2" />
               <th className="px-3 py-2">Código</th>
               <th className="px-3 py-2">Descripción</th>
-              <th className="px-3 py-2">ABC</th>
-              <th className="px-3 py-2" title="Meses con venta de los últimos 3 / 6 / 12">
-                Frecuencia
-              </th>
-              <th
-                className="px-3 py-2 text-right"
-                title="Unidades vendidas de verdad en esa sucursal, últimos 12 meses"
-              >
-                Venta 12m
-              </th>
-              <th
-                className="px-3 py-2 text-right"
-                title="Venta mensual promedio en esa sucursal, según el modelo"
-              >
-                Vta. mensual
-              </th>
-              <th className="px-3 py-2 text-right">Stock suc.</th>
-              <th className="px-3 py-2 text-right">Stock CD</th>
-              <th className="px-3 py-2 text-right" title="Stock en toda la empresa">
-                Stock nacional
-              </th>
-              <th className="px-3 py-2 text-right">Ya sugerido</th>
+              {ver("abc") && <th className="px-3 py-2">ABC</th>}
+              {ver("frecuencia") && (
+                <th className="px-3 py-2" title="Meses con venta de los últimos 3 / 6 / 12">
+                  Frecuencia
+                </th>
+              )}
+              {ver("venta_12m") && (
+                <th
+                  className="px-3 py-2 text-right"
+                  title="Unidades vendidas de verdad en esa sucursal, últimos 12 meses"
+                >
+                  Venta 12m
+                </th>
+              )}
+              {ver("venta_mensual") && (
+                <th
+                  className="px-3 py-2 text-right"
+                  title="Venta mensual promedio en esa sucursal, según el modelo"
+                >
+                  Vta. mensual
+                </th>
+              )}
+              {ver("stock_suc") && <th className="px-3 py-2 text-right">Stock suc.</th>}
+              {ver("stock_cd") && <th className="px-3 py-2 text-right">Stock CD</th>}
+              {ver("stock_nacional") && (
+                <th className="px-3 py-2 text-right" title="Stock en toda la empresa">
+                  Stock nacional
+                </th>
+              )}
+              {ver("transito") && (
+                <th
+                  className="px-3 py-2 text-right"
+                  title="Unidades ya pedidas que todavía no llegan a esa sucursal"
+                >
+                  En tránsito
+                </th>
+              )}
+              {ver("ya_sugerido") && <th className="px-3 py-2 text-right">Ya sugerido</th>}
+              {ver("cobertura") && (
+                <th
+                  className="px-3 py-2 text-right"
+                  title="Meses que dura el stock (más lo que viene) al ritmo de venta"
+                >
+                  Cobertura
+                </th>
+              )}
+              {ver("margen") && (
+                <th className="px-3 py-2 text-right" title="Margen sobre el precio de lista">
+                  Margen
+                </th>
+              )}
               <th className="px-3 py-2 text-right">Pidió</th>
               <th className="px-3 py-2 text-center">Se compra</th>
               <th className="px-3 py-2 text-right">Subtotal</th>
@@ -226,83 +309,167 @@ export default function RevisarRequerimientoPage() {
             {req.lineas.map((l) => {
               const a = l.analisis;
               const cantidad = cantidades[l.id] ?? l.cantidad_pedida;
+              const cob = coberturaMeses(l);
+              const margen = margenPct(l);
+              const estaAbierta = abierta === l.id;
               return (
-                <tr
-                  key={l.id}
-                  className={`border-b border-ink-100 ${cantidad === 0 ? "opacity-45" : ""}`}
-                >
-                  <td className="px-3 py-2 font-mono font-medium">{l.producto}</td>
-                  <td className="max-w-[260px] truncate px-3 py-2 text-ink-600">
-                    {l.descripcion ?? "—"}
-                    {l.comentario && (
-                      <span className="block text-[12px] text-ink-400">{l.comentario}</span>
+                <Fragment key={l.id}>
+                  <tr
+                    onClick={() => setAbierta(estaAbierta ? null : l.id)}
+                    className={`cursor-pointer border-b border-ink-100 hover:bg-paper-50 ${
+                      cantidad === 0 ? "opacity-45" : ""
+                    } ${estaAbierta ? "bg-paper-50" : ""}`}
+                  >
+                    <td className="px-1 py-2 text-ink-400">
+                      <ChevronRight
+                        size={15}
+                        className={`transition-transform ${estaAbierta ? "rotate-90" : ""}`}
+                      />
+                    </td>
+                    <td className="px-3 py-2 font-mono font-medium">{l.producto}</td>
+                    <td className="max-w-[260px] truncate px-3 py-2 text-ink-600">
+                      {l.descripcion ?? "—"}
+                      {l.comentario && (
+                        <span className="block text-[12px] text-ink-400">{l.comentario}</span>
+                      )}
+                      {a?.reemplazos && (
+                        <span className="block text-[11.5px] text-amber-700">
+                          reemplazo: {a.reemplazos}
+                        </span>
+                      )}
+                    </td>
+                    {ver("abc") && (
+                      <td className="px-3 py-2">
+                        {a?.clasificacion_abc ?? <span className="text-ink-300">—</span>}
+                      </td>
                     )}
-                    {a?.reemplazos && (
-                      <span className="block text-[11.5px] text-amber-700">
-                        reemplazo: {a.reemplazos}
-                      </span>
+                    {ver("frecuencia") && (
+                      <td className="px-3 py-2">
+                        <Frecuencia linea={l} />
+                      </td>
                     )}
-                  </td>
-                  <td className="px-3 py-2">
-                    {a?.clasificacion_abc ?? <span className="text-ink-300">—</span>}
-                  </td>
-                  <td className="px-3 py-2">
-                    <Frecuencia linea={l} />
-                  </td>
-                  <td className="px-3 py-2 text-right tabular">
-                    {a?.venta_12m == null ? (
-                      <span className="text-ink-300">—</span>
-                    ) : (
-                      formatoNumero(a.venta_12m)
+                    {ver("venta_12m") && (
+                      <td className="px-3 py-2 text-right tabular">
+                        {a?.venta_12m == null ? (
+                          <span className="text-ink-300">—</span>
+                        ) : (
+                          formatoNumero(a.venta_12m)
+                        )}
+                      </td>
                     )}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular text-ink-600">
-                    {/* Un decimal: redondear a entero convierte una venta de 0,3
-                        al mes en "0", que se lee como que no se vende. */}
-                    {a?.venta_mensual == null
-                      ? "—"
-                      : a.venta_mensual.toLocaleString("es-CL", { maximumFractionDigits: 1 })}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular">
-                    {formatoNumero(a?.stock_sucursal ?? 0)}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular text-ink-500">
-                    {formatoNumero(a?.stock_cd ?? 0)}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular text-ink-500">
-                    {formatoNumero(a?.stock_nacional ?? 0)}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular text-ink-500">
-                    {a?.total_sugerido_suc ? formatoNumero(a.total_sugerido_suc) : "—"}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular font-medium">
-                    {formatoNumero(l.cantidad_pedida)}
-                  </td>
-                  <td className="px-3 py-2">
-                    <input
-                      type="number"
-                      min={0}
-                      disabled={cerrado}
-                      value={cantidad}
-                      onChange={(e) =>
-                        setCantidades((prev) => ({
-                          ...prev,
-                          [l.id]: Math.max(0, Number(e.target.value) || 0),
-                        }))
-                      }
-                      className="mx-auto block h-8 w-20 rounded-sm border border-ink-200 bg-paper-50 text-center tabular text-[13px] disabled:opacity-60 focus-visible:border-accent-700 focus-visible:bg-white focus-visible:outline-none"
-                    />
-                  </td>
-                  <td className="px-3 py-2 text-right tabular">
-                    {formatoCLP(cantidad * (l.precio_lista ?? 0))}
-                  </td>
-                </tr>
+                    {ver("venta_mensual") && (
+                      <td className="px-3 py-2 text-right tabular text-ink-600">
+                        {/* Un decimal: redondear a entero convierte una venta de 0,3
+                            al mes en "0", que se lee como que no se vende. */}
+                        {a?.venta_mensual == null
+                          ? "—"
+                          : a.venta_mensual.toLocaleString("es-CL", {
+                              maximumFractionDigits: 1,
+                            })}
+                      </td>
+                    )}
+                    {ver("stock_suc") && (
+                      <td className="px-3 py-2 text-right tabular">
+                        {formatoNumero(a?.stock_sucursal ?? 0)}
+                      </td>
+                    )}
+                    {ver("stock_cd") && (
+                      <td className="px-3 py-2 text-right tabular text-ink-500">
+                        {formatoNumero(a?.stock_cd ?? 0)}
+                      </td>
+                    )}
+                    {ver("stock_nacional") && (
+                      <td className="px-3 py-2 text-right tabular text-ink-500">
+                        {formatoNumero(a?.stock_nacional ?? 0)}
+                      </td>
+                    )}
+                    {ver("transito") && (
+                      <td className="px-3 py-2 text-right tabular">
+                        {a?.transito_sucursal == null || a.transito_sucursal === 0 ? (
+                          <span className="text-ink-300">—</span>
+                        ) : (
+                          <span
+                            className="font-medium text-brand-600"
+                            title={
+                              a.transito_pedido_desde
+                                ? `OC más antigua: ${a.transito_pedido_desde}`
+                                : undefined
+                            }
+                          >
+                            {formatoNumero(a.transito_sucursal)}
+                          </span>
+                        )}
+                      </td>
+                    )}
+                    {ver("ya_sugerido") && (
+                      <td className="px-3 py-2 text-right tabular text-ink-500">
+                        {a?.total_sugerido_suc ? formatoNumero(a.total_sugerido_suc) : "—"}
+                      </td>
+                    )}
+                    {ver("cobertura") && (
+                      <td className="px-3 py-2 text-right tabular">
+                        {cob == null ? (
+                          <span className="text-ink-300">—</span>
+                        ) : (
+                          <span className={cob >= 12 ? "text-amber-800" : "text-ink-600"}>
+                            {cob >= 24
+                              ? "+24 m"
+                              : `${cob.toLocaleString("es-CL", { maximumFractionDigits: 1 })} m`}
+                          </span>
+                        )}
+                      </td>
+                    )}
+                    {ver("margen") && (
+                      <td className="px-3 py-2 text-right tabular">
+                        {margen == null ? (
+                          <span className="text-ink-300">—</span>
+                        ) : (
+                          <span className={margen < 0 ? "text-red-700" : "text-ink-600"}>
+                            {margen.toLocaleString("es-CL", { maximumFractionDigits: 1 })}%
+                          </span>
+                        )}
+                      </td>
+                    )}
+                    <td className="px-3 py-2 text-right tabular font-medium">
+                      {formatoNumero(l.cantidad_pedida)}
+                    </td>
+                    <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="number"
+                        min={0}
+                        disabled={cerrado}
+                        value={cantidad}
+                        onChange={(e) =>
+                          setCantidades((prev) => ({
+                            ...prev,
+                            [l.id]: Math.max(0, Number(e.target.value) || 0),
+                          }))
+                        }
+                        className="mx-auto block h-8 w-20 rounded-sm border border-ink-200 bg-paper-50 text-center tabular text-[13px] disabled:opacity-60 focus-visible:border-accent-700 focus-visible:bg-white focus-visible:outline-none"
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-right tabular">
+                      {formatoCLP(cantidad * (l.precio_lista ?? 0))}
+                    </td>
+                  </tr>
+                  {estaAbierta && (
+                    <tr className="border-b border-ink-100">
+                      <td colSpan={nCols} className="p-0">
+                        <DetalleProductoRequerimiento
+                          requerimientoId={req.id}
+                          producto={l.producto}
+                          nombreSucursal={req.nombre_sucursal ?? req.sucursal_id}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               );
             })}
           </tbody>
           <tfoot>
             <tr className="bg-paper-50 text-[13px] font-medium">
-              <td className="px-3 py-2" colSpan={12}>
+              <td className="px-3 py-2" colSpan={nCols - 1}>
                 {aComprar.length} de {req.lineas.length} líneas se compran
               </td>
               <td className="px-3 py-2 text-right tabular">{formatoCLP(total)}</td>

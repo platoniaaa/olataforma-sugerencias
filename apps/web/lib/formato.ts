@@ -35,6 +35,14 @@ export function formatoNumero(
 /** Fecha en formato chileno dd-mm-aaaa. */
 export function formatoFecha(iso: string | null | undefined): string {
   if (!iso) return "—";
+  // Una fecha SIN hora ("2026-05-02") la interpreta JS como medianoche UTC, y al
+  // mostrarla en hora de Chile (UTC-4) retrocede al dia anterior. Una fecha de OC
+  // corrida un dia no es un detalle cosmetico: es un dato equivocado.
+  const soloFecha = /^\d{4}-\d{2}-\d{2}$/.exec(iso.trim());
+  if (soloFecha) {
+    const [a, m, d] = iso.trim().split("-");
+    return `${d}-${m}-${a}`;
+  }
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
   const dd = String(d.getDate()).padStart(2, "0");

@@ -181,6 +181,23 @@ def detalle(
     return requerimiento_service.detalle(db, req_id, con_analisis=not vendedor)
 
 
+@router.get("/{req_id}/producto/{producto:path}")
+def detalle_producto(
+    req_id: int,
+    producto: str,
+    email: str = Depends(requiere_comprador),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Consumo, transito, stock, modelo y margen de UNA linea del requerimiento.
+
+    Va colgado del requerimiento (y no suelto por producto) porque la sucursal
+    sale de ahi: el mismo repuesto se decide distinto en Linderos que en Curico.
+    Solo comprador: es el contexto con el que se aprueba una compra.
+    """
+    req = requerimiento_service.obtener(db, req_id)
+    return requerimiento_service.detalle_producto(db, producto, req.sucursal_id)
+
+
 @router.patch("/{req_id}", response_model=RequerimientoOut)
 def actualizar(
     req_id: int,

@@ -16,6 +16,7 @@ from ..services import (
     powerbi_desktop_loader,
     powerbi_loader,
     stock_service,
+    transito_service,
 )
 from ..services.auth import requiere_admin
 
@@ -71,6 +72,35 @@ def publicar_stock_unificado(
             accion="stock_publicado",
             entidad="sistema",
             detalle=f"Stock unificado: {resumen['filas_cargadas']} filas",
+        )
+        db.commit()
+    return resumen
+
+
+@router.post("/stock-transito")
+def publicar_stock_transito(
+    payload: dict,
+    db: Session = Depends(get_db),
+) -> dict:
+    """El motor publica el transito vigente de TODO el catalogo (reemplaza la foto).
+
+    payload: {"filas": [{producto, sucursal_id, cantidad, pedido_desde}]}
+
+    Hasta ahora el transito solo existia pegado a las filas del sugerido, que es
+    un subconjunto chico del catalogo. El comprador que revisa un requerimiento
+    de sucursal no podia ver si el repuesto ya venia en camino, y podia comprar
+    de nuevo algo ya pedido.
+    """
+    filas = payload.get("filas")
+    if not isinstance(filas, list):
+        raise HTTPException(status_code=400, detail="Falta la lista 'filas'")
+    resumen = transito_service.reemplazar(db, filas)
+    if resumen["reemplazo"]:
+        auditoria_service.registrar(
+            db,
+            accion="transito_publicado",
+            entidad="sistema",
+            detalle=f"Stock en transito: {resumen['filas_cargadas']} filas",
         )
         db.commit()
     return resumen

@@ -9,6 +9,7 @@ from .venta_mensual import VentaMensual
 from .producto_catalogo import ProductoCatalogo
 from .sku_proveedor import SkuProveedor
 from .stock_unificado import StockUnificado
+from .stock_transito import StockTransito
 from .auditoria import AuditoriaLog
 from .notificacion import Notificacion
 from .incidencia import Incidencia
@@ -33,6 +34,7 @@ __all__ = [
     "ProductoCatalogo",
     "SkuProveedor",
     "StockUnificado",
+    "StockTransito",
     "AuditoriaLog",
     "Notificacion",
     "Incidencia",

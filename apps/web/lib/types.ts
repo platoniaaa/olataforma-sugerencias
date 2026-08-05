@@ -856,6 +856,54 @@ export interface LineaRequerimiento {
     meses_con_venta_12m: number;
     clasificacion_abc: string | null;
   } | null;
+  /** Unidades ya pedidas que todavía no llegan, en esta sucursal. */
+  transito_sucursal: number | null;
+  /** Lo mismo en toda la empresa: puede venir en camino a otra sucursal. */
+  transito_nacional: number | null;
+  /** Fecha de la OC más antigua del tránsito ("viene, pero pedido hace 4 meses"). */
+  transito_pedido_desde: string | null;
+}
+
+/** Todo lo que se abre bajo la fila de un producto del requerimiento. */
+export interface DetalleProducto {
+  producto: string;
+  sucursal_id: string;
+  descripcion: string | null;
+  reemplazos: string | null;
+  en_sugerido: boolean;
+  consumo: { periodo: string; sucursal: number; nacional: number }[];
+  consumo_12m_sucursal: number;
+  consumo_12m_nacional: number;
+  meses_con_venta_12m: number;
+  transito: {
+    sucursal: number | null;
+    pedido_desde: string | null;
+    por_sucursal: { sucursal_id: string | null; cantidad: number; pedido_desde: string | null }[];
+  };
+  stock: {
+    sucursal: number | null;
+    cd: number | null;
+    por_sucursal: { bodega: string | null; sucursal_id: string | null; stock: number; origen: string | null }[];
+  };
+  /** null cuando el modelo no evalúa este producto en esta sucursal. */
+  modelo: {
+    clasificacion_abc: string | null;
+    demanda_mensual: number | null;
+    demanda_diaria: number | null;
+    stock_seguridad: number | null;
+    punto_de_pedido: number | null;
+    nivel_maximo: number | null;
+    sugerido: number | null;
+    lead_time_dias: number | null;
+    meses_con_venta_3m: number | null;
+    meses_con_venta_6m: number | null;
+  } | null;
+  precio: {
+    precio: number | null;
+    costo: number | null;
+    margen_pct: number | null;
+    proveedor: string | null;
+  };
 }
 
 export interface RequerimientoResponse {

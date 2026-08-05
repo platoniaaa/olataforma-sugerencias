@@ -9,6 +9,7 @@ import type {
   CatalogoFiltros,
   CatalogoOpciones,
   CatalogoPage,
+  DetalleProducto,
   DetalleSugerencia,
   DimensionAgrupado,
   EstadoActualizacion,
@@ -304,6 +305,16 @@ export const api = {
 
   async requerimiento(id: number): Promise<Requerimiento> {
     return getJSON(`/api/requerimientos/${id}`);
+  },
+
+  /** Consumo, tránsito, stock y modelo de UNA línea. Se pide al abrir la fila. */
+  async detalleProductoRequerimiento(
+    id: number,
+    producto: string
+  ): Promise<DetalleProducto> {
+    return getJSON(
+      `/api/requerimientos/${id}/producto/${encodeURIComponent(producto)}`
+    );
   },
 
   async crearRequerimiento(body: {

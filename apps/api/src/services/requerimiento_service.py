@@ -43,9 +43,14 @@ from ..models import (
     Sugerido,
     VentaHistorica,
 )
-from . import sugerido_service
+from . import stock_service, sugerido_service, transito_service
 
 settings = get_settings()
+
+
+def _iso(d) -> str | None:
+    """Fecha -> 'YYYY-MM-DD'. None se propaga."""
+    return d.isoformat() if hasattr(d, "isoformat") else (str(d)[:10] or None if d else None)
 
 # Separadores explicitos: cuando aparece uno, la lectura es inequivoca.
 _SEPARADORES = re.compile(r"[\t;,|]")
@@ -213,10 +218,15 @@ def _venta_12m(db: Session, productos: set[str], sucursal_id: str) -> dict[str, 
     Dos trampas de los datos reales, las dos verificadas contra produccion:
 
     1. **La sucursal viene en dos formatos a la vez.** `venta_historica.sucursal`
-       tiene "02 LINDEROS" y tambien "LINDEROS", y los DOS estan vivos en los
-       ultimos meses (59,9M unidades el primero, 8,0M el segundo). Comparar por
-       igualdad se comeria el 88% de la venta de Linderos, asi que tambien se
-       acepta el mismo nombre con un prefijo numerico delante.
+       tiene "02 LINDEROS" y tambien "LINDEROS", y los DOS estan vivos: los
+       respaldos anuales 2018-2025 usan la forma numerada y el de 2026 trae las
+       dos en el mismo archivo. En una muestra de 30 productos del sugerido de
+       Linderos medida contra produccion, 22 tienen su venta SOLO bajo
+       "02 LINDEROS" y 3 solo bajo "LINDEROS". Como `sugerido.sucursal_id` usa la
+       forma corta, comparar por igualdad devuelve CERO para la mayoria del
+       catalogo; por eso se acepta tambien el nombre con prefijo numerico. El
+       patron no lleva `%` al final a proposito: asi "% CHILLAN" no se come
+       "10 CHILLAN VIEJO", que es otra sucursal.
     2. **El historico va atrasado.** Hoy carga hasta un par de meses antes del
        mes corriente, asi que la ventana se ancla al ultimo periodo CON datos y
        no a hoy; si no, se perderian meses reales por el otro extremo.
@@ -224,30 +234,14 @@ def _venta_12m(db: Session, productos: set[str], sucursal_id: str) -> dict[str, 
     if not productos:
         return {}
     try:
-        ultimo = db.scalar(select(func.max(VentaHistorica.periodo)))
-        if not ultimo or len(ultimo) != 6:
+        periodos = _periodos_12m(db)
+        if not periodos:
             return {}
-        a, m = int(ultimo[:4]), int(ultimo[4:])
-        periodos = []
-        for _ in range(12):
-            periodos.append(f"{a:04d}{m:02d}")
-            m -= 1
-            if m == 0:
-                a, m = a - 1, 12
-        # "02 LINDEROS" tambien es Linderos. Se escapan los comodines por si un
-        # dia un sucursal_id trae % o _.
-        seguro = (
-            sucursal_id.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
-        )
-        patron = f"% {seguro}"
         filas = db.execute(
             select(VentaHistorica.producto, func.sum(VentaHistorica.cantidad))
             .where(
                 VentaHistorica.producto.in_(productos),
-                or_(
-                    VentaHistorica.sucursal == sucursal_id,
-                    VentaHistorica.sucursal.like(patron, escape="\\"),
-                ),
+                _misma_sucursal(sucursal_id),
                 VentaHistorica.periodo.in_(periodos),
             )
             .group_by(VentaHistorica.producto)
@@ -256,31 +250,33 @@ def _venta_12m(db: Session, productos: set[str], sucursal_id: str) -> dict[str, 
     except Exception:  # noqa: BLE001 - sin historico la columna sale vacia, no rompe
         db.rollback()
         return {}
-    from datetime import date
 
-    hoy = date.today()
-    # 12 periodos hacia atras contando el actual, en formato YYYYMM.
+
+def _periodos_12m(db: Session) -> list[str]:
+    """Los 12 periodos YYYYMM hasta el ultimo CON datos, del mas nuevo al mas viejo."""
+    ultimo = db.scalar(select(func.max(VentaHistorica.periodo)))
+    if not ultimo or len(ultimo) != 6:
+        return []
+    a, m = int(ultimo[:4]), int(ultimo[4:])
     periodos = []
-    a, m = hoy.year, hoy.month
     for _ in range(12):
         periodos.append(f"{a:04d}{m:02d}")
         m -= 1
         if m == 0:
             a, m = a - 1, 12
-    try:
-        filas = db.execute(
-            select(VentaHistorica.producto, func.sum(VentaHistorica.cantidad))
-            .where(
-                VentaHistorica.producto.in_(productos),
-                VentaHistorica.sucursal == sucursal_id,
-                VentaHistorica.periodo.in_(periodos),
-            )
-            .group_by(VentaHistorica.producto)
-        ).all()
-        return {p: float(t or 0) for p, t in filas}
-    except Exception:  # noqa: BLE001 - sin historico la columna sale vacia, no rompe
-        db.rollback()
-        return {}
+    return periodos
+
+
+def _misma_sucursal(sucursal_id: str):
+    """Condicion que acepta "LINDEROS" y "02 LINDEROS" como la misma sucursal.
+
+    Se escapan los comodines por si un dia un sucursal_id trae % o _.
+    """
+    seguro = sucursal_id.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+    return or_(
+        VentaHistorica.sucursal == sucursal_id,
+        VentaHistorica.sucursal.like(f"% {seguro}", escape="\\"),
+    )
 
 
 def analizar(db: Session, sucursal_id: str, lineas: list[dict]) -> dict:
@@ -304,6 +300,11 @@ def analizar(db: Session, sucursal_id: str, lineas: list[dict]) -> dict:
     otras = _frecuencia_otras_sucursales(db, sin_local, sucursal_id)
     nacional = _stock_nacional(db, set(productos))
     vendido = _venta_12m(db, set(productos), sucursal_id)
+    # Transito de la tabla propia: existe para CUALQUIER producto, no solo para los
+    # que el sugerido evalua. El del sugerido (`propia.stock_en_transito_suc`) queda
+    # de respaldo por si el motor todavia no publico la tabla nueva.
+    transito = transito_service.por_producto(db, set(productos), sucursal_id)
+    transito_nac = transito_service.por_producto(db, set(productos))
 
     vistos: dict[str, int] = {}
     salida: list[dict] = []
@@ -347,6 +348,13 @@ def analizar(db: Session, sucursal_id: str, lineas: list[dict]) -> dict:
             "total_sugerido_suc": propia.total_sugerido_suc if propia else None,
             # Cuando no se vende aca, donde SI se vende.
             "frecuencia_otra_sucursal": otras.get(prod),
+            # Lo que ya viene en camino. Sin esto el comprador puede volver a
+            # comprar algo que ya esta pedido y no ha llegado.
+            "transito_sucursal": (transito.get(prod) or {}).get("cantidad")
+            if prod in transito
+            else (propia.stock_en_transito_suc if propia else None),
+            "transito_nacional": (transito_nac.get(prod) or {}).get("cantidad"),
+            "transito_pedido_desde": _iso((transito.get(prod) or {}).get("pedido_desde")),
         }
         salida.append(fila)
 
@@ -358,6 +366,150 @@ def analizar(db: Session, sucursal_id: str, lineas: list[dict]) -> dict:
             "sin_venta_local": sum(1 for f in salida if f["estado"] == "sin_venta_local"),
             "no_existe": sum(1 for f in salida if f["estado"] == "no_existe"),
             "duplicados": sum(1 for f in salida if f["duplicado"]),
+        },
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Detalle de UN producto del requerimiento.
+#
+# La tabla del requerimiento tiene que seguir siendo leible de una pasada, asi
+# que todo lo que sirve para profundizar en una linea vive aca y se abre bajo la
+# fila. La pregunta que responde es siempre la misma: "compro o no compro".
+# --------------------------------------------------------------------------- #
+def _consumo_mensual(db: Session, producto: str, sucursal_id: str) -> list[dict]:
+    """Venta mes a mes de los ultimos 12, en la sucursal y en todo Chile.
+
+    Devuelve SIEMPRE los 12 meses, con cero donde no hubo venta. Una serie con
+    huecos se dibuja como si esos meses no existieran, y "no vendio" se veria
+    igual que "no hay dato": justo la confusion que este panel viene a resolver.
+    """
+    periodos = _periodos_12m(db)
+    if not periodos:
+        return []
+    try:
+        propios = dict(
+            db.execute(
+                select(VentaHistorica.periodo, func.sum(VentaHistorica.cantidad))
+                .where(
+                    VentaHistorica.producto == producto,
+                    _misma_sucursal(sucursal_id),
+                    VentaHistorica.periodo.in_(periodos),
+                )
+                .group_by(VentaHistorica.periodo)
+            ).all()
+        )
+        nacionales = dict(
+            db.execute(
+                select(VentaHistorica.periodo, func.sum(VentaHistorica.cantidad))
+                .where(
+                    VentaHistorica.producto == producto,
+                    VentaHistorica.periodo.in_(periodos),
+                )
+                .group_by(VentaHistorica.periodo)
+            ).all()
+        )
+    except Exception:  # noqa: BLE001 - sin historico el grafico sale vacio, no rompe
+        db.rollback()
+        return []
+    return [
+        {
+            "periodo": p,
+            "sucursal": float(propios.get(p) or 0),
+            "nacional": float(nacionales.get(p) or 0),
+        }
+        for p in reversed(periodos)  # del mas viejo al mas nuevo, como se grafica
+    ]
+
+
+def detalle_producto(db: Session, producto: str, sucursal_id: str) -> dict:
+    """Todo lo que el comprador necesita de UN repuesto para decidir.
+
+    Se arma incluso cuando el producto no esta en el sugerido de esa sucursal:
+    ese es el caso NORMAL en un requerimiento (el vendedor pide justo lo que no
+    se stockea), y es cuando mas falta hace el contexto. Los bloques que no
+    aplican vuelven en None y la vista dice por que, en vez de dibujar un cero
+    que se lee como dato.
+    """
+    producto = (producto or "").strip()
+    if not producto:
+        raise HTTPException(status_code=400, detail="Falta el producto")
+
+    ctx = (sugerido_service.contexto_de_pares(db, [(producto, sucursal_id)]) or [{}])[0]
+    propia = next(
+        iter(sugerido_service._filas_de_pares(db, {(producto, sucursal_id)})), None
+    )
+    consumo = _consumo_mensual(db, producto, sucursal_id)
+    transito_suc = transito_service.por_producto(db, {producto}, sucursal_id).get(producto)
+    if transito_suc is None and propia is not None and propia.stock_en_transito_suc is not None:
+        # Respaldo mientras el motor no haya publicado la tabla nueva. Se compara
+        # con `is not None` y no por verdadero: un CERO del sugerido es un dato
+        # ("no viene nada"), y tratarlo como falta lo mostraria como "sin dato",
+        # que es lo contrario de lo que el modelo sabe.
+        transito_suc = {"cantidad": float(propia.stock_en_transito_suc), "pedido_desde": None}
+
+    # El precio de venta no viene del sugerido: es el de la lista de Curifor, la
+    # misma con la que el vendedor armo el carro.
+    precio = db.scalar(
+        select(ProductoCatalogo.precio).where(ProductoCatalogo.producto == producto)
+    )
+    costo = ctx.get("costo_unitario")
+    margen = None
+    # Un costo en CERO no es un repuesto gratis: es que no tenemos el costo. Sin
+    # esta guarda el panel muestra "margen 100%" y el comprador compra convencido
+    # de que es el mejor negocio del requerimiento.
+    if precio and costo:
+        margen = round((float(precio) - float(costo)) / float(precio) * 100, 1)
+    if not costo:
+        costo = None
+
+    total_suc = sum(m["sucursal"] for m in consumo)
+    total_nac = sum(m["nacional"] for m in consumo)
+    meses_con_venta = sum(1 for m in consumo if m["sucursal"] > 0)
+
+    return {
+        "producto": producto,
+        "sucursal_id": sucursal_id,
+        "descripcion": ctx.get("descripcion"),
+        "reemplazos": ctx.get("reemplazos"),
+        "en_sugerido": propia is not None,
+        # --- Consumo: el dato con el que se decide ---
+        "consumo": consumo,
+        "consumo_12m_sucursal": total_suc,
+        "consumo_12m_nacional": total_nac,
+        "meses_con_venta_12m": meses_con_venta,
+        # --- Lo que ya viene en camino ---
+        "transito": {
+            "sucursal": (transito_suc or {}).get("cantidad"),
+            "pedido_desde": _iso((transito_suc or {}).get("pedido_desde")),
+            "por_sucursal": transito_service.detalle_por_sucursal(db, producto),
+        },
+        # --- Donde estan las unidades que existen ---
+        "stock": {
+            "sucursal": ctx.get("stock_activo_suc"),
+            "cd": (propia.stock_en_cd if propia else None) or ctx.get("stock_en_cd"),
+            "por_sucursal": stock_service.stock_por_sucursal(db, producto),
+        },
+        # --- Que dice el modelo (solo si evalua este producto aca) ---
+        "modelo": {
+            "clasificacion_abc": (propia.clasificacion_abc if propia
+                                  else ctx.get("clasificacion_abc")),
+            "demanda_mensual": propia.demanda_mensual if propia else None,
+            "demanda_diaria": propia.demanda_diaria if propia else None,
+            "stock_seguridad": propia.stock_seguridad if propia else None,
+            "punto_de_pedido": propia.punto_de_pedido if propia else None,
+            "nivel_maximo": propia.nivel_maximo if propia else None,
+            "sugerido": propia.total_sugerido_suc if propia else None,
+            "lead_time_dias": propia.lead_time_dias if propia else None,
+            "meses_con_venta_3m": propia.meses_con_venta_3m if propia else None,
+            "meses_con_venta_6m": propia.meses_con_venta_6m if propia else None,
+        } if propia else None,
+        # --- Plata ---
+        "precio": {
+            "precio": precio,
+            "costo": costo,
+            "margen_pct": margen,
+            "proveedor": ctx.get("proveedor"),
         },
     }
 

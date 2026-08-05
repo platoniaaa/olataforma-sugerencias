@@ -60,6 +60,11 @@ class LineaRequerimiento(BaseModel):
     clasificacion_abc: str | None = None
     total_sugerido_suc: float | None = None
     frecuencia_otra_sucursal: FrecuenciaOtraSucursal | None = None
+    # Unidades ya pedidas que todavia no llegan. `None` = no hay dato (el motor
+    # aun no publico el transito), que NO es lo mismo que un cero.
+    transito_sucursal: float | None = None
+    transito_nacional: float | None = None
+    transito_pedido_desde: str | None = None
 
 
 class ResumenRequerimiento(BaseModel):
