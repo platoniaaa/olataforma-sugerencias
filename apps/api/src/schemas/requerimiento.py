@@ -53,6 +53,10 @@ class LineaRequerimiento(BaseModel):
     meses_con_venta_3m: int | None = None
     meses_con_venta_6m: int | None = None
     meses_con_venta_12m: int | None = None
+    # Venta mensual promedio (demanda del modelo) en esa sucursal.
+    venta_mensual: float | None = None
+    # Unidades vendidas de verdad en 12 meses en esa sucursal.
+    venta_12m: float | None = None
     clasificacion_abc: str | None = None
     total_sugerido_suc: float | None = None
     frecuencia_otra_sucursal: FrecuenciaOtraSucursal | None = None

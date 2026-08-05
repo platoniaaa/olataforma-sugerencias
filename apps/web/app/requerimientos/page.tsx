@@ -10,16 +10,19 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ClipboardPaste, Inbox, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EstadoRequerimientoBadge } from "@/components/estado-requerimiento";
 import { api } from "@/lib/api-client";
+import { filaNavegable } from "@/lib/tabla";
 import { formatoCLP, formatoFechaHora, formatoNumero } from "@/lib/formato";
 import type { Requerimiento } from "@/lib/types";
 
 type Filtro = "pendientes" | "todos";
 
 export default function RequerimientosPage() {
+  const router = useRouter();
   const [items, setItems] = useState<Requerimiento[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filtro, setFiltro] = useState<Filtro>("pendientes");
@@ -114,17 +117,21 @@ export default function RequerimientosPage() {
                     <th className="px-3 py-2 text-right">Repuestos</th>
                     <th className="px-3 py-2 text-right">Total aprox.</th>
                     <th className="px-3 py-2">Estado</th>
+                    <th className="w-8 px-3 py-2"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {visibles.map((r) => (
                     <tr
                       key={r.id}
-                      className={`border-b border-ink-100 hover:bg-paper-50 ${
+                      onClick={filaNavegable(() => router.push(`/requerimientos/${r.id}`))}
+                      className={`cursor-pointer border-b border-ink-100 hover:bg-paper-50 ${
                         r.estado === "enviado" ? "bg-blue-50/40" : ""
                       }`}
                     >
                       <td className="px-3 py-2">
+                        {/* Sigue siendo un enlace de verdad: Ctrl+click, rueda y
+                            teclado tienen que seguir funcionando. */}
                         <Link
                           href={`/requerimientos/${r.id}`}
                           className="font-medium text-accent-700 hover:underline"
@@ -148,6 +155,7 @@ export default function RequerimientosPage() {
                       <td className="px-3 py-2">
                         <EstadoRequerimientoBadge estado={r.estado} />
                       </td>
+                      <td className="px-3 py-2 text-right text-ink-300">›</td>
                     </tr>
                   ))}
                 </tbody>

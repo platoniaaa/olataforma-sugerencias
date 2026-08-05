@@ -123,10 +123,18 @@ def listar_notificaciones(
     db: Session = Depends(get_db),
     email: str = Depends(requiere_auth),
 ):
+    # El vendedor de sucursal solo ve SUS avisos: los del equipo de compras
+    # (sugerencias, cargas) son ruido para el.
+    from ..services.auth import es_vendedor
+
+    personales = es_vendedor(email, db)
     rows = auditoria_service.listar_notificaciones(
-        db, usuario_email=email, solo_no_leidas=solo_no_leidas, limit=limit
+        db, usuario_email=email, solo_no_leidas=solo_no_leidas, limit=limit,
+        solo_personales=personales,
     )
-    no_leidas = auditoria_service.contar_no_leidas(db, usuario_email=email)
+    no_leidas = auditoria_service.contar_no_leidas(
+        db, usuario_email=email, solo_personales=personales
+    )
     items: list[NotificacionOut] = []
     for n in rows:
         vistos = {e.strip() for e in (n.vistas_por or "").split(",") if e.strip()}

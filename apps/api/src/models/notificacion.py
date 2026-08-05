@@ -40,5 +40,10 @@ class Notificacion(Base):
     producto: Mapped[str | None] = mapped_column(String, nullable=True)
     sucursal_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
+    # NULL = para todo el equipo (como siempre fue). Con un email, es un aviso
+    # personal: "tu requerimiento fue comprado" no le importa a nadie mas, y al
+    # vendedor de sucursal lo unico que le importa son los suyos.
+    para_email: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+
     # Lista de emails que ya marcaron leida (CSV simple para no agregar otra tabla).
     vistas_por: Mapped[str | None] = mapped_column(Text, nullable=True, default="")

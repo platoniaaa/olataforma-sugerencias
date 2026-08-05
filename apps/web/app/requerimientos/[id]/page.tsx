@@ -190,7 +190,7 @@ export default function RevisarRequerimientoPage() {
 
       {/* La tabla de decisión: mismo contexto que la pantalla de pegar lista. */}
       <div className="overflow-x-auto rounded-sm border border-ink-200 bg-white shadow-card">
-        <table className="w-full min-w-[1040px] text-[13px]">
+        <table className="w-full min-w-[1240px] text-[13px]">
           <thead>
             <tr className="border-b border-ink-200 bg-paper-50 text-left text-[11.5px] uppercase tracking-wide text-ink-500">
               <th className="px-3 py-2">Código</th>
@@ -199,8 +199,23 @@ export default function RevisarRequerimientoPage() {
               <th className="px-3 py-2" title="Meses con venta de los últimos 3 / 6 / 12">
                 Frecuencia
               </th>
+              <th
+                className="px-3 py-2 text-right"
+                title="Unidades vendidas de verdad en esa sucursal, últimos 12 meses"
+              >
+                Venta 12m
+              </th>
+              <th
+                className="px-3 py-2 text-right"
+                title="Venta mensual promedio en esa sucursal, según el modelo"
+              >
+                Vta. mensual
+              </th>
               <th className="px-3 py-2 text-right">Stock suc.</th>
               <th className="px-3 py-2 text-right">Stock CD</th>
+              <th className="px-3 py-2 text-right" title="Stock en toda la empresa">
+                Stock nacional
+              </th>
               <th className="px-3 py-2 text-right">Ya sugerido</th>
               <th className="px-3 py-2 text-right">Pidió</th>
               <th className="px-3 py-2 text-center">Se compra</th>
@@ -222,6 +237,11 @@ export default function RevisarRequerimientoPage() {
                     {l.comentario && (
                       <span className="block text-[12px] text-ink-400">{l.comentario}</span>
                     )}
+                    {a?.reemplazos && (
+                      <span className="block text-[11.5px] text-amber-700">
+                        reemplazo: {a.reemplazos}
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-2">
                     {a?.clasificacion_abc ?? <span className="text-ink-300">—</span>}
@@ -230,10 +250,27 @@ export default function RevisarRequerimientoPage() {
                     <Frecuencia linea={l} />
                   </td>
                   <td className="px-3 py-2 text-right tabular">
+                    {a?.venta_12m == null ? (
+                      <span className="text-ink-300">—</span>
+                    ) : (
+                      formatoNumero(a.venta_12m)
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular text-ink-600">
+                    {/* Un decimal: redondear a entero convierte una venta de 0,3
+                        al mes en "0", que se lee como que no se vende. */}
+                    {a?.venta_mensual == null
+                      ? "—"
+                      : a.venta_mensual.toLocaleString("es-CL", { maximumFractionDigits: 1 })}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular">
                     {formatoNumero(a?.stock_sucursal ?? 0)}
                   </td>
                   <td className="px-3 py-2 text-right tabular text-ink-500">
                     {formatoNumero(a?.stock_cd ?? 0)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular text-ink-500">
+                    {formatoNumero(a?.stock_nacional ?? 0)}
                   </td>
                   <td className="px-3 py-2 text-right tabular text-ink-500">
                     {a?.total_sugerido_suc ? formatoNumero(a.total_sugerido_suc) : "—"}
@@ -265,7 +302,7 @@ export default function RevisarRequerimientoPage() {
           </tbody>
           <tfoot>
             <tr className="bg-paper-50 text-[13px] font-medium">
-              <td className="px-3 py-2" colSpan={9}>
+              <td className="px-3 py-2" colSpan={12}>
                 {aComprar.length} de {req.lineas.length} líneas se compran
               </td>
               <td className="px-3 py-2 text-right tabular">{formatoCLP(total)}</td>

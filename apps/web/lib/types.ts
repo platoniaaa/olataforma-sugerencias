@@ -843,6 +843,10 @@ export interface LineaRequerimiento {
   meses_con_venta_3m: number | null;
   meses_con_venta_6m: number | null;
   meses_con_venta_12m: number | null;
+  /** Venta mensual promedio (demanda del modelo) en esa sucursal. */
+  venta_mensual: number | null;
+  /** Unidades vendidas de verdad en los últimos 12 meses en esa sucursal. */
+  venta_12m: number | null;
   clasificacion_abc: string | null;
   total_sugerido_suc: number | null;
   /** Cuando no se vende en esta sucursal: dónde sí se vende. */

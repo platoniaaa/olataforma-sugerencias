@@ -10,14 +10,17 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Inbox, Loader2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EstadoRequerimientoBadge } from "@/components/estado-requerimiento";
 import { api } from "@/lib/api-client";
+import { filaNavegable } from "@/lib/tabla";
 import { formatoCLP, formatoFechaHora, formatoNumero } from "@/lib/formato";
 import type { Requerimiento } from "@/lib/types";
 
 export default function MisRequerimientosPage() {
+  const router = useRouter();
   const [items, setItems] = useState<Requerimiento[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -122,7 +125,11 @@ export default function MisRequerimientosPage() {
               </thead>
               <tbody>
                 {items.map((r) => (
-                  <tr key={r.id} className="border-b border-ink-100 hover:bg-paper-50">
+                  <tr
+                    key={r.id}
+                    onClick={filaNavegable(() => router.push(`/mis-requerimientos/${r.id}`))}
+                    className="cursor-pointer border-b border-ink-100 hover:bg-paper-50"
+                  >
                     <td className="px-3 py-2">
                       <Link
                         href={`/mis-requerimientos/${r.id}`}

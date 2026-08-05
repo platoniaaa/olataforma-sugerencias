@@ -41,6 +41,7 @@ from ..models import (
     RequerimientoLinea,
     StockUnificado,
     Sugerido,
+    VentaHistorica,
 )
 from . import sugerido_service
 
@@ -201,6 +202,87 @@ def _stock_nacional(db: Session, productos: set[str]) -> dict[str, float]:
         return {}
 
 
+def _venta_12m(db: Session, productos: set[str], sucursal_id: str) -> dict[str, float]:
+    """Unidades vendidas de verdad en los ultimos 12 meses, en ESA sucursal.
+
+    El Excel del comprador tenia una columna "Venta 12 meses" y era con la que
+    dimensionaba si lo que le piden es mucho o poco. `demanda_mensual` no sirve
+    para eso: es el promedio que usa el modelo, ya winsorizado, no lo que se
+    vendio.
+
+    Dos trampas de los datos reales, las dos verificadas contra produccion:
+
+    1. **La sucursal viene en dos formatos a la vez.** `venta_historica.sucursal`
+       tiene "02 LINDEROS" y tambien "LINDEROS", y los DOS estan vivos en los
+       ultimos meses (59,9M unidades el primero, 8,0M el segundo). Comparar por
+       igualdad se comeria el 88% de la venta de Linderos, asi que tambien se
+       acepta el mismo nombre con un prefijo numerico delante.
+    2. **El historico va atrasado.** Hoy carga hasta un par de meses antes del
+       mes corriente, asi que la ventana se ancla al ultimo periodo CON datos y
+       no a hoy; si no, se perderian meses reales por el otro extremo.
+    """
+    if not productos:
+        return {}
+    try:
+        ultimo = db.scalar(select(func.max(VentaHistorica.periodo)))
+        if not ultimo or len(ultimo) != 6:
+            return {}
+        a, m = int(ultimo[:4]), int(ultimo[4:])
+        periodos = []
+        for _ in range(12):
+            periodos.append(f"{a:04d}{m:02d}")
+            m -= 1
+            if m == 0:
+                a, m = a - 1, 12
+        # "02 LINDEROS" tambien es Linderos. Se escapan los comodines por si un
+        # dia un sucursal_id trae % o _.
+        seguro = (
+            sucursal_id.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+        )
+        patron = f"% {seguro}"
+        filas = db.execute(
+            select(VentaHistorica.producto, func.sum(VentaHistorica.cantidad))
+            .where(
+                VentaHistorica.producto.in_(productos),
+                or_(
+                    VentaHistorica.sucursal == sucursal_id,
+                    VentaHistorica.sucursal.like(patron, escape="\\"),
+                ),
+                VentaHistorica.periodo.in_(periodos),
+            )
+            .group_by(VentaHistorica.producto)
+        ).all()
+        return {p: float(t or 0) for p, t in filas}
+    except Exception:  # noqa: BLE001 - sin historico la columna sale vacia, no rompe
+        db.rollback()
+        return {}
+    from datetime import date
+
+    hoy = date.today()
+    # 12 periodos hacia atras contando el actual, en formato YYYYMM.
+    periodos = []
+    a, m = hoy.year, hoy.month
+    for _ in range(12):
+        periodos.append(f"{a:04d}{m:02d}")
+        m -= 1
+        if m == 0:
+            a, m = a - 1, 12
+    try:
+        filas = db.execute(
+            select(VentaHistorica.producto, func.sum(VentaHistorica.cantidad))
+            .where(
+                VentaHistorica.producto.in_(productos),
+                VentaHistorica.sucursal == sucursal_id,
+                VentaHistorica.periodo.in_(periodos),
+            )
+            .group_by(VentaHistorica.producto)
+        ).all()
+        return {p: float(t or 0) for p, t in filas}
+    except Exception:  # noqa: BLE001 - sin historico la columna sale vacia, no rompe
+        db.rollback()
+        return {}
+
+
 def analizar(db: Session, sucursal_id: str, lineas: list[dict]) -> dict:
     """Enriquece cada linea con lo necesario para decidir comprar o no."""
     if not lineas:
@@ -221,6 +303,7 @@ def analizar(db: Session, sucursal_id: str, lineas: list[dict]) -> dict:
     sin_local = {p for p in productos if (p, sucursal_id) not in propias and p in existen}
     otras = _frecuencia_otras_sucursales(db, sin_local, sucursal_id)
     nacional = _stock_nacional(db, set(productos))
+    vendido = _venta_12m(db, set(productos), sucursal_id)
 
     vistos: dict[str, int] = {}
     salida: list[dict] = []
@@ -253,6 +336,11 @@ def analizar(db: Session, sucursal_id: str, lineas: list[dict]) -> dict:
             "meses_con_venta_3m": propia.meses_con_venta_3m if propia else None,
             "meses_con_venta_6m": propia.meses_con_venta_6m if propia else None,
             "meses_con_venta_12m": propia.meses_con_venta_12m if propia else None,
+            # Venta mensual promedio segun el modelo. Es la columna con la que el
+            # comprador dimensionaba en su Excel si la cantidad pedida es mucha o poca.
+            "venta_mensual": propia.demanda_mensual if propia else None,
+            # Unidades vendidas de verdad en 12 meses en esta sucursal.
+            "venta_12m": vendido.get(prod),
             "clasificacion_abc": (propia.clasificacion_abc if propia
                                   else ctx.get("clasificacion_abc")),
             "stock_cd": propia.stock_en_cd if propia else None,

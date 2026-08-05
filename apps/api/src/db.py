@@ -136,6 +136,9 @@ def create_all() -> None:
         "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS meses_con_venta_12m INTEGER",
         # 2026-08: vendedor de sucursal (arma requerimientos, no ve el sugerido).
         "ALTER TABLE usuario ADD COLUMN IF NOT EXISTS es_vendedor BOOLEAN NOT NULL DEFAULT FALSE",
+        # 2026-08: notificaciones dirigidas ("tu requerimiento fue comprado").
+        "ALTER TABLE notificacion ADD COLUMN IF NOT EXISTS para_email VARCHAR",
+        "CREATE INDEX IF NOT EXISTS ix_notificacion_para_email ON notificacion (para_email)",
     ]
     # SQLite NO soporta "ADD COLUMN IF NOT EXISTS" (error de sintaxis que se
     # tragaba el try, dejando bases locales viejas sin las columnas nuevas):
@@ -149,8 +152,19 @@ def create_all() -> None:
             # aborta las siguientes (en Postgres abortaria la transaccion entera).
             with engine.begin() as conn:
                 conn.execute(text(sql))
-        except Exception:
-            pass
+        except Exception as e:
+            # La mayoria de los fallos aca son "la columna ya existe", que es lo
+            # normal y esperado. Pero un fallo DE VERDAD (corte del pooler
+            # justo en esa sentencia) deja el modelo declarando una columna que
+            # la tabla no tiene, y ahi TODA consulta de esa tabla se cae hasta
+            # el proximo reinicio. Con `pass` eso no dejaba ni una linea de log.
+            texto = str(e).lower()
+            ya_existe = any(
+                p in texto
+                for p in ("already exists", "duplicate column", "ya existe")
+            )
+            if not ya_existe:
+                print(f"[migracion] FALLO: {sql} -> {type(e).__name__}: {e}")
 
 
 def get_db() -> Generator[Session, None, None]:

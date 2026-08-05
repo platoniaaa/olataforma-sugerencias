@@ -43,9 +43,15 @@ def registrar(
             motivo=motivo,
             detalle=detalle,
         )
-        db.add(log)
-        # Se commitea con la transaccion del endpoint.
-        db.flush()
+        # SAVEPOINT: si el INSERT falla (tabla vieja, columna que falta tras un
+        # deploy), el error queda CONTENIDO. Sin esto la sesion queda en
+        # pending-rollback y el db.commit() del endpoint revienta con un 500
+        # DESPUES de que la accion principal ya se guardo: el usuario ve un error,
+        # reintenta, y termina con un requerimiento duplicado. Un db.rollback()
+        # a secas tampoco sirve: se llevaria por delante lo que el endpoint
+        # todavia no commitea.
+        with db.begin_nested():
+            db.add(log)
         return log
     except Exception:
         # Auditoria no debe romper la accion principal.
@@ -61,6 +67,7 @@ def notificar(
     creado_por_email: str | None = None,
     producto: str | None = None,
     sucursal_id: str | None = None,
+    para_email: str | None = None,
 ) -> Notificacion | None:
     try:
         n = Notificacion(
@@ -71,10 +78,12 @@ def notificar(
             creado_por_email=creado_por_email,
             producto=producto,
             sucursal_id=sucursal_id,
+            para_email=para_email,
             vistas_por="",
         )
-        db.add(n)
-        db.flush()
+        # Mismo SAVEPOINT que en `registrar`, y por la misma razon.
+        with db.begin_nested():
+            db.add(n)
         return n
     except Exception:
         return None
@@ -104,13 +113,30 @@ def listar_auditoria(
     return rows, total
 
 
+def _visibles_para(usuario_email: str, solo_personales: bool):
+    """Filtro de visibilidad: lo del equipo + lo dirigido a MI.
+
+    `solo_personales` es para el vendedor de sucursal: a el no le interesan los
+    avisos del equipo de compras (sugerencias creadas, cargas), solo los suyos.
+    """
+    from sqlalchemy import or_
+
+    if solo_personales:
+        return Notificacion.para_email == usuario_email
+    return or_(Notificacion.para_email.is_(None), Notificacion.para_email == usuario_email)
+
+
 def listar_notificaciones(
-    db: Session, *, usuario_email: str, solo_no_leidas: bool = False, limit: int = 50
+    db: Session, *, usuario_email: str, solo_no_leidas: bool = False, limit: int = 50,
+    solo_personales: bool = False,
 ) -> list[Notificacion]:
     rows = list(
         db.scalars(
             select(Notificacion)
-            .where(Notificacion.tenant_id == settings.default_tenant_id)
+            .where(
+                Notificacion.tenant_id == settings.default_tenant_id,
+                _visibles_para(usuario_email, solo_personales),
+            )
             .order_by(desc(Notificacion.creado_en))
             .limit(limit if not solo_no_leidas else limit * 3)
         ).all()
@@ -120,11 +146,12 @@ def listar_notificaciones(
     return rows
 
 
-def contar_no_leidas(db: Session, *, usuario_email: str) -> int:
+def contar_no_leidas(db: Session, *, usuario_email: str, solo_personales: bool = False) -> int:
     rows = list(
         db.scalars(
             select(Notificacion).where(
-                Notificacion.tenant_id == settings.default_tenant_id
+                Notificacion.tenant_id == settings.default_tenant_id,
+                _visibles_para(usuario_email, solo_personales),
             )
         ).all()
     )

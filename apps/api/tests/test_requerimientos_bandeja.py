@@ -308,3 +308,134 @@ def test_pegar_resuelve_el_codigo_ambiguo(client, vendedor):
     assert r[0]["producto"] == "70 2723982"
     assert r[0]["cantidad"] == 6
     assert r[0]["encontrado"] is True
+
+
+# --- Notificaciones: la respuesta que el correo nunca dio ---------------------
+
+def test_al_crear_avisa_al_equipo_de_compras(client, vendedor):
+    from src.models import Notificacion
+
+    _como("vendedor@curifor.com")
+    client.post("/api/requerimientos", json={
+        "lineas": [{"producto": "70 2723982", "cantidad": 2}], "nota": "urgente",
+    })
+    avisos = vendedor.query(Notificacion).filter_by(tipo="requerimiento_nuevo").all()
+    assert len(avisos) == 1
+    assert "urgente" in (avisos[0].mensaje or "")
+    # Es para todo el equipo, no dirigido.
+    assert avisos[0].para_email is None
+
+
+def test_al_cerrar_avisa_SOLO_al_vendedor_que_pidio(client, vendedor):
+    from src.models import Notificacion
+
+    rid = _crear(client)
+    _como("test@curifor.com")
+    client.patch(f"/api/requerimientos/{rid}", json={
+        "estado": "procesado", "nota_comprador": "Llega el jueves con el camión del CD.",
+    })
+    aviso = vendedor.query(Notificacion).filter_by(tipo="requerimiento_procesado").one()
+    assert aviso.para_email == "vendedor@curifor.com"
+    assert "comprado" in aviso.titulo
+    assert "jueves" in (aviso.mensaje or "")
+
+
+def test_el_vendedor_ve_su_aviso_y_no_el_ruido_del_equipo(client, vendedor):
+    from src.services import auditoria_service
+
+    rid = _crear(client)
+    _como("test@curifor.com")
+    # Ruido tipico del equipo de compras.
+    auditoria_service.notificar(vendedor, tipo="sugerencia_creada",
+                                titulo="Sugerencia manual creada")
+    client.patch(f"/api/requerimientos/{rid}", json={
+        "estado": "rechazado", "nota_comprador": "Se resuelve con traslado.",
+    })
+
+    _como("vendedor@curifor.com")
+    r = client.get("/api/notificaciones").json()
+    titulos = [n["titulo"] for n in r["items"]]
+    assert any("rechazado" in t for t in titulos)
+    assert not any("Sugerencia" in t for t in titulos)
+
+    _como("test@curifor.com")
+    titulos_comprador = [n["titulo"] for n in client.get("/api/notificaciones").json()["items"]]
+    # El comprador si ve el ruido del equipo, y NO el aviso personal del vendedor.
+    assert any("Sugerencia" in t for t in titulos_comprador)
+    assert not any("rechazado" in t for t in titulos_comprador)
+
+
+def test_el_analisis_trae_la_venta_mensual(client, vendedor):
+    """La columna con la que el comprador dimensiona si lo pedido es mucho o poco."""
+    from src.models import Sugerido
+
+    # La fixture de este archivo no crea filas del sugerido (prueba el flujo del
+    # carro, no el modelo): se agrega la fila que el analisis va a mirar.
+    vendedor.add(Sugerido(
+        tenant_id="curifor", producto="19 SZ6Z3B437B", sucursal_id="LINDEROS",
+        nombre_sucursal="Linderos", clasificacion_abc="A", pedir="Si",
+        demanda_mensual=7.5, meses_con_venta_12m=11,
+    ))
+    vendedor.commit()
+    rid = _crear(client)
+    _como("test@curifor.com")
+    linea = client.get(f"/api/requerimientos/{rid}").json()["lineas"][0]
+    assert linea["analisis"]["estado"] == "en_sugerido"
+    assert linea["analisis"]["venta_mensual"] == 7.5
+
+
+def test_la_venta_de_12_meses_suma_los_DOS_formatos_de_sucursal(client, vendedor):
+    """En produccion `venta_historica.sucursal` trae "02 LINDEROS" Y "LINDEROS",
+    los dos vivos hoy. Comparar por igualdad se comia el 88% de la venta."""
+    from src.models import VentaHistorica
+
+    vendedor.add_all([
+        # Mismo mes, la misma sucursal escrita de las dos formas.
+        VentaHistorica(tenant_id="curifor", producto="19 SZ6Z3B437B",
+                       sucursal="02 LINDEROS", periodo="202606", cantidad=40),
+        VentaHistorica(tenant_id="curifor", producto="19 SZ6Z3B437B",
+                       sucursal="LINDEROS", periodo="202606", cantidad=6),
+        # 11 meses antes: dentro de la ventana.
+        VentaHistorica(tenant_id="curifor", producto="19 SZ6Z3B437B",
+                       sucursal="02 LINDEROS", periodo="202507", cantidad=4),
+        # 12 meses antes: FUERA de la ventana.
+        VentaHistorica(tenant_id="curifor", producto="19 SZ6Z3B437B",
+                       sucursal="02 LINDEROS", periodo="202506", cantidad=99),
+        # Otra sucursal que NO debe colarse por el patron.
+        VentaHistorica(tenant_id="curifor", producto="19 SZ6Z3B437B",
+                       sucursal="07 CURICO", periodo="202606", cantidad=50),
+        VentaHistorica(tenant_id="curifor", producto="19 SZ6Z3B437B",
+                       sucursal="RANCAGUA 2", periodo="202606", cantidad=7),
+    ])
+    vendedor.commit()
+
+    rid = _crear(client)
+    _como("test@curifor.com")
+    linea = client.get(f"/api/requerimientos/{rid}").json()["lineas"][0]
+    assert linea["analisis"]["venta_12m"] == 50  # 40 + 6 + 4
+
+
+def test_la_ventana_de_12_meses_se_ancla_al_ultimo_periodo_con_datos(client, vendedor):
+    """El historico va atrasado respecto de hoy: anclar la ventana en la fecha
+    actual perderia meses reales por el otro extremo.
+
+    El conftest ya siembra venta hasta 202505, asi que ese es el ancla y la
+    ventana es 202406..202505 — ninguno de esos meses es "hoy".
+    """
+    from src.models import VentaHistorica
+
+    vendedor.add_all([
+        VentaHistorica(tenant_id="curifor", producto="19 SZ6Z3B437B",
+                       sucursal="LINDEROS", periodo="202505", cantidad=12),
+        # Justo el borde de adentro (11 meses antes del ancla).
+        VentaHistorica(tenant_id="curifor", producto="19 SZ6Z3B437B",
+                       sucursal="LINDEROS", periodo="202406", cantidad=8),
+        # Justo afuera.
+        VentaHistorica(tenant_id="curifor", producto="19 SZ6Z3B437B",
+                       sucursal="LINDEROS", periodo="202405", cantidad=99),
+    ])
+    vendedor.commit()
+    rid = _crear(client)
+    _como("test@curifor.com")
+    linea = client.get(f"/api/requerimientos/{rid}").json()["lineas"][0]
+    assert linea["analisis"]["venta_12m"] == 20

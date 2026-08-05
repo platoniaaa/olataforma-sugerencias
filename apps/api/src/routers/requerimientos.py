@@ -144,6 +144,19 @@ def crear(
         usuario_email=email,
         detalle=f"{sucursal}: {len(req.lineas)} líneas",
     )
+    # Campanita del equipo de compras: la bandeja no se mira sola.
+    auditoria_service.notificar(
+        db,
+        tipo="requerimiento_nuevo",
+        titulo=f"Requerimiento #{req.id} de {req.nombre_sucursal or sucursal}",
+        mensaje=(
+            f"{req.creado_por_nombre or email} pidió {len(req.lineas)} "
+            f"{'repuesto' if len(req.lineas) == 1 else 'repuestos'}."
+            + (f" «{req.nota}»" if req.nota else "")
+        ),
+        creado_por_email=email,
+        sucursal_id=sucursal,
+    )
     db.commit()
     return requerimiento_service.detalle(db, req.id)
 
@@ -192,5 +205,20 @@ def actualizar(
             entidad_id=str(req_id),
             usuario_email=email,
         )
+        # Aviso PERSONAL al vendedor: el correo nunca le dijo en que quedo lo
+        # que pidio; esta campanita es justamente esa respuesta.
+        if payload.estado in ("procesado", "rechazado"):
+            comprado = payload.estado == "procesado"
+            auditoria_service.notificar(
+                db,
+                tipo=f"requerimiento_{payload.estado}",
+                titulo=(
+                    f"Tu requerimiento #{req_id} fue "
+                    + ("comprado" if comprado else "rechazado")
+                ),
+                mensaje=salida.get("nota_comprador"),
+                creado_por_email=email,
+                para_email=salida.get("creado_por"),
+            )
         db.commit()
     return salida
