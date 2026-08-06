@@ -344,7 +344,11 @@ def analizar(db: Session, sucursal_id: str, lineas: list[dict]) -> dict:
             "venta_12m": vendido.get(prod),
             "clasificacion_abc": (propia.clasificacion_abc if propia
                                   else ctx.get("clasificacion_abc")),
-            "stock_cd": propia.stock_en_cd if propia else None,
+            # Mismo camino que el panel de detalle. Sin el respaldo del catalogo,
+            # la fila y el panel del MISMO repuesto mostraban numeros distintos:
+            # `14 1495982` salia con "Stock CD 0" en la tabla y "6" abajo, porque
+            # la tabla solo miraba el sugerido y el producto no tiene fila ahi.
+            "stock_cd": (propia.stock_en_cd if propia else None) or ctx.get("stock_en_cd"),
             "total_sugerido_suc": propia.total_sugerido_suc if propia else None,
             # Cuando no se vende aca, donde SI se vende.
             "frecuencia_otra_sucursal": otras.get(prod),

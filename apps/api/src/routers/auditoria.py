@@ -88,10 +88,17 @@ def listar(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
+    email: str = Depends(requiere_auth),
 ):
+    # El vendedor de sucursal solo ve lo que hizo EL. La actividad del equipo de
+    # compras -quien cargo que, quien creo o borro sugerencias, quien edito
+    # usuarios- no es asunto suyo, y hasta ahora la veia completa.
+    from ..services.auth import es_vendedor
+
+    solo_de = email if es_vendedor(email, db) else None
     # Los accesos (login) van en su propia vista, restringida. No mezclarlos aca.
     rows, total = auditoria_service.listar_auditoria(
-        db, excluir_acciones=["login"], limit=limit, offset=offset
+        db, excluir_acciones=["login"], solo_de=solo_de, limit=limit, offset=offset
     )
     return AuditoriaPage(
         items=[AuditoriaLogOut.model_validate(r) for r in rows],

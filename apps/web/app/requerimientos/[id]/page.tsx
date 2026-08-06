@@ -55,6 +55,19 @@ function Frecuencia({ linea }: { linea: LineaGuardada }) {
 }
 
 /**
+ * Unidades, distinguiendo CERO de SIN DATO.
+ *
+ * Antes se pintaba `valor ?? 0`, así que un repuesto sin fila en el sugerido salía
+ * con "Stock CD 0" cuando la verdad era "no lo sabemos por ahí". Y el panel de la
+ * misma línea mostraba 6, porque él sí consultaba el catálogo: dos números
+ * distintos para el mismo dato, en la misma pantalla.
+ */
+function Unidades({ valor }: { valor: number | null | undefined }) {
+  if (valor == null) return <span className="text-ink-300">—</span>;
+  return <>{formatoNumero(valor)}</>;
+}
+
+/**
  * Meses que dura lo que hay (stock + lo que viene) al ritmo de venta REAL de la
  * sucursal. Se usa `venta_12m` y no `venta_mensual` a propósito: la del modelo
  * está winsorizada, y para "cuánto me dura" interesa lo que se vendió de verdad.
@@ -370,17 +383,17 @@ export default function RevisarRequerimientoPage() {
                     )}
                     {ver("stock_suc") && (
                       <td className="px-3 py-2 text-right tabular">
-                        {formatoNumero(a?.stock_sucursal ?? 0)}
+                        <Unidades valor={a?.stock_sucursal} />
                       </td>
                     )}
                     {ver("stock_cd") && (
                       <td className="px-3 py-2 text-right tabular text-ink-500">
-                        {formatoNumero(a?.stock_cd ?? 0)}
+                        <Unidades valor={a?.stock_cd} />
                       </td>
                     )}
                     {ver("stock_nacional") && (
                       <td className="px-3 py-2 text-right tabular text-ink-500">
-                        {formatoNumero(a?.stock_nacional ?? 0)}
+                        <Unidades valor={a?.stock_nacional} />
                       </td>
                     )}
                     {ver("transito") && (

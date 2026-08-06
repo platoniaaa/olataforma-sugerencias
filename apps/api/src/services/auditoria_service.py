@@ -6,7 +6,7 @@ romper la accion del usuario).
 """
 from __future__ import annotations
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -94,9 +94,16 @@ def listar_auditoria(
     *,
     accion: str | None = None,
     excluir_acciones: list[str] | None = None,
+    solo_de: str | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> tuple[list[AuditoriaLog], int]:
+    """Pagina del log. `solo_de` limita a lo que hizo ESE usuario.
+
+    Lo usa el vendedor de sucursal: la auditoria del equipo de compras -quien
+    cargo que, quien creo o borro sugerencias, quien edito usuarios- no es asunto
+    suyo, y hasta ahora la veia completa.
+    """
     base = select(AuditoriaLog).where(
         AuditoriaLog.tenant_id == settings.default_tenant_id
     )
@@ -104,7 +111,12 @@ def listar_auditoria(
         base = base.where(AuditoriaLog.accion == accion)
     if excluir_acciones:
         base = base.where(AuditoriaLog.accion.not_in(excluir_acciones))
-    total = len(list(db.scalars(base).all()))
+    if solo_de:
+        base = base.where(AuditoriaLog.usuario_email == solo_de)
+    # COUNT en la base. Antes se traian TODAS las filas a memoria solo para
+    # contarlas (`len(db.scalars(base).all())`): el log crece sin techo y esa
+    # consulta se paga entera en cada carga de la pantalla.
+    total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
     rows = list(
         db.scalars(
             base.order_by(desc(AuditoriaLog.creado_en)).offset(offset).limit(limit)
