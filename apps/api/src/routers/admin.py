@@ -17,6 +17,7 @@ from ..services import (
     powerbi_loader,
     stock_service,
     transito_service,
+    ventas_historicas_service,
 )
 from ..services.auth import requiere_admin
 
@@ -101,6 +102,38 @@ def publicar_stock_transito(
             accion="transito_publicado",
             entidad="sistema",
             detalle=f"Stock en transito: {resumen['filas_cargadas']} filas",
+        )
+        db.commit()
+    return resumen
+
+
+@router.post("/ventas-historicas")
+def publicar_ventas_historicas(
+    payload: dict,
+    db: Session = Depends(get_db),
+) -> dict:
+    """El motor publica los meses de venta que a la plataforma le faltan.
+
+    payload: {"filas": [{periodo, producto, sucursal, cantidad, neto, n_lineas}]}
+
+    Reemplaza SOLO los periodos que vienen. Hasta ahora esta tabla se cargaba con
+    un job manual conectado directo a la base: el mes que se pegaba en el respaldo
+    de Ventas no llegaba nunca a la plataforma salvo que alguien se acordara, y la
+    columna "Venta 12m" y el grafico de consumo se quedaban atras sin avisar.
+    """
+    filas = payload.get("filas")
+    if not isinstance(filas, list):
+        raise HTTPException(status_code=400, detail="Falta la lista 'filas'")
+    resumen = ventas_historicas_service.reemplazar_periodos(db, filas)
+    if resumen["filas_cargadas"]:
+        auditoria_service.registrar(
+            db,
+            accion="ventas_publicadas",
+            entidad="sistema",
+            detalle=(
+                f"Venta historica: {resumen['filas_cargadas']} filas, "
+                f"periodos {', '.join(resumen['periodos'])}"
+            ),
         )
         db.commit()
     return resumen

@@ -267,16 +267,10 @@ def _periodos_12m(db: Session) -> list[str]:
     return periodos
 
 
-def _misma_sucursal(sucursal_id: str):
-    """Condicion que acepta "LINDEROS" y "02 LINDEROS" como la misma sucursal.
-
-    Se escapan los comodines por si un dia un sucursal_id trae % o _.
-    """
-    seguro = sucursal_id.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
-    return or_(
-        VentaHistorica.sucursal == sucursal_id,
-        VentaHistorica.sucursal.like(f"% {seguro}", escape="\\"),
-    )
+# Vive en `sugerido_service` para que exista UNA sola definicion de "misma
+# sucursal": si cada modulo trae la suya, dos pantallas muestran dos ventas
+# distintas del mismo producto y no hay forma de saber cual creer.
+_misma_sucursal = sugerido_service.misma_sucursal
 
 
 def analizar(db: Session, sucursal_id: str, lineas: list[dict]) -> dict:

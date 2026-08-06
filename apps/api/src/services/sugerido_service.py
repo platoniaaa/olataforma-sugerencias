@@ -4,6 +4,7 @@ NOTA Fase 0: aca NO se calcula el sugerido. Los valores ya vienen del Power BI.
 Solo se filtra/agrega lo que ya esta cargado en la tabla.
 """
 import math
+import re
 import unicodedata
 from datetime import datetime, timezone
 
@@ -659,6 +660,36 @@ def _resolver_instock(db: Session, f: SugeridoFiltros, manuales: dict, man: dict
     }
 
 
+_PREFIJO_SUCURSAL = re.compile(r"^\d+\s+")
+
+
+def normalizar_sucursal(nombre: str | None) -> str | None:
+    """"02 LINDEROS" -> "LINDEROS". El resto vuelve igual.
+
+    `venta_historica.sucursal` sale tal cual del Excel de Ventas, y ahi el mismo
+    lugar aparece con y sin el codigo por delante -a veces en el MISMO archivo-.
+    `sugerido.sucursal_id` en cambio usa siempre la forma corta, asi que cruzar
+    las dos tablas por igualdad pierde la mayor parte de la venta.
+    """
+    if not nombre:
+        return nombre
+    return _PREFIJO_SUCURSAL.sub("", nombre.strip()) or nombre.strip()
+
+
+def misma_sucursal(sucursal_id: str):
+    """Condicion SQL que acepta "LINDEROS" y "02 LINDEROS" como el mismo lugar.
+
+    Se escapan los comodines por si un dia un sucursal_id trae % o _. El patron
+    NO lleva `%` al final a proposito: asi "% CHILLAN" no se come
+    "10 CHILLAN VIEJO", que es otra sucursal.
+    """
+    seguro = sucursal_id.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+    return or_(
+        VentaHistorica.sucursal == sucursal_id,
+        VentaHistorica.sucursal.like(f"% {seguro}", escape="\\"),
+    )
+
+
 def _mes_anterior_yyyymm(hoy: "date | None" = None) -> str:
     """Devuelve el mes calendario anterior en formato YYYYMM (string).
 
@@ -725,7 +756,15 @@ def _aplicar_regla_stock_sin_venta(
 
     productos = {p for p, _ in pares}
     sucursales = {s for _, s in pares}
-    # Suma de cantidad vendida el mes anterior por par.
+    # Suma vendida el mes anterior por par. NO se filtra por sucursal en la
+    # consulta: `venta_historica.sucursal` trae el mismo lugar en dos formas
+    # ("02 LINDEROS" y "LINDEROS") y comparar por igualdad se come la mayoria.
+    # Medido en el respaldo de julio-2026: el 76% de las filas viene con prefijo
+    # numerico, y en Talca y Chillan la forma corta NO EXISTE. Con el filtro
+    # exacto esas dos sucursales daban venta CERO y la regla marcaba "No pedir"
+    # en todo lo que tuviera stock, escondiendolo del dashboard.
+    # Se agrupa en Python normalizando el nombre; las filas ya vienen acotadas
+    # por producto y periodo, asi que no se trae de mas.
     rows = db.execute(
         select(
             VentaHistorica.producto,
@@ -734,12 +773,15 @@ def _aplicar_regla_stock_sin_venta(
         )
         .where(
             VentaHistorica.producto.in_(productos),
-            VentaHistorica.sucursal.in_(sucursales),
             VentaHistorica.periodo == mes,
         )
         .group_by(VentaHistorica.producto, VentaHistorica.sucursal)
     ).all()
-    venta_map = {(p, s): float(c or 0) for p, s, c in rows}
+    venta_map: dict[tuple[str, str], float] = {}
+    for p, s, c in rows:
+        clave = (p, normalizar_sucursal(s))
+        if clave[1] in sucursales:
+            venta_map[clave] = venta_map.get(clave, 0.0) + float(c or 0)
 
     for it in items:
         p = it.get("producto")
@@ -1757,7 +1799,9 @@ def ventas_12m(db: Session, producto: str, sucursal_id: str | None = None) -> di
             func.coalesce(func.sum(VentaHistorica.cantidad), 0).label("cantidad"),
         ).where(VentaHistorica.producto == producto)
         if suc:
-            stmt = stmt.where(VentaHistorica.sucursal == suc)
+            # "02 LINDEROS" tambien es Linderos: con igualdad, la serie de la
+            # sucursal salia plana en cero para la mayoria de los productos.
+            stmt = stmt.where(misma_sucursal(suc))
         stmt = stmt.group_by(VentaHistorica.periodo).order_by(VentaHistorica.periodo.asc())
         return [(m, float(c)) for m, c in db.execute(stmt).all()]
 

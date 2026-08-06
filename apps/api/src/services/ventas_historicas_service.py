@@ -6,7 +6,7 @@ en un periodo.
 """
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, insert, select
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -16,6 +16,67 @@ from .sugerido_service import PREFIJOS_EXCLUIDOS
 settings = get_settings()
 
 LIMITE_FILAS = 2000
+_LOTE = 1000
+
+
+def reemplazar_periodos(db: Session, filas: list[dict]) -> dict:
+    """Carga meses de venta reemplazando SOLO los periodos que vienen.
+
+    Se publica desde el motor, que es el unico que tiene los Excel a mano. Antes
+    esto era un job manual que alguien tenia que acordarse de correr: el mes que
+    se pegaba en el respaldo no llegaba nunca a la plataforma, y la columna
+    "Venta 12m" y el grafico de consumo se quedaban atras sin avisar.
+
+    Reemplazar por periodo (y no la tabla entera) permite recargar un mes
+    corregido sin tocar el resto del historico.
+    """
+    tenant = settings.default_tenant_id
+    validas: list[dict] = []
+    for f in filas:
+        periodo = str(f.get("periodo") or "").strip()
+        producto = (f.get("producto") or "").strip()
+        if len(periodo) != 6 or not periodo.isdigit() or not producto:
+            continue
+        try:
+            cantidad = float(f.get("cantidad") or 0)
+        except (TypeError, ValueError):
+            continue
+        neto = f.get("neto")
+        try:
+            neto = float(neto) if neto is not None else None
+        except (TypeError, ValueError):
+            neto = None
+        validas.append({
+            "tenant_id": tenant,
+            "periodo": periodo,
+            "producto": producto,
+            # Se guarda el nombre TAL CUAL viene del Excel. Normalizarlo aca
+            # perderia el dato original; quien cruza contra el sugerido usa
+            # `sugerido_service.misma_sucursal`, que acepta las dos formas.
+            "sucursal": (f.get("sucursal") or "").strip() or None,
+            "cantidad": cantidad,
+            "neto": neto,
+            "n_lineas": int(f.get("n_lineas") or 0) or None,
+        })
+
+    if not validas:
+        return {"filas_cargadas": 0, "ignoradas": len(filas), "periodos": []}
+
+    periodos = sorted({f["periodo"] for f in validas})
+    db.execute(
+        delete(VentaHistorica).where(
+            VentaHistorica.tenant_id == tenant,
+            VentaHistorica.periodo.in_(periodos),
+        )
+    )
+    for i in range(0, len(validas), _LOTE):
+        db.execute(insert(VentaHistorica), validas[i : i + _LOTE])
+    db.commit()
+    return {
+        "filas_cargadas": len(validas),
+        "ignoradas": len(filas) - len(validas),
+        "periodos": periodos,
+    }
 
 
 def _base(f: dict):
