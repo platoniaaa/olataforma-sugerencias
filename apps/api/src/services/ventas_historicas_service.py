@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..models import VentaHistorica
-from .sugerido_service import PREFIJOS_EXCLUIDOS
+from .sugerido_service import PREFIJOS_EXCLUIDOS, misma_sucursal, normalizar_sucursal
 
 settings = get_settings()
 
@@ -92,7 +92,9 @@ def _base(f: dict):
     if f.get("producto"):
         stmt = stmt.where(VentaHistorica.producto.ilike(f"%{f['producto']}%"))
     if f.get("sucursal"):
-        stmt = stmt.where(VentaHistorica.sucursal == f["sucursal"])
+        # El desplegable ofrece el nombre normalizado; la tabla guarda las dos
+        # formas. Comparar por igualdad devolvia la mitad de la venta.
+        stmt = stmt.where(misma_sucursal(f["sucursal"]))
     if f.get("periodo_desde"):
         stmt = stmt.where(VentaHistorica.periodo >= f["periodo_desde"])
     if f.get("periodo_hasta"):
@@ -109,14 +111,18 @@ def meta(db: Session) -> dict:
             func.count(),
         ).where(VentaHistorica.tenant_id == settings.default_tenant_id)
     ).first()
-    sucursales = [
-        s for (s,) in db.execute(
+    # Se juntan las dos formas del mismo lugar. El historico viejo trae la celda
+    # cruda del Excel ("02 LINDEROS") y lo que publica el motor viene normalizado
+    # ("LINDEROS"), asi que sin esto el desplegable ofrece la misma sucursal dos
+    # veces y elegir una devuelve la mitad de la venta.
+    sucursales = sorted({
+        normalizar_sucursal(s)
+        for (s,) in db.execute(
             select(VentaHistorica.sucursal)
             .where(VentaHistorica.tenant_id == settings.default_tenant_id)
             .distinct()
-            .order_by(VentaHistorica.sucursal)
         ).all() if s
-    ]
+    })
     return {
         "periodo_min": row[0], "periodo_max": row[1], "filas": row[2] or 0,
         "sucursales": sucursales,
@@ -137,16 +143,24 @@ def por_periodo(db: Session, f: dict) -> list[dict]:
 
 
 def por_sucursal(db: Session, f: dict) -> list[dict]:
+    """Venta por sucursal, juntando las dos formas del mismo lugar.
+
+    Se agrupa en Python y no en SQL porque el nombre viene en dos formatos
+    ("02 LINDEROS" en el historico viejo, "LINDEROS" en lo que publica el motor)
+    y agrupar por la columna cruda parte cada sucursal en dos filas.
+    """
     stmt = _base(f).with_only_columns(
         VentaHistorica.sucursal,
         func.sum(VentaHistorica.cantidad),
         func.sum(VentaHistorica.neto),
     ).group_by(VentaHistorica.sucursal)
-    filas = [
-        {"sucursal": s or "(sin sucursal)", "cantidad": float(c or 0), "neto": float(n or 0)}
-        for s, c, n in db.execute(stmt).all()
-    ]
-    return sorted(filas, key=lambda x: x["cantidad"], reverse=True)
+    junto: dict[str, dict] = {}
+    for s, c, n in db.execute(stmt).all():
+        clave = normalizar_sucursal(s) or "(sin sucursal)"
+        fila = junto.setdefault(clave, {"sucursal": clave, "cantidad": 0.0, "neto": 0.0})
+        fila["cantidad"] += float(c or 0)
+        fila["neto"] += float(n or 0)
+    return sorted(junto.values(), key=lambda x: x["cantidad"], reverse=True)
 
 
 def detalle(db: Session, f: dict, limit: int = 500) -> dict:

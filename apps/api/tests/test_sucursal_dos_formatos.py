@@ -134,3 +134,51 @@ def test_la_serie_de_la_sucursal_incluye_la_forma_numerada(db_session):
     r = sugerido_service.ventas_12m(db, "P1", "LINDEROS")
     assert r["total_sucursal"] == 8, "las dos formas de Linderos, y solo esas"
     assert r["total_general"] == 108
+
+
+# --- La pantalla de Ventas historicas ---------------------------------------- #
+
+def test_el_desplegable_no_ofrece_la_misma_sucursal_dos_veces(db_session):
+    """El historico viejo trae "02 LINDEROS" y lo que publica el motor
+    "LINDEROS": sin juntarlas, el filtro lista la misma sucursal dos veces y
+    elegir una devuelve la mitad de la venta."""
+    from src.services import ventas_historicas_service as vh
+
+    db = db_session
+    _venta(db, "202606", "P1", "02 LINDEROS", 10)
+    _venta(db, "202607", "P1", "LINDEROS", 5)
+    _venta(db, "202607", "P1", "TALCA (2)", 3)
+    db.commit()
+
+    suc = vh.meta(db)["sucursales"]
+    assert suc.count("LINDEROS") == 1
+    assert "02 LINDEROS" not in suc
+    assert "TALCA (2)" in suc, "un nombre sin prefijo no se toca"
+
+
+def test_el_reporte_por_sucursal_junta_las_dos_formas(db_session):
+    from src.services import ventas_historicas_service as vh
+
+    db = db_session
+    _venta(db, "202606", "P1", "02 LINDEROS", 10)
+    _venta(db, "202607", "P1", "LINDEROS", 5)
+    db.commit()
+
+    # Acotado al producto: el conftest ya siembra ventas de otros.
+    filas = {f["sucursal"]: f["cantidad"] for f in vh.por_sucursal(db, {"producto": "P1"})}
+    assert filas.get("LINDEROS") == 15, "una sola fila con la venta completa"
+    assert "02 LINDEROS" not in filas
+
+
+def test_filtrar_por_sucursal_trae_las_dos_formas(db_session):
+    from src.services import ventas_historicas_service as vh
+
+    db = db_session
+    _venta(db, "202606", "P1", "02 LINDEROS", 10)
+    _venta(db, "202607", "P1", "LINDEROS", 5)
+    _venta(db, "202607", "P1", "07 CURICO", 99)
+    db.commit()
+
+    total = sum(p["cantidad"]
+                for p in vh.por_periodo(db, {"sucursal": "LINDEROS", "producto": "P1"}))
+    assert total == 15
