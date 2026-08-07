@@ -126,9 +126,37 @@ def test_clase_d_entra_con_abcd():
     assert filas[0]["total_sugerido_suc"] == 1
 
 
-def test_clase_agregada_ab_basta():
-    """D local pero A a nivel empresa: el modelo igual lo abastece via CD."""
+def test_en_sucursal_manda_la_clase_local():
+    """D local pero A a nivel empresa: en la SUCURSAL no se repone.
+
+    De eso se encarga el CD. Si la sucursal tambien repusiera, el mismo codigo
+    se compraria dos veces (era el caso al 07-08-2026: 1.444 filas, $58,4M).
+    """
     filas = [_fila(clasificacion_abc="D", clasificacion_abc_agregada="A")]
+    nivel_maximo.aplicar(filas, CONFIG)
+    assert filas[0]["total_sugerido_suc"] == 0
+    assert filas[0]["nivel_maximo"] == 2  # informativo, se publica igual
+
+
+def test_en_el_cd_manda_la_clase_agregada():
+    """La otra cara: en el CD, D local + A agregada SI repone. Es quien compra."""
+    filas = [_fila(sucursal_id="CD REPUESTOS", clasificacion_abc="D",
+                   clasificacion_abc_agregada="A")]
+    nivel_maximo.aplicar(filas, CONFIG)
+    assert filas[0]["total_sugerido_suc"] == 1
+
+
+def test_en_el_cd_la_clase_local_no_alcanza():
+    """A local pero D agregada: el CD no es quien compra, no repone."""
+    filas = [_fila(sucursal_id="CD REPUESTOS", clasificacion_abc="A",
+                   clasificacion_abc_agregada="D")]
+    nivel_maximo.aplicar(filas, CONFIG)
+    assert filas[0]["total_sugerido_suc"] == 0
+
+
+def test_la_sucursal_que_si_rota_sigue_reponiendo():
+    """El cambio es quirurgico: apaga las que no venden, no las sucursales."""
+    filas = [_fila(clasificacion_abc="B", clasificacion_abc_agregada="D")]
     nivel_maximo.aplicar(filas, CONFIG)
     assert filas[0]["total_sugerido_suc"] == 1
 

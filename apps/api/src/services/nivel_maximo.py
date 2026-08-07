@@ -35,8 +35,9 @@ Alcance
 -------
 Lo controla `clases_que_reponen` en Configuracion:
 
-- `"AB"` (default): solo clases de rotacion, mirando la clase local **o** la
-  agregada. ~1.700 filas y ~$110M sobre el snapshot de jul-2026.
+- `"AB"` (default): solo clases de rotacion, mirando la MISMA clase que usa el
+  motor para decidir quien compra: la agregada en la fila del CD, la local en
+  las sucursales.
 - `"ABCD"`: todas. Son ~12.300 filas y >$378M, porque para una clase D el nivel
   teorico es una fraccion de unidad y el techo lo convierte en 1: en la practica
   es "tener 1 unidad de todo", no "reponer al maximo". Por eso no es el default.
@@ -74,17 +75,30 @@ def _clase_agregada(fila: dict) -> str:
     return str(fila.get("clasificacion_abc_agregada") or "").strip().upper()
 
 
+def _es_cd(fila: dict) -> bool:
+    return str(fila.get("sucursal_id") or "").strip().upper() == CD
+
+
 def _aplica_a(fila: dict, clases: str) -> bool:
     """La fila entra en la regla segun el parametro `clases_que_reponen`.
 
-    Con "AB" basta con que la clase local **o** la agregada sea A/B: un repuesto
-    que en la sucursal se mueve poco (D local) pero que la empresa vende harto
-    (A agregada) se abastece igual via CD, y dejarlo fuera seria incoherente con
-    como el modelo decide a quien le compra.
+    Con "AB" decide la MISMA clase que usa el motor para saber quien compra
+    (`motor/sugerido.py`): la agregada en la fila del CD, la local en las
+    sucursales. Las dos capas tienen que responder lo mismo, si no una deshace
+    lo que la otra decidio.
+
+    Antes bastaba con que cualquiera de las dos fuera A/B. La intencion era que
+    un repuesto de poca rotacion local pero mucha venta nacional se abasteciera
+    igual -- y eso es correcto --, pero la regla se aplica a la fila de la
+    SUCURSAL y le escribia compra propia en vez de dejar que la tomara el CD.
+    Resultado: el mismo codigo comprado dos veces, en el CD y en la sucursal.
+    Al 07-08-2026 eran 1.444 filas y $58,4 millones de compra duplicada, con el
+    stock ya existiendo en la red (decision de Ignacio Calderon, 07-08-2026).
     """
     if clases == "ABCD":
         return True
-    return _clase(fila) in CLASES_ROTACION or _clase_agregada(fila) in CLASES_ROTACION
+    clase = _clase_agregada(fila) if _es_cd(fila) else _clase(fila)
+    return clase in CLASES_ROTACION
 
 
 def nivel_de(fila: dict, config: dict) -> int | None:
