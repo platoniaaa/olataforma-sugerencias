@@ -61,6 +61,25 @@ export function ConsumoChart({
   }
 
   const totalSuc = datos.reduce((s, d) => s + d.sucursal, 0);
+  const totalNac = datos.reduce((s, d) => s + d.nacional, 0);
+
+  // Ni aca ni en el resto de la empresa. Antes se caia igual a la serie nacional
+  // y se dibujaban doce barras de altura cero: un recuadro en blanco con los
+  // meses abajo, que el comprador lee como "no cargo" y no como "no se vende".
+  // Encima el subtitulo prometia "se muestra la venta nacional" y no habia nada
+  // que mostrar. Doce ceros se dicen con palabras, no con un grafico.
+  if (totalSuc === 0 && totalNac === 0) {
+    return (
+      <div>
+        <p className="text-[12.5px] font-medium text-ink-700">Consumo mensual</p>
+        <p className="mt-1 text-[12.5px] text-ink-500">
+          Sin ventas en los últimos 12 meses, ni en {nombreSucursal} ni en el
+          resto de la empresa.
+        </p>
+      </div>
+    );
+  }
+
   // Si la sucursal no movio nada, la serie util es la nacional.
   const usaNacional = totalSuc === 0;
   const valores = datos.map((d) => (usaNacional ? d.nacional : d.sucursal));

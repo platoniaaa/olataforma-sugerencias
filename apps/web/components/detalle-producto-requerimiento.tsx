@@ -120,7 +120,12 @@ export function DetalleProductoRequerimiento({
         </div>
       )}
 
-      <ConsumoChart datos={d.consumo} nombreSucursal={nombreSucursal} />
+      {/* Si no se vende en ninguna parte, el aviso de arriba ya lo dijo con mas
+          contexto. Repetirlo abajo sobra, y dibujar el grafico con doce ceros se
+          lee como una vista que no cargo. */}
+      {!nuncaSeVende && (
+        <ConsumoChart datos={d.consumo} nombreSucursal={nombreSucursal} />
+      )}
 
       <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 lg:grid-cols-5">
         <Dato
@@ -132,15 +137,13 @@ export function DetalleProductoRequerimiento({
           etiqueta="Consumo 12m · empresa"
           valor={formatoNumero(d.consumo_12m_nacional)}
         />
+        {/* Sin fila de transito = no hay OC pendiente = cero, igual que el stock
+            de al lado, que ya hacia `?? 0`. Mostrar "sin dato" en uno y "0" en el
+            otro para el mismo vacio hacia dudar de la carga, y encima contradecia
+            al propio panel, que mas abajo afirma "no hay ordenes pendientes". */}
         <Dato
           etiqueta="En tránsito acá"
-          valor={
-            d.transito.sucursal == null ? (
-              <span className="text-ink-300">sin dato</span>
-            ) : (
-              formatoNumero(d.transito.sucursal)
-            )
-          }
+          valor={formatoNumero(d.transito.sucursal ?? 0)}
           nota={
             d.transito.pedido_desde
               ? `pedido el ${formatoFecha(d.transito.pedido_desde)}`
