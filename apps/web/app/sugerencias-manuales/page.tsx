@@ -39,19 +39,86 @@ function fechaLimite(expiraEn: string): string {
   return formatoFecha(new Date(d.getTime() - 60000).toISOString());
 }
 
-/** Con qué criterio se pidió: unidades directas, días de cobertura o nivel a mantener. */
+/** Con qué criterio se pidió, y qué implica.
+ *
+ * Los tres tipos NO se comportan igual y la diferencia decide plata: "días" y
+ * "mantener" completan un nivel —descuentan lo que ya hay en bodega, así que
+ * pueden terminar pidiendo 0—, mientras que "unidades" suma una cantidad fija
+ * pase lo que pase con el stock. Antes esa última decía solo "unidades
+ * directas", que no dice nada: el título explica el comportamiento al pasar el
+ * mouse, para no depender de que alguien sepa la diferencia de memoria.
+ */
 function EtiquetaTipo({ m }: { m: SugerenciaManual }) {
   if (m.stock_objetivo)
     return (
-      <Badge className="bg-emerald-50 text-emerald-700">
-        mantener {formatoNumero(m.stock_objetivo)} u
+      <Badge
+        className="bg-emerald-50 text-emerald-700"
+        title={`Completa hasta dejar ${formatoNumero(m.stock_objetivo)} u en stock. Descuenta lo que ya hay, así que si la sucursal ya llegó a ese nivel no pide nada.`}
+      >
+        completar a {formatoNumero(m.stock_objetivo)} u
       </Badge>
     );
   if (m.dias_inventario)
     return (
-      <Badge className="bg-blue-50 text-blue-700">cubrir {m.dias_inventario} días</Badge>
+      <Badge
+        className="bg-blue-50 text-blue-700"
+        title={`Completa lo que falte para cubrir ${m.dias_inventario} días de venta según la demanda del modelo. Descuenta lo que ya hay.`}
+      >
+        cubrir {m.dias_inventario} días
+      </Badge>
     );
-  return <Badge className="bg-slate-100 text-slate-600">unidades directas</Badge>;
+  return (
+    <Badge
+      className="bg-slate-100 text-slate-600"
+      title={`Suma ${formatoNumero(m.unidades)} u fijas al sugerido, sin mirar el stock: se piden igual aunque la sucursal ya tenga de sobra.`}
+    >
+      suma {formatoNumero(m.unidades)} u fijas
+    </Badge>
+  );
+}
+
+/** La misma etiqueta para un lote entero.
+ *
+ * Una carga masiva por filtros usa el mismo criterio y el mismo número en todas
+ * sus filas, pero una carga pegada trae un valor por línea. Mostrar el de la
+ * primera fila como si fuera el de todas diría un número que no es cierto para
+ * las demás, así que cuando varían se dice que varían.
+ */
+function EtiquetaTipoLote({ filas }: { filas: SugerenciaManual[] }) {
+  const primera = filas[0];
+  if (!primera) return null;
+  const criterio = (m: SugerenciaManual) =>
+    m.stock_objetivo ? "objetivo" : m.dias_inventario ? "dias" : "unidades";
+  const valor = (m: SugerenciaManual) =>
+    `${criterio(m)}:${m.stock_objetivo ?? m.dias_inventario ?? m.unidades}`;
+
+  const mismoCriterio = filas.every((m) => criterio(m) === criterio(primera));
+  const mismoValor = filas.every((m) => valor(m) === valor(primera));
+  if (mismoValor) return <EtiquetaTipo m={primera} />;
+  if (mismoCriterio) {
+    const etiqueta =
+      criterio(primera) === "objetivo"
+        ? "completar a un nivel por línea"
+        : criterio(primera) === "dias"
+          ? "cubrir días por línea"
+          : "suma fija por línea";
+    return (
+      <Badge
+        className="bg-slate-100 text-slate-600"
+        title="Cada línea de esta carga trae su propia cantidad."
+      >
+        {etiqueta}
+      </Badge>
+    );
+  }
+  return (
+    <Badge
+      className="bg-slate-100 text-slate-600"
+      title="Esta carga mezcla los tres criterios: cada línea trae el suyo. Ábrela para ver el detalle."
+    >
+      criterio mixto
+    </Badge>
+  );
 }
 
 function BadgeVencimiento({ expiraEn }: { expiraEn: string }) {
@@ -416,7 +483,7 @@ function LoteCard({
                 <Badge className="bg-emerald-50 text-emerald-700">
                   +{formatoNumero(totalUnidades)} u en total
                 </Badge>
-                {primera && <EtiquetaTipo m={primera} />}
+                {primera && <EtiquetaTipoLote filas={filas} />}
                 {primera?.expira_en && <BadgeVencimiento expiraEn={primera.expira_en} />}
               </div>
               <p className="mt-1 text-[12px] text-slate-500">

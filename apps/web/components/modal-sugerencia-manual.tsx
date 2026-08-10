@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Boxes, Layers, Package, Repeat, TriangleAlert } from "lucide-react";
+import { Boxes, ClipboardPaste, Layers, Package, Repeat, TriangleAlert } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { api } from "@/lib/api-client";
 import { formatoNumero } from "@/lib/formato";
 import type {
+  CargaPegadaResultado,
   PreviewDias,
   PreviewObjetivo,
   Producto,
@@ -17,7 +18,7 @@ import type {
   SugeridoFiltros,
 } from "@/lib/types";
 
-type Modo = "individual" | "grupo" | "todos";
+type Modo = "individual" | "grupo" | "todos" | "pegar";
 // Solo "unidades" suma sobre el sugerido. "objetivo" fija un nivel de stock y
 // "dias" fija una cobertura en dias: los dos piden solo la brecha que falta,
 // descontando stock, transito y lo que el sistema ya sugiere.
@@ -88,6 +89,13 @@ export function ModalSugerenciaManual({
   // "días" (solo individual: necesita el par exacto).
   const [preview, setPreview] = useState<PreviewObjetivo | PreviewDias | null>(null);
 
+  // Pegar lista: cada línea trae su propia cantidad, así que no hay un número
+  // único que validar. La previa la calcula el servidor (necesita demanda y
+  // stock por par) y es lo que se mira antes de guardar.
+  const [textoPegado, setTextoPegado] = useState("");
+  const [previaPegada, setPreviaPegada] = useState<CargaPegadaResultado | null>(null);
+  const [leyendo, setLeyendo] = useState(false);
+
   // Recurrencia
   const [recurrente, setRecurrente] = useState(false);
   const [cadaDias, setCadaDias] = useState("7");
@@ -127,6 +135,8 @@ export function ModalSugerenciaManual({
       setRecurrente(false);
       setCadaDias("7");
       setFechaFin("");
+      setTextoPegado("");
+      setPreviaPegada(null);
     }
   }, [open, productoInicial, sucursalInicial]);
 
@@ -196,7 +206,7 @@ export function ModalSugerenciaManual({
 
   // Conteo en vivo de productos afectados.
   useEffect(() => {
-    if (!open || modo === "individual") return;
+    if (!open || modo === "individual" || modo === "pegar") return;
     setContando(true);
     const t = setTimeout(async () => {
       try {
@@ -212,6 +222,15 @@ export function ModalSugerenciaManual({
 
   /** Primer problema del formulario, o null si está listo para guardar. */
   const validar = (): string | null => {
+    // Pegar lista no tiene un número único: cada línea trae el suyo y el
+    // servidor ya dijo cuáles sirven.
+    if (modo === "pegar") {
+      if (!textoPegado.trim()) return "Pega la lista de productos.";
+      if (!previaPegada) return "Aprieta “Revisar la lista” antes de guardar.";
+      if (!previaPegada.lineas.some((l) => l.unidades_resultantes !== null))
+        return "Ninguna línea de la lista se puede cargar. Revisa los errores.";
+      return null;
+    }
     const n = parseInt(cantidad, 10);
     if (!n || n <= 0)
       return tipoCantidad === "dias"
@@ -229,9 +248,45 @@ export function ModalSugerenciaManual({
     return null;
   };
 
+  /** Manda la lista al servidor para ver qué se crearía, sin escribir nada. */
+  const revisarLista = async () => {
+    setError(null);
+    setLeyendo(true);
+    try {
+      setPreviaPegada(
+        await api.crearSugerenciasPegadas(textoPegado, { previsualizar: true })
+      );
+    } catch (e) {
+      setPreviaPegada(null);
+      setError(e instanceof Error ? e.message : "No se pudo leer la lista");
+    } finally {
+      setLeyendo(false);
+    }
+  };
+
   const ejecutarGuardado = async () => {
     setConfirmarSinFecha(false);
     setError(null);
+
+    if (modo === "pegar") {
+      const expiraLista = fechaLimite || undefined;
+      setGuardando(true);
+      try {
+        const r = await api.crearSugerenciasPegadas(textoPegado, {
+          motivo: motivo || undefined,
+          expiraEn: expiraLista,
+        });
+        onGuardado();
+        onClose();
+        return r;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "No se pudo guardar");
+        return;
+      } finally {
+        setGuardando(false);
+      }
+    }
+
     const n = parseInt(cantidad, 10);
     const cantidadPayload =
       tipoCantidad === "dias"
@@ -319,18 +374,31 @@ export function ModalSugerenciaManual({
     { id: "individual", icon: <Package size={16} />, label: "Individual", sub: "Un producto" },
     { id: "grupo", icon: <Layers size={16} />, label: "Por grupo", sub: "Por sucursal / proveedor / ABC" },
     { id: "todos", icon: <Boxes size={16} />, label: "Todos", sub: "Todos los productos" },
+    // Los tres de arriba aplican UN criterio a lo que caiga en un filtro. Este es
+    // el caso contrario: una lista armada a mano donde cada linea trae lo suyo.
+    { id: "pegar", icon: <ClipboardPaste size={16} />, label: "Pegar lista", sub: "Una cantidad por línea" },
   ];
+
+  // Cuántas líneas de la lista pegada van a crear algo (las omitidas no cuentan).
+  const lineasQueEntran =
+    previaPegada?.lineas.filter((l) => l.unidades_resultantes !== null).length ?? 0;
 
   const etiquetaBoton =
     modo === "individual"
       ? guardando
         ? "Guardando…"
         : "Guardar"
-      : guardando
-        ? "Aplicando…"
-        : conteo
-          ? `Aplicar a ${formatoNumero(conteo)} producto${conteo === 1 ? "" : "s"}`
-          : "Aplicar";
+      : modo === "pegar"
+        ? guardando
+          ? "Cargando…"
+          : lineasQueEntran
+            ? `Cargar ${formatoNumero(lineasQueEntran)} línea${lineasQueEntran === 1 ? "" : "s"}`
+            : "Cargar la lista"
+        : guardando
+          ? "Aplicando…"
+          : conteo
+            ? `Aplicar a ${formatoNumero(conteo)} producto${conteo === 1 ? "" : "s"}`
+            : "Aplicar";
 
   return (
     <Dialog
@@ -348,7 +416,7 @@ export function ModalSugerenciaManual({
       <div className="space-y-4">
         {/* Selector de modo */}
         {!soloIndividual && (
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {tabs.map((t) => (
               <button
                 key={t.id}
@@ -507,7 +575,126 @@ export function ModalSugerenciaManual({
           </div>
         )}
 
-        {/* Cantidad (dias o unidades) + motivo (comunes) */}
+        {/* --- Modo pegar lista --- */}
+        {modo === "pegar" && (
+          <div className="space-y-3">
+            <div>
+              <Label htmlFor="pegado">Pega la lista</Label>
+              <Textarea
+                id="pegado"
+                rows={7}
+                value={textoPegado}
+                onChange={(e) => {
+                  setTextoPegado(e.target.value);
+                  setPreviaPegada(null);
+                }}
+                placeholder={
+                  "producto\tsucursal\tunidades\tdías\tmantener\n" +
+                  "25 DG9Z8100A\tLINDEROS\t5\n" +
+                  "20 BXO5W30BA\tCURICO\t\t30\n" +
+                  "13 C5TS7600B3\tTALCA\t\t\t12"
+                }
+                className="font-mono text-[12px]"
+              />
+              <p className="mt-1 text-[11.5px] text-slate-500">
+                Copia el rango desde Excel y pégalo. La primera fila puede ser el
+                encabezado (da igual el orden de las columnas). Si una línea trae
+                más de una cantidad, manda <b>mantener</b>, después <b>días</b> y
+                al final <b>unidades</b>.
+              </p>
+            </div>
+
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={revisarLista}
+              disabled={!textoPegado.trim() || leyendo}
+            >
+              {leyendo ? "Leyendo…" : "Revisar la lista"}
+            </Button>
+
+            {previaPegada && (
+              <div className="space-y-2">
+                <div className="flex flex-wrap gap-3 text-[12.5px]">
+                  <span className="text-emerald-700">
+                    <b>{formatoNumero(previaPegada.lineas.filter((l) => l.unidades_resultantes !== null).length)}</b>{" "}
+                    líneas se van a cargar
+                  </span>
+                  {previaPegada.omitidas > 0 && (
+                    <span className="text-slate-500">
+                      <b>{formatoNumero(previaPegada.omitidas)}</b> omitidas
+                    </span>
+                  )}
+                  {previaPegada.errores.length > 0 && (
+                    <span className="text-red-600">
+                      <b>{previaPegada.errores.length}</b> con error
+                    </span>
+                  )}
+                </div>
+
+                <div className="max-h-52 overflow-auto rounded-md border border-slate-200">
+                  <table className="w-full text-[12px]">
+                    <thead className="sticky top-0 bg-slate-50 text-slate-500">
+                      <tr>
+                        <th className="px-2 py-1 text-left font-normal">Producto</th>
+                        <th className="px-2 py-1 text-left font-normal">Sucursal</th>
+                        <th className="px-2 py-1 text-left font-normal">Criterio</th>
+                        <th className="px-2 py-1 text-right font-normal">Pide</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {previaPegada.lineas.map((l, i) => (
+                        <tr
+                          key={`${l.producto}-${l.sucursal}-${i}`}
+                          className={cn(
+                            "border-t border-slate-100",
+                            l.unidades_resultantes === null && "text-slate-400"
+                          )}
+                        >
+                          <td className="px-2 py-1 font-mono">{l.producto}</td>
+                          <td className="px-2 py-1">{l.sucursal}</td>
+                          <td className="px-2 py-1">
+                            {l.criterio === "mantener"
+                              ? `completar a ${formatoNumero(l.mantener ?? 0)} u`
+                              : l.criterio === "dias"
+                                ? `cubrir ${l.dias} días`
+                                : `suma ${formatoNumero(l.unidades ?? 0)} u fijas`}
+                          </td>
+                          <td className="px-2 py-1 text-right tabular">
+                            {l.unidades_resultantes !== null ? (
+                              <b>{formatoNumero(l.unidades_resultantes)}</b>
+                            ) : (
+                              <span title={l.omitida_porque ?? undefined}>no pide</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {previaPegada.errores.length > 0 && (
+                  <ul className="space-y-0.5 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-800">
+                    {previaPegada.errores.slice(0, 6).map((e) => (
+                      <li key={e.linea}>
+                        <b>Línea {e.linea}:</b> {e.error}
+                      </li>
+                    ))}
+                    {previaPegada.errores.length > 6 && (
+                      <li className="text-red-600">
+                        y {previaPegada.errores.length - 6} más…
+                      </li>
+                    )}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Cantidad (dias o unidades) + motivo (comunes). En "pegar" no hay un
+            número único: cada línea trae el suyo. */}
+        {modo !== "pegar" && (
         <div>
           <div className="mb-1.5 flex items-center justify-between gap-2">
             <Label htmlFor="uni" className="!mb-0">
@@ -666,6 +853,7 @@ export function ModalSugerenciaManual({
             </div>
           )}
         </div>
+        )}
 
         {/* Fecha límite: hasta cuándo la sugerencia sigue vigente (no aplica a recurrentes). */}
         {!recurrente && (

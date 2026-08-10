@@ -869,6 +869,32 @@ export interface LineaRequerimiento {
   transito_pedido_desde: string | null;
 }
 
+/** Una línea de una carga pegada, ya interpretada por el servidor. */
+export interface LineaPegadaManual {
+  producto: string;
+  sucursal: string;
+  unidades: number | null;
+  dias: number | null;
+  mantener: number | null;
+  /** Cuál de las tres columnas mandó en esta línea. */
+  criterio: "mantener" | "dias" | "unidades";
+  /** Lo que se va a pedir. null cuando la línea se omite. */
+  unidades_resultantes: number | null;
+  /** Por qué se omite, en castellano. null si entra. */
+  omitida_porque: string | null;
+}
+
+export interface CargaPegadaResultado {
+  creadas: number;
+  omitidas: number;
+  lote_id: string | null;
+  /** Solo al previsualizar: lo que se crearía, línea por línea. */
+  lineas: LineaPegadaManual[];
+  /** Líneas que no se pudieron leer, con su número para poder corregirlas. */
+  errores: { linea: number; texto: string; error: string }[];
+  encabezado_detectado: boolean;
+}
+
 /** La cadena de reemplazo que publica FORD para un código.
  *
  * `agrupado` y `sucesor_confirmado` no son lo mismo y la vista los distingue:

@@ -54,6 +54,50 @@ class SugerenciaManualMasivaResultado(BaseModel):
     lote_id: str | None = None
 
 
+class SugerenciaManualPegada(BaseModel):
+    """Lista pegada donde cada linea trae su propia cantidad.
+
+    A diferencia de `SugerenciaManualMasiva`, que aplica UN criterio y UN numero a
+    todos los pares de un filtro, aca cada linea decide lo suyo. `previsualizar`
+    devuelve lo que se va a crear sin escribir nada: la lista sale de un Excel
+    armado a mano y conviene mirarla antes.
+    """
+
+    texto: str
+    previsualizar: bool = False
+    expira_en: date | None = Field(
+        default=None,
+        description="Fecha limite (inclusive) para todas las lineas de esta carga.",
+    )
+    motivo: str | None = None
+
+
+class LineaManualPegada(BaseModel):
+    producto: str
+    sucursal: str
+    unidades: int | None = None
+    dias: int | None = None
+    mantener: int | None = None
+    # 'mantener' | 'dias' | 'unidades', ya resuelto por la regla de prioridad.
+    criterio: str
+    # Lo que efectivamente se va a pedir. None cuando el par no da (sin demanda
+    # para calcular los dias, o ya esta en el nivel pedido): esas se omiten.
+    unidades_resultantes: int | None = None
+    # Por que se omite, en lenguaje de usuario. None si la linea entra.
+    omitida_porque: str | None = None
+
+
+class SugerenciaManualPegadaResultado(BaseModel):
+    creadas: int = 0
+    omitidas: int = 0
+    lote_id: str | None = None
+    # Solo en previsualizacion: lo que se crearia, linea por linea.
+    lineas: list[LineaManualPegada] = Field(default_factory=list)
+    # Lineas que no se pudieron leer, con su numero para poder corregirlas.
+    errores: list[dict] = Field(default_factory=list)
+    encabezado_detectado: bool = False
+
+
 class SugerenciaManualUpdate(BaseModel):
     aprobado: bool | None = None
     usado_en_compra: bool | None = None

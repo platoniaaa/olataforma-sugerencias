@@ -32,16 +32,20 @@ from ..config import get_settings
 from ..db import get_db
 from ..models import SugerenciaManual
 from ..schemas import (
+    LineaManualPegada,
     RecurrenteCreate,
     RecurrenteOut,
     SugerenciaManualCreate,
     SugerenciaManualMasiva,
     SugerenciaManualMasivaResultado,
     SugerenciaManualOut,
+    SugerenciaManualPegada,
+    SugerenciaManualPegadaResultado,
     SugerenciaManualUpdate,
 )
 from ..services import (
     auditoria_service,
+    carga_manual_service,
     detalle_sugerencia_service,
     excel_export,
     recurrentes_service,
@@ -428,6 +432,122 @@ def crear_masiva(
     lote_id_resp = lote_id if nuevas else None
     return SugerenciaManualMasivaResultado(
         creadas=len(nuevas), omitidas=omitidas, lote_id=lote_id_resp
+    )
+
+
+@router.post("/pegada", response_model=SugerenciaManualPegadaResultado)
+def crear_pegada(
+    payload: SugerenciaManualPegada,
+    db: Session = Depends(get_db),
+    email: str = Depends(requiere_escritura),
+):
+    """Crea sugerencias desde una lista pegada, con una cantidad por linea.
+
+    La otra masiva aplica UN criterio a todos los pares de un filtro; esta acepta
+    un Excel armado a mano donde cada linea lleva lo suyo (unidades, dias o nivel
+    a mantener). Si una linea trae mas de uno manda `mantener` > `dias` >
+    `unidades`, el mismo orden del modal por filtros.
+
+    Con `previsualizar=True` no escribe nada y devuelve lo que se crearia, ya
+    calculado: es una lista hecha a mano, conviene verla antes de guardarla.
+    """
+    import uuid as _uuid_mod
+
+    leido = carga_manual_service.parsear(payload.texto)
+    filas = leido["filas"]
+    if not filas:
+        return SugerenciaManualPegadaResultado(
+            errores=leido["errores"],
+            encabezado_detectado=leido["encabezado_detectado"],
+        )
+
+    # Los criterios "dias" y "mantener" necesitan la demanda y el stock del par,
+    # que se resuelven en bloque para no hacer una query por linea.
+    por_criterio: dict[str, list[tuple[str, str]]] = {}
+    for f in filas:
+        por_criterio.setdefault(f["criterio"], []).append((f["producto"], f["sucursal"]))
+
+    calculado: dict[tuple[str, str, str], int] = {}
+    for crit, pares in por_criterio.items():
+        if crit == "unidades":
+            continue
+        # Cada linea puede pedir un numero distinto de dias/nivel, asi que se
+        # agrupa por valor: los que piden lo mismo se resuelven en una query.
+        por_valor: dict[int, list[tuple[str, str]]] = {}
+        for f in filas:
+            if f["criterio"] != crit:
+                continue
+            por_valor.setdefault(f[crit], []).append((f["producto"], f["sucursal"]))
+        for valor, ps in por_valor.items():
+            mapa = (
+                sugerido_service.unidades_objetivo_por_par(db, ps, valor)
+                if crit == "mantener"
+                else sugerido_service.unidades_por_par(db, ps, valor)
+            )
+            for par, u in mapa.items():
+                calculado[(crit, par[0], par[1])] = u
+
+    lote_id = str(_uuid_mod.uuid4())
+    expira_en = _expira_en(payload.expira_en)
+    salida: list[LineaManualPegada] = []
+    nuevas: list[SugerenciaManual] = []
+
+    for f in filas:
+        crit = f["criterio"]
+        par = (f["producto"], f["sucursal"])
+        if crit == "unidades":
+            u, motivo_omision = f["unidades"], None
+        else:
+            u = calculado.get((crit, *par))
+            motivo_omision = (
+                None if u is not None
+                else "Ya está en el nivel pedido." if crit == "mantener"
+                else "Sin demanda para calcular los días, o ya están cubiertos."
+            )
+        salida.append(LineaManualPegada(**f, unidades_resultantes=u,
+                                        omitida_porque=motivo_omision))
+        if u is None:
+            continue
+        nuevas.append(
+            SugerenciaManual(
+                producto=f["producto"], sucursal_id=f["sucursal"], unidades=u,
+                motivo=payload.motivo, creado_por=email,
+                tenant_id=settings.default_tenant_id,
+                lote_id=lote_id, expira_en=expira_en,
+                dias_inventario=f["dias"], stock_objetivo=f["mantener"],
+            )
+        )
+
+    omitidas = len(filas) - len(nuevas)
+    if payload.previsualizar:
+        return SugerenciaManualPegadaResultado(
+            creadas=0, omitidas=omitidas, lineas=salida,
+            errores=leido["errores"],
+            encabezado_detectado=leido["encabezado_detectado"],
+        )
+
+    db.add_all(nuevas)
+    db.flush()
+    auditoria_service.registrar(
+        db, accion="masiva_creada", entidad="sugerencia_manual", entidad_id=lote_id,
+        usuario_email=email, motivo=payload.motivo,
+        detalle=f"Lista pegada: {len(nuevas)} lineas, {omitidas} omitidas, "
+                f"{len(leido['errores'])} con error (lote {lote_id[:8]})",
+    )
+    auditoria_service.notificar(
+        db, tipo="masiva_creada",
+        titulo=f"{email.split('@')[0]} pego {len(nuevas)} sugerencias",
+        mensaje="Cada línea con su propia cantidad"
+        + (f". Motivo: {payload.motivo}" if payload.motivo else "")
+        + (f". {omitidas} omitidas." if omitidas else ""),
+        creado_por_email=email,
+    )
+    db.commit()
+    return SugerenciaManualPegadaResultado(
+        creadas=len(nuevas), omitidas=omitidas,
+        lote_id=lote_id if nuevas else None,
+        errores=leido["errores"],
+        encabezado_detectado=leido["encabezado_detectado"],
     )
 
 

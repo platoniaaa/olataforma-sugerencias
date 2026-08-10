@@ -3,6 +3,7 @@ import { clearSession, getToken, setSession } from "./auth";
 import type {
   AgrupadoRow,
   AuditoriaPage,
+  CargaPegadaResultado,
   CargaResultado,
   CarrosResponse,
   CatalogoDetalle,
@@ -448,6 +449,31 @@ export const api = {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail ?? "No se pudo crear la carga masiva");
+    }
+    return res.json();
+  },
+
+  /** Carga masiva pegando una lista, con una cantidad por línea.
+   *
+   * Con `previsualizar` no escribe nada y devuelve lo que se crearía: la lista
+   * viene de un Excel armado a mano y conviene mirarla antes de guardarla. */
+  async crearSugerenciasPegadas(
+    texto: string,
+    opciones: { previsualizar?: boolean; motivo?: string; expiraEn?: string } = {}
+  ): Promise<CargaPegadaResultado> {
+    const res = await req("/api/sugerencias-manuales/pegada", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        texto,
+        previsualizar: opciones.previsualizar ?? false,
+        motivo: opciones.motivo,
+        expira_en: opciones.expiraEn,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail ?? "No se pudo leer la lista");
     }
     return res.json();
   },
