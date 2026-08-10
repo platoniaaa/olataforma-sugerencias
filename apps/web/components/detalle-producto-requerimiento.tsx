@@ -162,7 +162,35 @@ export function DetalleProductoRequerimiento({
         <ConsumoChart datos={d.consumo} nombreSucursal={nombreSucursal} />
       )}
 
-      <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 lg:grid-cols-5">
+      {/* La pregunta es "compro o no compro", y el dato que mas se le acerca es
+          cuanto dura lo que ya hay. Antes competia de igual a igual con otros
+          cuatro numeros del mismo tamaño, asi que habia que buscarlo. */}
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-paper-200 pb-3">
+        <span className="text-[11px] uppercase tracking-wide text-ink-400">
+          Dura para
+        </span>
+        {cob ? (
+          <>
+            <span
+              className={`text-[22px] font-semibold leading-none ${
+                cob.meses >= 12 ? "text-amber-800" : "text-ink-900"
+              }`}
+            >
+              {cob.texto}
+            </span>
+            <span className="text-[12.5px] text-ink-500">
+              con {formatoNumero((d.stock.sucursal ?? 0) + (d.transito.sucursal ?? 0))} unidades
+              (stock y lo que viene) al ritmo de {nombreSucursal}
+            </span>
+          </>
+        ) : (
+          <span className="text-[12.5px] text-ink-500">
+            No se puede estimar: este repuesto no se vende en {nombreSucursal}.
+          </span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
         <Dato
           etiqueta={`Consumo 12m · ${nombreSucursal}`}
           valor={formatoNumero(d.consumo_12m_sucursal)}
@@ -185,15 +213,18 @@ export function DetalleProductoRequerimiento({
               : undefined
           }
         />
+        {/* "28 / 24" obligaba a volver al titulo para saber cual era cual. */}
         <Dato
-          etiqueta="Stock acá / CD"
-          valor={`${formatoNumero(d.stock.sucursal ?? 0)} / ${formatoNumero(d.stock.cd ?? 0)}`}
-        />
-        <Dato
-          etiqueta="Cobertura"
-          valor={cob ? cob.texto : <span className="text-ink-300">—</span>}
-          nota={cob ? "con el stock y lo que viene" : "sin venta acá, no se puede estimar"}
-          acento={cob && cob.meses >= 12 ? "ojo" : undefined}
+          etiqueta="Stock"
+          valor={
+            <>
+              {formatoNumero(d.stock.sucursal ?? 0)}{" "}
+              <span className="text-[12.5px] font-normal text-ink-400">acá</span>
+              <span className="mx-1.5 text-ink-300">·</span>
+              {formatoNumero(d.stock.cd ?? 0)}{" "}
+              <span className="text-[12.5px] font-normal text-ink-400">CD</span>
+            </>
+          }
         />
       </div>
 
@@ -283,30 +314,43 @@ export function DetalleProductoRequerimiento({
             )}
           </div>
 
+          {/* Cinco cifras separadas por puntos no se escanean: para encontrar el
+              punto de pedido habia que leer la frase entera. Como lista de pares
+              se busca por la etiqueta y se lee el numero al frente. */}
           <div>
             <p className="text-[11px] uppercase tracking-wide text-ink-400">El modelo</p>
             {d.modelo ? (
-              <p className="mt-1 text-[12.5px] text-ink-600">
-                Clase <strong>{d.modelo.clasificacion_abc ?? "—"}</strong>
-                {d.modelo.punto_de_pedido != null && (
-                  <> · punto de pedido {formatoNumero(d.modelo.punto_de_pedido)}</>
-                )}
-                {d.modelo.stock_seguridad != null && (
-                  <> · stock de seguridad {formatoNumero(d.modelo.stock_seguridad)}</>
-                )}
-                {d.modelo.nivel_maximo != null && (
-                  <> · máximo {formatoNumero(d.modelo.nivel_maximo)}</>
-                )}
+              <>
                 {d.modelo.sugerido != null && d.modelo.sugerido > 0 && (
-                  <>
-                    {" "}
-                    · <strong>ya sugiere {formatoNumero(d.modelo.sugerido)}</strong>
-                  </>
+                  <p className="mt-1 text-[12.5px] text-ink-900">
+                    Ya sugiere <strong>{formatoNumero(d.modelo.sugerido)}</strong> para{" "}
+                    {nombreSucursal}.
+                  </p>
                 )}
-                {d.modelo.lead_time_dias != null && (
-                  <> · lead time {d.modelo.lead_time_dias} días</>
-                )}
-              </p>
+                <ul className="mt-1 space-y-0.5 text-[12.5px]">
+                  {[
+                    ["Clase", d.modelo.clasificacion_abc ?? "—"],
+                    ["Punto de pedido", d.modelo.punto_de_pedido],
+                    ["Stock de seguridad", d.modelo.stock_seguridad],
+                    ["Máximo", d.modelo.nivel_maximo],
+                    [
+                      "Lead time",
+                      d.modelo.lead_time_dias != null
+                        ? `${d.modelo.lead_time_dias} días`
+                        : null,
+                    ],
+                  ]
+                    .filter(([, v]) => v != null)
+                    .map(([etiqueta, valor]) => (
+                      <li key={String(etiqueta)} className="flex justify-between gap-3">
+                        <span className="text-ink-500">{etiqueta}</span>
+                        <span className="tabular font-medium">
+                          {typeof valor === "number" ? formatoNumero(valor) : valor}
+                        </span>
+                      </li>
+                    ))}
+                </ul>
+              </>
             ) : (
               <p className="mt-1 text-[12.5px] text-ink-500">
                 El modelo no evalúa este repuesto en {nombreSucursal}: no tiene demanda
@@ -318,7 +362,11 @@ export function DetalleProductoRequerimiento({
         </div>
       </div>
 
-      {d.reemplazos && (
+      {/* El campo libre del catalogo dice lo mismo que el bloque de FORD, pero sin
+          distinguir que reemplaza a que ni si el stock se cuenta junto. Cuando FORD
+          tiene el dato, repetirlo abajo era la TERCERA vez que la misma linea veia
+          los mismos codigos (la fila de la tabla, el bloque de arriba y esto). */}
+      {d.reemplazos && !d.reemplazo_ford && (
         <p className="text-[12.5px] text-amber-800">
           Reemplazo: <span className="font-mono">{d.reemplazos}</span>
         </p>
