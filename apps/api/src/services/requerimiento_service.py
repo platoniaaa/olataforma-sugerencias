@@ -43,7 +43,7 @@ from ..models import (
     Sugerido,
     VentaHistorica,
 )
-from . import stock_service, sugerido_service, transito_service
+from . import reemplazo_service, stock_service, sugerido_service, transito_service
 
 settings = get_settings()
 
@@ -471,6 +471,10 @@ def detalle_producto(db: Session, producto: str, sucursal_id: str) -> dict:
         "descripcion": ctx.get("descripcion"),
         "reemplazos": ctx.get("reemplazos"),
         "en_sugerido": propia is not None,
+        # Que FORD lo haya descontinuado es lo primero que hay que saber: comprar
+        # un codigo muerto es plata perdida aunque el resto del panel se vea bien.
+        # None cuando FORD no dice nada de este codigo, que es el caso normal.
+        "reemplazo_ford": reemplazo_service.de_producto(db, producto),
         # --- Consumo: el dato con el que se decide ---
         "consumo": consumo,
         "consumo_12m_sucursal": total_suc,

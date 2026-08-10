@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Loader2, TrendingDown, Truck } from "lucide-react";
+import { ArrowRight, Loader2, TrendingDown, Truck } from "lucide-react";
 import { ConsumoChart } from "@/components/consumo-chart";
 import { api } from "@/lib/api-client";
 import { formatoCLP, formatoFecha, formatoNumero } from "@/lib/formato";
@@ -98,6 +98,41 @@ export function DetalleProductoRequerimiento({
 
   return (
     <div className="space-y-4 border-l-2 border-brand-200 bg-paper-50 px-4 py-4">
+      {/* Antes que nada: si FORD lo descontinuó, comprarlo es plata perdida por
+          mucho que el resto del panel se vea bien. */}
+      {d.reemplazo_ford?.reemplazado_por_ford && (
+        <div className="flex items-start gap-2 rounded-sm border border-rose-200 bg-rose-50 px-3 py-2 text-[12.5px] text-rose-900">
+          <ArrowRight size={14} className="mt-0.5 shrink-0" />
+          <span>
+            <strong>FORD lo dio de baja.</strong>{" "}
+            {d.reemplazo_ford.reemplazado_por ? (
+              <>
+                Lo reemplaza{" "}
+                <strong className="tabular">{d.reemplazo_ford.reemplazado_por}</strong>, que
+                sí está en el catálogo.
+              </>
+            ) : (
+              <>
+                Lo reemplaza{" "}
+                <strong className="tabular">{d.reemplazo_ford.reemplazado_por_ford}</strong>{" "}
+                (código de FORD), que no está en el catálogo de Curifor.
+              </>
+            )}{" "}
+            {d.reemplazo_ford.sucesor_confirmado ? (
+              d.reemplazo_ford.agrupado && (
+                <span className="text-rose-700">
+                  El stock de los dos códigos se cuenta junto.
+                </span>
+              )
+            ) : (
+              <span className="text-rose-700">
+                FORD no confirmó el reemplazo, así que el stock de los dos NO se cuenta
+                junto: confírmalo antes de pedir el nuevo.
+              </span>
+            )}
+          </span>
+        </div>
+      )}
       {/* La conclusión primero, cuando el dato la permite. */}
       {nuncaSeVende && (
         <div className="flex items-start gap-2 rounded-sm border border-amber-200 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900">
@@ -183,6 +218,21 @@ export function DetalleProductoRequerimiento({
                 </li>
               ))}
             </ul>
+          )}
+          {/* Este código es el vigente y hay viejos que puede haber en bodega. Si
+              el motor los agrupó, el stock de arriba YA los incluye: decirlo evita
+              que el comprador los sume de nuevo por su cuenta. */}
+          {!!d.reemplazo_ford?.reemplaza_a.length && (
+            <p className="mt-2 text-[11.5px] text-ink-500">
+              Reemplaza a{" "}
+              <span className="tabular text-ink-600">
+                {d.reemplazo_ford.reemplaza_a.join(", ")}
+              </span>
+              .{" "}
+              {d.reemplazo_ford.agrupado
+                ? "Su stock ya está sumado acá."
+                : "Su stock se cuenta aparte."}
+            </p>
           )}
         </div>
 

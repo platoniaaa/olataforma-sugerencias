@@ -864,6 +864,26 @@ export interface LineaRequerimiento {
   transito_pedido_desde: string | null;
 }
 
+/** La cadena de reemplazo que publica FORD para un código.
+ *
+ * `agrupado` y `sucesor_confirmado` no son lo mismo y la vista los distingue:
+ * cuando FORD marca el reemplazo como "Sin candidato vigente" no se sabe si de
+ * verdad no hay sucesor o si el código consultado se armó mal, así que ese par
+ * se avisa pero NO suma el stock del viejo con el del nuevo. */
+export interface ReemplazoFord {
+  producto: string;
+  /** El vigente, en código de Curifor. null si Curifor no lo tiene. */
+  reemplazado_por: string | null;
+  /** El mismo código como lo escribe FORD, para buscarlo en el portal. */
+  reemplazado_por_ford: string | null;
+  cadena: string | null;
+  /** Códigos de Curifor que ESTA pieza reemplazó. */
+  reemplaza_a: string[];
+  sucesor_confirmado: boolean;
+  agrupado: boolean;
+  aviso: string | null;
+}
+
 /** Todo lo que se abre bajo la fila de un producto del requerimiento. */
 export interface DetalleProducto {
   producto: string;
@@ -871,6 +891,8 @@ export interface DetalleProducto {
   descripcion: string | null;
   reemplazos: string | null;
   en_sugerido: boolean;
+  /** Lo que FORD dice de este código. null = no dice nada (el caso normal). */
+  reemplazo_ford: ReemplazoFord | null;
   consumo: { periodo: string; sucursal: number; nacional: number }[];
   consumo_12m_sucursal: number;
   consumo_12m_nacional: number;

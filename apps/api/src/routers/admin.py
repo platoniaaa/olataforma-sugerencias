@@ -15,6 +15,7 @@ from ..services import (
     motor_comparacion,
     powerbi_desktop_loader,
     powerbi_loader,
+    reemplazo_service,
     stock_service,
     transito_service,
     ventas_historicas_service,
@@ -102,6 +103,35 @@ def publicar_stock_transito(
             accion="transito_publicado",
             entidad="sistema",
             detalle=f"Stock en transito: {resumen['filas_cargadas']} filas",
+        )
+        db.commit()
+    return resumen
+
+
+@router.post("/reemplazos-ford")
+def publicar_reemplazos_ford(
+    payload: dict,
+    db: Session = Depends(get_db),
+) -> dict:
+    """El motor publica la cadena de reemplazo de FORD (reemplaza la foto).
+
+    payload: {"filas": [{producto, reemplazado_por, reemplazado_por_ford, cadena,
+                         reemplaza_a, sucesor_confirmado, agrupado, aviso}]}
+
+    Solo llega lo que toca a productos que Curifor tiene. La agrupacion de stock
+    y demanda la hace el motor; esta tabla es para AVISARLE al comprador que el
+    codigo que le pidieron esta descontinuado y cual es el vigente.
+    """
+    filas = payload.get("filas")
+    if not isinstance(filas, list):
+        raise HTTPException(status_code=400, detail="Falta la lista 'filas'")
+    resumen = reemplazo_service.reemplazar(db, filas)
+    if resumen["reemplazo"]:
+        auditoria_service.registrar(
+            db,
+            accion="reemplazos_publicados",
+            entidad="sistema",
+            detalle=f"Reemplazos FORD: {resumen['filas_cargadas']} filas",
         )
         db.commit()
     return resumen
