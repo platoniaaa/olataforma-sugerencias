@@ -272,10 +272,14 @@ export default function DashboardPage() {
     try {
       // Los filtros de columna viajan dentro de `filtros`: el backend exporta el
       // set filtrado COMPLETO (no solo las ~5.000 filas cargadas en la grilla).
+      // El orden que el usuario dejó en el grid, no uno fijo: si ordenó por
+      // Proveedor, el Excel tiene que salir por Proveedor. Si no ordenó nada,
+      // se cae al orden por defecto de la pantalla.
+      const orden = tablaRef.current?.obtenerOrden() ?? "-total_sugerido_suc";
       await api.exportExcel(
         { ...filtros, filtros_columna: filtrosColumna },
         colsVisibles,
-        "-total_sugerido_suc"
+        orden
       );
     } catch (e) {
       alert(e instanceof Error ? e.message : "No se pudo exportar");

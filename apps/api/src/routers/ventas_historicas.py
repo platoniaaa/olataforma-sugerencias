@@ -50,7 +50,10 @@ def export_csv(f: dict = Depends(_filtros), db: Session = Depends(get_db)):
     import csv
     import io
 
-    datos = svc.detalle(db, f, limit=svc.LIMITE_FILAS)
+    # Una descarga no se lee en pantalla: se abre en Excel. Por eso el tope es el
+    # de exportacion (100.000) y no el de la grilla (2.000), que cortaba el archivo
+    # en silencio y el usuario se llevaba una parte creyendo que tenia todo.
+    datos = svc.detalle(db, f, limit=svc.LIMITE_EXPORT, tope=svc.LIMITE_EXPORT)
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";")
     w.writerow(["Periodo", "Producto", "Sucursal", "Cantidad", "Neto CLP", "Lineas"])
@@ -58,6 +61,16 @@ def export_csv(f: dict = Depends(_filtros), db: Session = Depends(get_db)):
         w.writerow([
             it["periodo"], it["producto"], it["sucursal"] or "",
             it["cantidad"], it["neto"] or "", it["n_lineas"] or "",
+        ])
+    # Si ni con el tope alto alcanzo, se dice EN el archivo: un CSV cortado sin
+    # aviso se ve igual de completo que uno entero.
+    faltan = (datos.get("total") or 0) - len(datos["items"])
+    if faltan > 0:
+        w.writerow([])
+        w.writerow([
+            f"ATENCION: faltan {faltan:,} filas. Este archivo trae las primeras "
+            f"{len(datos['items']):,} de {datos['total']:,}. Acota el filtro "
+            f"(producto, sucursal o periodo) para descargarlas todas."
         ])
     contenido = buf.getvalue().encode("utf-8-sig")  # BOM: Excel respeta las tildes
     return StreamingResponse(

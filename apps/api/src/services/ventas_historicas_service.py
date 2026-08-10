@@ -16,6 +16,10 @@ from .sugerido_service import PREFIJOS_EXCLUIDOS, misma_sucursal, normalizar_suc
 settings = get_settings()
 
 LIMITE_FILAS = 2000
+# Una descarga no se "lee": el usuario la abre en Excel y la trabaja ahi, asi que
+# el tope es mucho mas alto que el de la pantalla. Si aun asi se corta, el CSV lo
+# dice en la ultima fila en vez de entregar un archivo mocho sin avisar.
+LIMITE_EXPORT = 100_000
 _LOTE = 1000
 
 
@@ -163,9 +167,14 @@ def por_sucursal(db: Session, f: dict) -> list[dict]:
     return sorted(junto.values(), key=lambda x: x["cantidad"], reverse=True)
 
 
-def detalle(db: Session, f: dict, limit: int = 500) -> dict:
-    """Filas producto x sucursal x periodo, para ver o exportar."""
-    limit = min(limit, LIMITE_FILAS)
+def detalle(db: Session, f: dict, limit: int = 500, tope: int | None = None) -> dict:
+    """Filas producto x sucursal x periodo, para ver o exportar.
+
+    `tope` permite pasarse del limite de la PANTALLA. Son dos cosas distintas: en
+    pantalla 2.000 filas ya no se leen y traer mas solo hace lenta la consulta,
+    pero en una descarga el usuario espera lo que pidio completo.
+    """
+    limit = min(limit, tope or LIMITE_FILAS)
     total = db.scalar(select(func.count()).select_from(_base(f).subquery())) or 0
     stmt = (
         _base(f)

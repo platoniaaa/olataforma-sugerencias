@@ -48,6 +48,9 @@ interface Props {
 }
 
 export interface TablaSugeridoHandle {
+  /** El orden activo del grid, en la forma del backend ("campo" / "-campo").
+   *  null si el usuario no ordenó nada. */
+  obtenerOrden(): string | null;
   /** IDs de las filas visibles tras filtros y orden del AG Grid. Solo del BI (id > 0). */
   obtenerIdsVisibles(): number[];
   /** Borra el filterModel del grid y persiste el cambio. */
@@ -387,6 +390,24 @@ export const TablaSugerido = forwardRef<TablaSugeridoHandle, Props>(function Tab
   useImperativeHandle(
     ref,
     () => ({
+      /** El orden del grid en la forma del backend: "campo" o "-campo".
+       *
+       * El Excel salía siempre por total sugerido descendente, así que ordenar
+       * por Proveedor y exportar daba un archivo en otro orden que la pantalla.
+       * Se toma la PRIMERA columna ordenada (`sortIndex`): el backend ordena por
+       * un solo campo, y un multi-sort del grid no se puede representar sin
+       * mentir sobre el resto. */
+      obtenerOrden: () => {
+        const api = gridRef.current?.api;
+        if (!api) return null;
+        const ordenadas = api
+          .getColumnState()
+          .filter((c) => c.sort)
+          .sort((a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0));
+        const primera = ordenadas[0];
+        if (!primera?.colId) return null;
+        return primera.sort === "desc" ? `-${primera.colId}` : primera.colId;
+      },
       obtenerIdsVisibles: () => {
         const api = gridRef.current?.api;
         if (!api) return [];
