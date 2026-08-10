@@ -92,6 +92,9 @@ class SugeridoRow(BaseModel):
     sobrecosto_vs_dealer_pct: float | None = None
     # Unidades ya pedidas de esta linea (services/pedidos_service.py).
     unidades_pedidas: float | None = None
+    # Codigo vigente cuando FORD dio de baja este (services/reemplazo_service.py).
+    # Trae el de Curifor si lo hay, y si no el de FORD para buscarlo en el portal.
+    reemplazado_por_ford: str | None = None
     # Regla InStock (services/instock_service.py): repuesto de pauta que no puede
     # faltar en las sucursales con taller.
     instock: bool | None = None

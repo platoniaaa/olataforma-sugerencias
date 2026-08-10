@@ -32,7 +32,7 @@ from ..models import (
     VentaHistorica,
 )
 from ..schemas import SugeridoFiltros
-from . import instock_service, margen, pedidos_service, stock_service
+from . import instock_service, margen, pedidos_service, reemplazo_service, stock_service
 
 # Columnas por las que se permite ordenar (whitelist para evitar inyeccion).
 SORTABLE = {c.name for c in Sugerido.__table__.columns}
@@ -1185,7 +1185,32 @@ def listar(
     protegidos = set(manuales) | set(ins["solo_unidades"]) | set(ins["extras"]) | set(ins["solas"])
     _aplicar_regla_stock_sin_venta(items, db, protegidos=protegidos)
 
+    _agregar_reemplazo_ford(items, db)
+
     return items, total + total_extras + total_manuales_solas + total_instock + total_cat
+
+
+def _agregar_reemplazo_ford(items: list[dict], db: Session) -> None:
+    """Marca las filas cuyo codigo FORD dio de baja.
+
+    Se cruza contra la tabla `reemplazo_ford` en vez de guardar la columna en
+    `sugerido`: esa tabla se borra y se reinserta entera en cada carga, asi que
+    duplicar el dato ahi obligaria a que el motor lo mandara en el CSV y a
+    mantener las dos copias sincronizadas. Aca es un join sobre la pagina que se
+    esta mostrando (50 filas), no sobre las 18.000.
+    """
+    if not items:
+        return
+    mapa = reemplazo_service.por_producto(
+        db, {str(i.get("producto")) for i in items if i.get("producto")}
+    )
+    for it in items:
+        r = mapa.get(str(it.get("producto") or ""))
+        # Solo interesa la baja, no la direccion inversa: la columna responde
+        # "¿este codigo sigue vivo?".
+        it["reemplazado_por_ford"] = (
+            (r.get("reemplazado_por") or r.get("reemplazado_por_ford")) if r else None
+        )
 
 
 def _aporte_manuales(db: Session, f: SugeridoFiltros, man: dict | None = None) -> dict:

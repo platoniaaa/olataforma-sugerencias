@@ -110,3 +110,36 @@ def test_el_endpoint_publica(client):
 def test_el_endpoint_exige_la_lista(client):
     r = client.post("/api/admin/reemplazos-ford", json={})
     assert r.status_code == 400
+
+
+# --- La columna del sugerido -----------------------------------------------------
+
+def test_el_sugerido_marca_las_filas_dadas_de_baja(client, db_session):
+    """La columna sale de un cruce, no de una columna de `sugerido`.
+
+    Esa tabla se borra y reinserta entera en cada carga: duplicar el dato ahi
+    obligaria a que el motor lo mandara en el CSV y a mantener dos copias.
+    """
+    fila = client.get("/api/sugerido", params={"solo_pedir": False, "limit": 1}).json()
+    # Sin `assert` esto seria un test que pasa sin probar nada si el fixture deja
+    # de sembrar sugerido. Mejor que avise.
+    assert fila["items"], "el fixture no tiene filas de sugerido: el test no prueba nada"
+    producto = fila["items"][0]["producto"]
+
+    reemplazo_service.reemplazar(db_session, [
+        _fila(producto=producto, reemplazado_por="25 VIGENTE"),
+    ])
+    datos = client.get("/api/sugerido", params={"solo_pedir": False, "limit": 50}).json()
+    marcada = next(i for i in datos["items"] if i["producto"] == producto)
+    assert marcada["reemplazado_por_ford"] == "25 VIGENTE"
+
+
+def test_sin_el_vigente_en_curifor_cae_al_codigo_de_ford(db_session):
+    """Aunque Curifor no tenga el sucesor, saber que esta descontinuado importa."""
+    reemplazo_service.reemplazar(db_session, [
+        _fila(producto="25 SOLOFORD", reemplazado_por=None,
+              reemplazado_por_ford="MB3Z/19N619/A/"),
+    ])
+    fila = reemplazo_service.de_producto(db_session, "25 SOLOFORD")
+    assert fila["reemplazado_por"] is None
+    assert fila["reemplazado_por_ford"] == "MB3Z/19N619/A/"

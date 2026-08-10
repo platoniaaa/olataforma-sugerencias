@@ -98,6 +98,51 @@ export default function DetalleCatalogoPage({ params }: { params: { producto: st
         <Card titulo="Unidad" valor={d.unidad ?? "—"} />
       </div>
 
+      {/* Que FORD lo haya dado de baja no es lo mismo que tener equivalentes:
+          esto dice que el codigo ya no se fabrica y cual ocupa su lugar. */}
+      {d.reemplazo_ford?.reemplazado_por_ford && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+          <h2 className="text-sm font-semibold text-rose-900">
+            FORD dio de baja este código
+          </h2>
+          <p className="mt-1 text-[13px] text-rose-900">
+            Lo reemplaza{" "}
+            {d.reemplazo_ford.reemplazado_por ? (
+              <Link
+                href={`/catalogo/${encodeURIComponent(d.reemplazo_ford.reemplazado_por)}`}
+                className="rounded bg-rose-100 px-1.5 py-0.5 font-mono text-[12px] font-semibold text-rose-900 hover:bg-rose-200"
+              >
+                {d.reemplazo_ford.reemplazado_por}
+              </Link>
+            ) : (
+              <>
+                <span className="rounded bg-rose-100 px-1.5 py-0.5 font-mono text-[12px] font-semibold text-rose-900">
+                  {d.reemplazo_ford.reemplazado_por_ford}
+                </span>{" "}
+                <span className="text-rose-700">
+                  (código de FORD; no está en el catálogo de Curifor)
+                </span>
+              </>
+            )}
+          </p>
+          {d.reemplazo_ford.cadena && (
+            <p className="mt-1 font-mono text-[11.5px] text-rose-700">
+              {d.reemplazo_ford.cadena}
+            </p>
+          )}
+          <p className="mt-1.5 text-xs text-rose-700">
+            {!d.reemplazo_ford.sucesor_confirmado
+              ? "FORD no confirmó el reemplazo, así que el stock de los dos códigos se cuenta por separado. Confírmalo antes de pedir el nuevo."
+              : d.reemplazo_ford.agrupado
+                ? "El stock y la demanda de los dos códigos se cuentan juntos."
+                : "El stock de los dos códigos se cuenta por separado."}
+          </p>
+          {d.reemplazo_ford.aviso && (
+            <p className="mt-1 text-xs text-rose-700">{d.reemplazo_ford.aviso}</p>
+          )}
+        </div>
+      )}
+
       {/* Equivalentes: el sugerido los trata como un mismo producto (stock y
           demanda se suman), asi que hay que verlos antes de pedir. */}
       {reemplazos.length > 0 && (

@@ -120,6 +120,10 @@ export const COLUMNAS: DefColumna[] = [
     info: "Stock del producto (y su grupo de reemplazos) en la bodega de Chillán Viejo." },
   { key: "stock_talca_2", label: "Stock Talca (2)", tipo: "numero", visiblePorDefecto: false,
     info: "Stock del producto (y su grupo de reemplazos) en la bodega de Talca (2)." },
+  // Cadena de reemplazo que publica FORD. No es lo mismo que "Reemplazos" (los
+  // equivalentes del mix): esto dice que el codigo ya no se fabrica.
+  { key: "reemplazado_por_ford", label: "Reemplazado por (FORD)", tipo: "texto", visiblePorDefecto: false,
+    info: "Código vigente cuando FORD dio de baja este repuesto. Trae el código de Curifor si lo tenemos, y si no el de FORD para buscarlo en el portal. En blanco si el código sigue vigente." },
   // Precios FORD (cruce por codigo con la tabla Precios; en blanco si el codigo no esta en la lista de FORD).
   { key: "precio_flota_ford", label: "Precio Flota FORD", tipo: "clp", visiblePorDefecto: false,
     info: "Precio de flota de FORD para el repuesto (cruce por código). En blanco si el código no está en la lista de precios de FORD." },

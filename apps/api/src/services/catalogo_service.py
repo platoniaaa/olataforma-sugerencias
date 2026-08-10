@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..models import ProductoCatalogo, Sugerido
-from . import stock_service
+from . import reemplazo_service, stock_service
 
 settings = get_settings()
 
@@ -77,6 +77,10 @@ def detalle(db: Session, producto: str) -> dict | None:
     # que valen son los del mix, que el motor resuelve y publica en `sugerido`. Se
     # prefiere esa fuente y el maestro queda de respaldo.
     d["reemplazo"] = _reemplazos(db, producto) or d.get("reemplazo")
+    # Lo de arriba son los equivalentes del mix: piezas distintas que sirven para
+    # lo mismo. Esto es otra cosa y no se lee igual: FORD dio de baja el codigo y
+    # hay uno vigente que lo sustituye. None cuando FORD no dice nada.
+    d["reemplazo_ford"] = reemplazo_service.de_producto(db, producto)
     return d
 
 

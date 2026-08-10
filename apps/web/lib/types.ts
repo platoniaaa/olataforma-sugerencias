@@ -80,6 +80,8 @@ export interface SugeridoRow {
   sobrecosto_vs_dealer_pct: number | null;
   /** Unidades ya marcadas como pedidas (services/pedidos_service.py). */
   unidades_pedidas: number | null;
+  /** Código vigente cuando FORD dio de baja este. En blanco si sigue vigente. */
+  reemplazado_por_ford: string | null;
   /** Repuesto de pauta de mantención que no puede faltar (services/instock_service.py). */
   instock: boolean | null;
   /** Modelos de la pauta que lo usan ("F-150, Ranger"). */
@@ -366,6 +368,9 @@ export interface StockSucursalRow {
 
 export interface CatalogoDetalle extends CatalogoRow {
   stock_por_sucursal: StockSucursalRow[];
+  /** Lo que FORD dice de este código. null = no dice nada (el caso normal).
+   *  No confundir con `reemplazo`, que son los equivalentes del mix. */
+  reemplazo_ford: ReemplazoFord | null;
 }
 
 export interface CargaResultado {
