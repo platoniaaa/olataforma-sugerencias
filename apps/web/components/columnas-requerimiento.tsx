@@ -36,7 +36,10 @@ export const COLUMNAS: {
   defecto: boolean;
 }[] = [
   { id: "abc", titulo: "ABC", ayuda: "Clase del repuesto según su rotación", defecto: true },
-  { id: "frecuencia", titulo: "Frecuencia", ayuda: "Meses con venta de los últimos 3 / 6 / 12", defecto: true },
+  // "Frecuencia" no decia que se contaba, y el valor mas comun ("3/6/12") se leia
+  // igual que el encabezado. El titulo ahora es literal y el numero trae su
+  // denominador. Ver `components/frecuencia-venta.tsx`.
+  { id: "frecuencia", titulo: "Meses con venta", ayuda: "De los últimos 12 meses, en cuántos se vendió este repuesto en esa sucursal. Mide cada cuánto se mueve, no cuánto", defecto: true },
   { id: "venta_12m", titulo: "Venta 12m", ayuda: "Unidades vendidas de verdad en esa sucursal, últimos 12 meses", defecto: true },
   { id: "venta_mensual", titulo: "Vta. mensual", ayuda: "Venta mensual promedio en esa sucursal, según el modelo", defecto: true },
   { id: "stock_suc", titulo: "Stock suc.", ayuda: "Stock en la sucursal que pide", defecto: true },

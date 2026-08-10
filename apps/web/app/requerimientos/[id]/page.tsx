@@ -28,29 +28,21 @@ import { Button } from "@/components/ui/button";
 import { BotonColumnas, useColumnas } from "@/components/columnas-requerimiento";
 import { DetalleProductoRequerimiento } from "@/components/detalle-producto-requerimiento";
 import { EstadoRequerimientoBadge } from "@/components/estado-requerimiento";
+import { FrecuenciaVenta } from "@/components/frecuencia-venta";
 import { api } from "@/lib/api-client";
 import { formatoCLP, formatoFechaHora, formatoNumero } from "@/lib/formato";
 import type { LineaGuardada, Requerimiento } from "@/lib/types";
 
-/** Frecuencia 3/6/12 en una celda, que es como se lee de un vistazo. */
+/** Cada cuanto se mueve. Ver `components/frecuencia-venta.tsx`. */
 function Frecuencia({ linea }: { linea: LineaGuardada }) {
   const a = linea.analisis;
-  if (!a || a.meses_con_venta_12m === null) {
-    const otra = a?.frecuencia_otra_sucursal;
-    return otra ? (
-      <span className="text-[11.5px] text-amber-800">
-        acá nunca · {otra.nombre_sucursal} {otra.meses_con_venta_12m}/12
-      </span>
-    ) : (
-      <span className="text-ink-300">—</span>
-    );
-  }
-  const m12 = a.meses_con_venta_12m ?? 0;
-  const color = m12 >= 9 ? "text-emerald-700" : m12 >= 4 ? "text-ink-900" : "text-ink-400";
   return (
-    <span className={`tabular ${color}`}>
-      {a.meses_con_venta_3m}/{a.meses_con_venta_6m}/<strong>{m12}</strong>
-    </span>
+    <FrecuenciaVenta
+      meses3={a?.meses_con_venta_3m}
+      meses6={a?.meses_con_venta_6m}
+      meses12={a?.meses_con_venta_12m}
+      otraSucursal={a?.frecuencia_otra_sucursal}
+    />
   );
 }
 
@@ -264,8 +256,11 @@ export default function RevisarRequerimientoPage() {
               <th className="px-3 py-2">Descripción</th>
               {ver("abc") && <th className="px-3 py-2">ABC</th>}
               {ver("frecuencia") && (
-                <th className="px-3 py-2" title="Meses con venta de los últimos 3 / 6 / 12">
-                  Frecuencia
+                <th
+                  className="px-3 py-2"
+                  title="De los últimos 12 meses, en cuántos se vendió este repuesto en esa sucursal"
+                >
+                  Meses con venta
                 </th>
               )}
               {ver("venta_12m") && (

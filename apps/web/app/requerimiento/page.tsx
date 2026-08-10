@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { FrecuenciaVenta } from "@/components/frecuencia-venta";
 import { api } from "@/lib/api-client";
 import { formatoCLP, formatoNumero } from "@/lib/formato";
 import type { LineaRequerimiento, RequerimientoResponse, Sucursal } from "@/lib/types";
@@ -59,16 +60,14 @@ function Estado({ linea }: { linea: LineaRequerimiento }) {
   return null;
 }
 
-/** Frecuencia 3/6/12 en una sola celda, que es como se lee de un vistazo. */
+/** Cada cuanto se mueve. Ver `components/frecuencia-venta.tsx`. */
 function Frecuencia({ linea }: { linea: LineaRequerimiento }) {
-  if (linea.meses_con_venta_12m === null) return <span className="text-ink-300">—</span>;
-  const m12 = linea.meses_con_venta_12m ?? 0;
-  const color =
-    m12 >= 9 ? "text-emerald-700" : m12 >= 4 ? "text-ink-900" : "text-ink-400";
   return (
-    <span className={`tabular ${color}`}>
-      {linea.meses_con_venta_3m}/{linea.meses_con_venta_6m}/<strong>{m12}</strong>
-    </span>
+    <FrecuenciaVenta
+      meses3={linea.meses_con_venta_3m}
+      meses6={linea.meses_con_venta_6m}
+      meses12={linea.meses_con_venta_12m}
+    />
   );
 }
 
@@ -277,8 +276,11 @@ export default function RequerimientoPage() {
                   <th className="px-3 py-2">Producto</th>
                   <th className="px-3 py-2">Descripción</th>
                   <th className="px-3 py-2 text-right">Cantidad</th>
-                  <th className="px-3 py-2" title="Meses con venta 3m / 6m / 12m">
-                    Frecuencia
+                  <th
+                    className="px-3 py-2"
+                    title="De los últimos 12 meses, en cuántos se vendió este repuesto en esa sucursal"
+                  >
+                    Meses con venta
                   </th>
                   <th className="px-3 py-2">ABC</th>
                   <th className="px-3 py-2 text-right">Stock acá</th>
