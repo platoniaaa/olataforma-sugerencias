@@ -37,6 +37,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { DetalleLineaVendedor } from "@/components/detalle-linea-vendedor";
 import { api } from "@/lib/api-client";
 import { getSucursales } from "@/lib/auth";
 import { formatoCLP, formatoNumero } from "@/lib/formato";
@@ -446,6 +447,12 @@ export default function NuevoRequerimientoPage() {
                       {formatoCLP(l.precio ?? 0)} c/u · stock acá{" "}
                       {formatoNumero(l.stock_sucursal ?? 0)}
                     </p>
+                    {/* Cuánto se vende, dónde hay unidades y si ya viene en
+                        camino: lo que el comprador va a preguntar. */}
+                    <DetalleLineaVendedor
+                      producto={l.producto}
+                      nombreSucursal={sucursal ?? "tu sucursal"}
+                    />
                   </div>
                   {/* 44x44 de area tactil: en el celular esto se aprieta con el pulgar. */}
                   <button

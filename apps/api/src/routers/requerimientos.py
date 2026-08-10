@@ -181,6 +181,32 @@ def detalle(
     return requerimiento_service.detalle(db, req_id, con_analisis=not vendedor)
 
 
+@router.get("/producto/{producto:path}")
+def contexto_producto(
+    producto: str,
+    sucursal_id: str | None = None,
+    email: str = Depends(requiere_auth),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Contexto de un repuesto para el vendedor que esta armando su lista.
+
+    Va suelto (sin req_id) a proposito: se consulta ANTES de crear el
+    requerimiento, cuando la lista todavia se esta armando.
+
+    La sucursal sale del USUARIO cuando es vendedor, no del parametro: si no, un
+    vendedor podria mirar el consumo de una sucursal ajena cambiando la URL.
+
+    Devuelve venta, stock de la red y transito, SIN costo ni margen.
+    """
+    if es_vendedor(email, db):
+        sucursal = _sucursal_a_usar(db, email, sucursal_id)
+    elif not sucursal_id:
+        raise HTTPException(status_code=400, detail="Falta la sucursal.")
+    else:
+        sucursal = sucursal_id
+    return requerimiento_service.contexto_para_vendedor(db, producto, sucursal)
+
+
 @router.get("/{req_id}/producto/{producto:path}")
 def detalle_producto(
     req_id: int,

@@ -869,6 +869,30 @@ export interface LineaRequerimiento {
   transito_pedido_desde: string | null;
 }
 
+/** Contexto de un repuesto para el vendedor que arma su lista.
+ *
+ * Deliberadamente SIN costo ni margen: el vendedor pide, no compra. */
+export interface ContextoVendedor {
+  producto: string;
+  sucursal_id: string;
+  descripcion: string | null;
+  reemplazo_ford: ReemplazoFord | null;
+  consumo: { periodo: string; sucursal: number; nacional: number }[];
+  consumo_12m_sucursal: number;
+  consumo_12m_nacional: number;
+  meses_con_venta_12m: number;
+  transito: { sucursal: number | null; pedido_desde: string | null };
+  stock: {
+    sucursal: number | null;
+    por_sucursal: {
+      bodega: string | null;
+      sucursal_id: string | null;
+      stock: number;
+      origen: string | null;
+    }[];
+  };
+}
+
 /** Una línea de una carga pegada, ya interpretada por el servidor. */
 export interface LineaPegadaManual {
   producto: string;

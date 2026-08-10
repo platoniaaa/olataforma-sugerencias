@@ -4,6 +4,7 @@ import type {
   AgrupadoRow,
   AuditoriaPage,
   CargaPegadaResultado,
+  ContextoVendedor,
   CargaResultado,
   CarrosResponse,
   CatalogoDetalle,
@@ -476,6 +477,13 @@ export const api = {
       throw new Error(err.detail ?? "No se pudo leer la lista");
     }
     return res.json();
+  },
+
+  /** Venta, stock de la red y tránsito de un repuesto, para el vendedor que arma
+   * su lista. Va sin req_id: se consulta antes de crear el requerimiento. */
+  async contextoProducto(producto: string, sucursalId?: string): Promise<ContextoVendedor> {
+    const p = sucursalId ? `?sucursal_id=${encodeURIComponent(sucursalId)}` : "";
+    return getJSON(`/api/requerimientos/producto/${encodeURIComponent(producto)}${p}`);
   },
 
   async crearRecurrente(payload: RecurrenteCreate): Promise<Recurrente> {

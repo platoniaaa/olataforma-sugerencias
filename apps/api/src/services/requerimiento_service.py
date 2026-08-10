@@ -516,6 +516,51 @@ def detalle_producto(db: Session, producto: str, sucursal_id: str) -> dict:
     }
 
 
+def contexto_para_vendedor(db: Session, producto: str, sucursal_id: str) -> dict:
+    """Lo que el vendedor puede ver de un repuesto MIENTRAS arma su lista.
+
+    Es el mismo contexto que mira el comprador, menos la plata de compra: sin
+    costo unitario, sin margen y sin lo que dice el modelo. El vendedor pide, no
+    compra; el costo es informacion de negociacion con el proveedor y no tiene por
+    que viajar a la sucursal. Lo que si es suyo -y hoy no ve en ninguna parte- es
+    cuanto se vende el repuesto aca, donde hay stock en la red y si ya viene en
+    camino: con eso puede justificar el pedido o darse cuenta de que le conviene
+    pedir un traslado.
+
+    No cuelga de un requerimiento porque se usa ANTES de crearlo, cuando la lista
+    todavia se esta armando.
+    """
+    producto = (producto or "").strip()
+    if not producto:
+        raise HTTPException(status_code=400, detail="Falta el producto")
+
+    ctx = (sugerido_service.contexto_de_pares(db, [(producto, sucursal_id)]) or [{}])[0]
+    consumo = _consumo_mensual(db, producto, sucursal_id)
+    transito_suc = transito_service.por_producto(db, {producto}, sucursal_id).get(producto)
+
+    return {
+        "producto": producto,
+        "sucursal_id": sucursal_id,
+        "descripcion": ctx.get("descripcion"),
+        "reemplazo_ford": reemplazo_service.de_producto(db, producto),
+        # El dato que el vendedor no tenia: cuanto se ha vendido.
+        "consumo": consumo,
+        "consumo_12m_sucursal": sum(m["sucursal"] for m in consumo),
+        "consumo_12m_nacional": sum(m["nacional"] for m in consumo),
+        "meses_con_venta_12m": sum(1 for m in consumo if m["sucursal"] > 0),
+        "transito": {
+            "sucursal": (transito_suc or {}).get("cantidad"),
+            "pedido_desde": _iso((transito_suc or {}).get("pedido_desde")),
+        },
+        # Donde hay unidades: a veces la respuesta no es comprar sino pedir un
+        # traslado, y eso lo puede gestionar la propia sucursal.
+        "stock": {
+            "sucursal": ctx.get("stock_activo_suc"),
+            "por_sucursal": stock_service.stock_por_sucursal(db, producto),
+        },
+    }
+
+
 # --------------------------------------------------------------------------- #
 # Carro del vendedor y bandeja del comprador.
 #
