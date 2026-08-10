@@ -97,6 +97,71 @@ def _clausula_columna(fc):
     return None
 
 
+def _fila_pasa_columna(fila: dict, fc) -> bool:
+    """Gemelo en Python de `_clausula_columna`, para las filas que NO salen del query.
+
+    `listar` devuelve dos clases de fila: las que vienen del SELECT sobre
+    `Sugerido` -que ya pasaron por `_apply_filters`- y las que se INYECTAN despues
+    (sugerencias manuales, minimo InStock, catalogo). Esas ultimas nunca tocaron el
+    WHERE, asi que sin esto se colaban aunque el usuario hubiera filtrado la
+    columna: un comprador filtro Sucursal = Chillan y el Excel salio con 6
+    sucursales, 78 filas de mas (10-08-2026).
+
+    Tiene que replicar la MISMA semantica que la clausula SQL, incluido el
+    centinela de blancos y el caso "destildo todo" (que no matchea nada).
+    """
+    campo = getattr(fc, "campo", None)
+    if not campo or campo not in SORTABLE:
+        return True
+    valor = fila.get(campo)
+
+    contiene = getattr(fc, "contiene", None)
+    if contiene:
+        return str(contiene).lower() in str("" if valor is None else valor).lower()
+
+    valores = getattr(fc, "valores", None)
+    if valores is None:
+        return True
+    incluir_blanco = BLANCO_SENTINEL in valores
+    reales = [v for v in valores if v != BLANCO_SENTINEL]
+    es_blanco = valor is None or valor == ""
+    if es_blanco:
+        return incluir_blanco
+    if not reales:
+        # Destildo todo salvo "(en blanco)": ninguna fila con valor entra.
+        return False
+    if _columna_numerica(campo):
+        try:
+            objetivo = float(valor)
+        except (TypeError, ValueError):
+            return False
+        for v in reales:
+            try:
+                if float(v) == objetivo:
+                    return True
+            except (TypeError, ValueError):
+                continue
+        return False
+    return str(valor) in {str(v) for v in reales}
+
+
+def _filtrar_inyectadas(items: list[dict], f: SugeridoFiltros) -> list[dict]:
+    """Deja solo las filas inyectadas que pasan los filtros de columna.
+
+    Las que vienen del query ya estan filtradas; se reconocen porque `listar` las
+    marca con `_inyectada`. Ese marcador se saca aca mismo para que no viaje al
+    schema ni al Excel.
+    """
+    filtros = getattr(f, "filtros_columna", None) or []
+    salida = []
+    for it in items:
+        inyectada = it.pop("_inyectada", False)
+        if inyectada and not all(_fila_pasa_columna(it, fc) for fc in filtros):
+            continue
+        salida.append(it)
+    return salida
+
+
 def _apply_alcance(stmt, f: SugeridoFiltros):
     """Lo que NO existe para la plataforma, pase lo que pase.
 
@@ -1080,7 +1145,10 @@ def listar(
     # orden explicita de comprar: gana sobre el toggle, y se muestra la fila BUENA
     # (con proveedor, ABC y stock), no una en blanco.
     if man["extras"] and page == 1:
-        items.extend(_a_dict(s) for s in _filas_de_pares(db, man["extras"]))
+        items.extend(
+            {**_a_dict(s), "_inyectada": True}
+            for s in _filas_de_pares(db, man["extras"])
+        )
 
     # Filas sinteticas para pares (producto, sucursal) que NO estan en el sugerido
     # en ninguna parte. Son las que alguien cargo a mano sobre un producto que el
@@ -1099,7 +1167,8 @@ def listar(
         stock_pares = _stock_de_pares(db, set(man["solas"]))
         for (p, s), u in man["solas"].items():
             items.append(
-                _fila_sintetica_manual(p, s, u, cat_map.get(p), stock_pares.get((p, s)))
+                {**_fila_sintetica_manual(p, s, u, cat_map.get(p), stock_pares.get((p, s))),
+                 "_inyectada": True}
             )
 
     # Lo mismo para la regla InStock: la fila real cuando existe, una sintetica
@@ -1108,7 +1177,10 @@ def listar(
     # una regla invisible.
     if (ins["extras"] or ins["solas"]) and page == 1:
         if ins["extras"]:
-            items.extend(_a_dict(s) for s in _filas_de_pares(db, set(ins["extras"])))
+            items.extend(
+                {**_a_dict(s), "_inyectada": True}
+                for s in _filas_de_pares(db, set(ins["extras"]))
+            )
         if ins["solas"]:
             cat_ins = {
                 c.producto: c
@@ -1127,6 +1199,7 @@ def listar(
                 # columna "InStock agregado" explique de donde salio el numero (y
                 # para que `aplicar` no lo vuelva a sumar).
                 fila["instock_agregado"] = float(u)
+                fila["_inyectada"] = True
                 items.append(fila)
 
     # Catalogo (productos que no estan ni en sugerido ni con manuales): solo cuando hay busqueda.
@@ -1158,6 +1231,7 @@ def listar(
                 for r in rows_cat:
                     if r["producto"] in stock_map:
                         r["stock_activo_suc"] = stock_map[r["producto"]]
+                    r["_inyectada"] = True
                 items.extend(rows_cat)
         except Exception:
             total_cat = 0
@@ -1187,7 +1261,18 @@ def listar(
 
     _agregar_reemplazo_ford(items, db)
 
-    return items, total + total_extras + total_manuales_solas + total_instock + total_cat
+    # Las filas inyectadas (manuales, InStock, catalogo) nunca pasaron por el WHERE
+    # con los filtros de columna: se filtran aca. Va al final para que lo hagan ya
+    # completas -- el margen, InStock y las manuales llenan campos por los que el
+    # usuario puede estar filtrando.
+    antes_de_filtrar = len(items)
+    items = _filtrar_inyectadas(items, f)
+    descartadas = antes_de_filtrar - len(items)
+
+    total_final = total + total_extras + total_manuales_solas + total_instock + total_cat
+    # El total tiene que cuadrar con lo que se devuelve: si no, el Excel trae N
+    # filas y el contador de la pantalla dice otra cosa.
+    return items, max(total_final - descartadas, len(items))
 
 
 def _agregar_reemplazo_ford(items: list[dict], db: Session) -> None:
