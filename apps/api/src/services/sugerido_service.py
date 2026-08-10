@@ -32,7 +32,14 @@ from ..models import (
     VentaHistorica,
 )
 from ..schemas import SugeridoFiltros
-from . import instock_service, margen, pedidos_service, reemplazo_service, stock_service
+from . import (
+    instock_service,
+    margen,
+    pedidos_service,
+    proveedor_producto_service,
+    reemplazo_service,
+    stock_service,
+)
 
 # Columnas por las que se permite ordenar (whitelist para evitar inyeccion).
 SORTABLE = {c.name for c in Sugerido.__table__.columns}
@@ -917,8 +924,14 @@ def _completar_filas_sinteticas(items: list[dict], db: Session) -> None:
        importado, precios de lista—, porque ya paso por el motor. Lo que depende de
        la sucursal no se copia (ver `CAMPOS_DE_PRODUCTO`).
     2. **`dim_producto`**: marca, unidad, costo y proveedor del maestro del motor.
-    3. **`producto_catalogo`**: glosa, procedencia, unidad, costo y reemplazos.
-    4. **`stock_unificado`**: el stock real por sucursal, que llena tanto las
+    3. **`proveedor_producto`**: a quien se le compra, deducido de las ordenes de
+       compra historicas. Cubre lo que las dos anteriores no: un producto que no
+       esta en el sugerido de hoy tampoco esta en `dim_producto` (se llena con lo
+       que trae el CSV del sugerido), asi que hasta aca la celda quedaba vacia
+       aunque hubiera 78 OC a FORD. Y sin proveedor la linea no entra a ningun
+       carro de compra (`compras_service` filtra por `proveedor IS NOT NULL`).
+    4. **`producto_catalogo`**: glosa, procedencia, unidad, costo y reemplazos.
+    5. **`stock_unificado`**: el stock real por sucursal, que llena tanto las
        columnas por bodega como el stock de la propia sucursal de la fila.
 
     Nunca pisa un valor que la fila ya traiga. Muta `items` in-place.
@@ -957,7 +970,14 @@ def _completar_filas_sinteticas(items: list[dict], db: Session) -> None:
         db.rollback()
         dim = {}
 
-    # 3) catalogo maestro.
+    # 3) proveedor deducido de las OC (cubre lo que no esta en el sugerido).
+    try:
+        prov_deducido = proveedor_producto_service.mapa(db, productos)
+    except Exception:  # noqa: BLE001 - tabla ausente en despliegues viejos
+        db.rollback()
+        prov_deducido = {}
+
+    # 4) catalogo maestro.
     cat = {
         c.producto: c
         for c in db.scalars(
@@ -965,7 +985,7 @@ def _completar_filas_sinteticas(items: list[dict], db: Session) -> None:
         ).all()
     }
 
-    # 4) stock real por sucursal, en una query.
+    # 5) stock real por sucursal, en una query.
     stock: dict[str, dict[str, float]] = {}
     try:
         for p, suc, total in db.execute(
@@ -995,6 +1015,7 @@ def _completar_filas_sinteticas(items: list[dict], db: Session) -> None:
             _rellenar(fila, "costo_unitario", d.costo_unitario)
             _rellenar(fila, "proveedor", d.proveedor)
             _rellenar(fila, "es_importado", d.es_importado)
+        _rellenar(fila, "proveedor", prov_deducido.get(p))
         c = cat.get(p)
         if c is not None:
             _rellenar(fila, "descripcion", c.glosa)

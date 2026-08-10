@@ -15,6 +15,7 @@ from ..services import (
     motor_comparacion,
     powerbi_desktop_loader,
     powerbi_loader,
+    proveedor_producto_service,
     reemplazo_service,
     stock_service,
     transito_service,
@@ -49,6 +50,36 @@ def publicar_lead_time(
     if not isinstance(filas, list):
         raise HTTPException(status_code=400, detail="Falta la lista 'filas'")
     return lead_time_service.reemplazar(db, filas)
+
+
+@router.post("/proveedor-producto")
+def publicar_proveedor_producto(
+    payload: dict,
+    db: Session = Depends(get_db),
+) -> dict:
+    """El motor publica a quien se le compra cada producto. Admin.
+
+    payload: {"filas": [{producto, proveedor}]}
+
+    El proveedor se deduce de las ordenes de compra historicas. Viene aparte del
+    sugerido porque cubre TODO producto con OC, no solo lo que el motor evalua:
+    las filas de minimo InStock y las sugerencias manuales salian sin proveedor
+    —y por lo tanto fuera del carro de compra— aunque el producto tuviera
+    decenas de OC. Ver `models/proveedor_producto.py`.
+    """
+    filas = payload.get("filas")
+    if not isinstance(filas, list):
+        raise HTTPException(status_code=400, detail="Falta la lista 'filas'")
+    resumen = proveedor_producto_service.reemplazar(db, filas)
+    if resumen["filas_cargadas"]:
+        auditoria_service.registrar(
+            db,
+            accion="proveedor_producto_publicado",
+            entidad="sistema",
+            detalle=f"Proveedor por producto: {resumen['filas_cargadas']} productos",
+        )
+        db.commit()
+    return resumen
 
 
 @router.post("/stock-unificado")
