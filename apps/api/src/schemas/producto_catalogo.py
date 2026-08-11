@@ -59,7 +59,30 @@ class StockSucursalRow(BaseModel):
     origen: str | None = None
 
 
+class ReemplazoFordRow(BaseModel):
+    """Lo que FORD dice del código: que lo dio de baja y cuál lo sustituye.
+
+    Es otra cosa que `reemplazo` (los equivalentes del mix: piezas distintas que
+    sirven para lo mismo) y no se lee igual. Ver `models/reemplazo_ford.py`.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    producto: str
+    reemplazado_por: str | None = None
+    reemplazado_por_ford: str | None = None
+    cadena: str | None = None
+    reemplaza_a: list[str] = Field(default_factory=list)
+    sucesor_confirmado: bool = False
+    agrupado: bool = False
+    aviso: str | None = None
+
+
 class CatalogoDetalle(CatalogoRow):
     """Detalle del producto del catálogo + desglose de stock por sucursal."""
 
     stock_por_sucursal: list[StockSucursalRow] = Field(default_factory=list)
+    # `catalogo_service.detalle` ya lo calculaba, pero sin declararlo aca FastAPI
+    # lo descartaba al serializar: la ficha del catalogo tiene el bloque rojo listo
+    # para pintarlo desde ago-2026 y nunca le llego el dato.
+    reemplazo_ford: ReemplazoFordRow | None = None
