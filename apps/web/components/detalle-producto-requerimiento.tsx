@@ -19,25 +19,40 @@ import { api } from "@/lib/api-client";
 import { formatoCLP, formatoFecha, formatoNumero } from "@/lib/formato";
 import type { DetalleProducto } from "@/lib/types";
 
-function Dato({
+/** Etiqueta a la izquierda, numero a la derecha, en una columna estrecha. */
+function Cifra({
   etiqueta,
   valor,
   nota,
-  acento,
 }: {
   etiqueta: string;
   valor: React.ReactNode;
   nota?: React.ReactNode;
-  acento?: "bueno" | "ojo";
 }) {
-  const color =
-    acento === "bueno" ? "text-emerald-700" : acento === "ojo" ? "text-amber-800" : "text-ink-900";
   return (
-    <div>
-      <p className="text-[11px] uppercase tracking-wide text-ink-400">{etiqueta}</p>
-      <p className={`mt-0.5 text-[15px] font-medium ${color}`}>{valor}</p>
-      {nota && <p className="text-[11.5px] text-ink-500">{nota}</p>}
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="min-w-0 text-ink-500">
+        <span className="block truncate">{etiqueta}</span>
+        {nota && <span className="block text-[11px] text-ink-400">{nota}</span>}
+      </dt>
+      <dd className="tabular shrink-0 font-medium text-ink-900">{valor}</dd>
     </div>
+  );
+}
+
+/** Fila de una lista larga (stock o transito por sucursal). */
+function Renglon({
+  izquierda,
+  derecha,
+}: {
+  izquierda: React.ReactNode;
+  derecha: React.ReactNode;
+}) {
+  return (
+    <li className="flex justify-between gap-3">
+      <span className="min-w-0 truncate text-ink-600">{izquierda}</span>
+      <span className="tabular shrink-0 font-medium">{derecha}</span>
+    </li>
   );
 }
 
@@ -158,79 +173,78 @@ export function DetalleProductoRequerimiento({
       {/* Si no se vende en ninguna parte, el aviso de arriba ya lo dijo con mas
           contexto. Repetirlo abajo sobra, y dibujar el grafico con doce ceros se
           lee como una vista que no cargo. */}
-      {!nuncaSeVende && (
-        <ConsumoChart datos={d.consumo} nombreSucursal={nombreSucursal} />
-      )}
+      {/* El grafico ocupaba un tercio del ancho y dejaba dos tercios en blanco,
+          mientras las cifras se estiraban a lo largo de toda la pantalla: en un
+          monitor ancho, cada numero terminaba a media pantalla de su etiqueta.
+          Puestos lado a lado, el grafico usa el espacio que le sobraba y las
+          cifras quedan en una columna donde etiqueta y valor se leen juntos. */}
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+        <div className="min-w-0">
+          {!nuncaSeVende && (
+            <ConsumoChart datos={d.consumo} nombreSucursal={nombreSucursal} />
+          )}
+        </div>
 
-      {/* La pregunta es "compro o no compro", y el dato que mas se le acerca es
-          cuanto dura lo que ya hay. Antes competia de igual a igual con otros
-          cuatro numeros del mismo tamaño, asi que habia que buscarlo. */}
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-paper-200 pb-3">
-        <span className="text-[11px] uppercase tracking-wide text-ink-400">
-          Dura para
-        </span>
-        {cob ? (
-          <>
-            <span
-              className={`text-[22px] font-semibold leading-none ${
-                cob.meses >= 12 ? "text-amber-800" : "text-ink-900"
-              }`}
-            >
-              {cob.texto}
-            </span>
-            <span className="text-[12.5px] text-ink-500">
-              con {formatoNumero((d.stock.sucursal ?? 0) + (d.transito.sucursal ?? 0))} unidades
-              (stock y lo que viene) al ritmo de {nombreSucursal}
-            </span>
-          </>
-        ) : (
-          <span className="text-[12.5px] text-ink-500">
-            No se puede estimar: este repuesto no se vende en {nombreSucursal}.
-          </span>
-        )}
-      </div>
-
-      <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
-        <Dato
-          etiqueta={`Consumo 12m · ${nombreSucursal}`}
-          valor={formatoNumero(d.consumo_12m_sucursal)}
-          nota={`${d.meses_con_venta_12m} de 12 meses con venta`}
-        />
-        <Dato
-          etiqueta="Consumo 12m · empresa"
-          valor={formatoNumero(d.consumo_12m_nacional)}
-        />
-        {/* Sin fila de transito = no hay OC pendiente = cero, igual que el stock
-            de al lado, que ya hacia `?? 0`. Mostrar "sin dato" en uno y "0" en el
-            otro para el mismo vacio hacia dudar de la carga, y encima contradecia
-            al propio panel, que mas abajo afirma "no hay ordenes pendientes". */}
-        <Dato
-          etiqueta="En tránsito acá"
-          valor={formatoNumero(d.transito.sucursal ?? 0)}
-          nota={
-            d.transito.pedido_desde
-              ? `pedido el ${formatoFecha(d.transito.pedido_desde)}`
-              : undefined
-          }
-        />
-        {/* "28 / 24" obligaba a volver al titulo para saber cual era cual. */}
-        <Dato
-          etiqueta="Stock"
-          valor={
+        <div className="min-w-0 rounded-sm bg-white/60 px-3 py-3">
+          {/* La pregunta es "compro o no compro", y el dato que mas se le acerca
+              es cuanto dura lo que ya hay. */}
+          <p className="text-[11px] uppercase tracking-wide text-ink-400">Dura para</p>
+          {cob ? (
             <>
-              {formatoNumero(d.stock.sucursal ?? 0)}{" "}
-              <span className="text-[12.5px] font-normal text-ink-400">acá</span>
-              <span className="mx-1.5 text-ink-300">·</span>
-              {formatoNumero(d.stock.cd ?? 0)}{" "}
-              <span className="text-[12.5px] font-normal text-ink-400">CD</span>
+              <p
+                className={`text-[26px] font-semibold leading-none ${
+                  cob.meses >= 12 ? "text-amber-800" : "text-ink-900"
+                }`}
+              >
+                {cob.texto}
+              </p>
+              <p className="mt-1 text-[12px] leading-snug text-ink-500">
+                con {formatoNumero((d.stock.sucursal ?? 0) + (d.transito.sucursal ?? 0))}{" "}
+                unidades entre stock y lo que viene, al ritmo de {nombreSucursal}
+              </p>
             </>
-          }
-        />
+          ) : (
+            <p className="mt-1 text-[12.5px] leading-snug text-ink-500">
+              No se puede estimar: este repuesto no se vende en {nombreSucursal}.
+            </p>
+          )}
+
+          <dl className="mt-3 space-y-1 border-t border-paper-200 pt-2.5 text-[12.5px]">
+            <Cifra
+              etiqueta={`Consumo 12m · ${nombreSucursal}`}
+              valor={formatoNumero(d.consumo_12m_sucursal)}
+              nota={`${d.meses_con_venta_12m} de 12 meses con venta`}
+            />
+            <Cifra
+              etiqueta="Consumo 12m · empresa"
+              valor={formatoNumero(d.consumo_12m_nacional)}
+            />
+            <Cifra etiqueta="Stock acá" valor={formatoNumero(d.stock.sucursal ?? 0)} />
+            <Cifra etiqueta="Stock en el CD" valor={formatoNumero(d.stock.cd ?? 0)} />
+            {/* Sin fila de transito = no hay OC pendiente = cero, igual que el
+                stock de al lado, que ya hacia `?? 0`. Mostrar "sin dato" en uno y
+                "0" en el otro para el mismo vacio hacia dudar de la carga.
+                Y decir "aca" a secas chocaba con la lista de mas abajo, donde el
+                CD aparece con 20 en camino: nombrar la sucursal deja claro que
+                esas unidades no vienen para ella. */}
+            <Cifra
+              etiqueta={`En tránsito a ${nombreSucursal}`}
+              valor={formatoNumero(d.transito.sucursal ?? 0)}
+              nota={
+                d.transito.pedido_desde
+                  ? `pedido el ${formatoFecha(d.transito.pedido_desde)}`
+                  : undefined
+              }
+            />
+          </dl>
+        </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      {/* `max-w-sm` en cada lista: sin tope, en un monitor ancho el numero se iba
+          a 500px de su etiqueta y la fila dejaba de leerse como una fila. */}
+      <div className="grid gap-x-8 gap-y-5 md:grid-cols-3">
         {/* Dónde están las unidades: a veces la respuesta es un traslado. */}
-        <div>
+        <div className="max-w-sm">
           <p className="text-[11px] uppercase tracking-wide text-ink-400">
             Stock por sucursal
           </p>
@@ -241,12 +255,11 @@ export function DetalleProductoRequerimiento({
           ) : (
             <ul className="mt-1 space-y-0.5 text-[12.5px]">
               {conStock.slice(0, 8).map((s, i) => (
-                <li key={`${s.sucursal_id}-${s.bodega}-${i}`} className="flex justify-between gap-3">
-                  <span className="truncate text-ink-600">
-                    {s.sucursal_id ?? s.bodega ?? "—"}
-                  </span>
-                  <span className="tabular font-medium">{formatoNumero(s.stock)}</span>
-                </li>
+                <Renglon
+                  key={`${s.sucursal_id}-${s.bodega}-${i}`}
+                  izquierda={s.sucursal_id ?? s.bodega ?? "—"}
+                  derecha={formatoNumero(s.stock)}
+                />
               ))}
             </ul>
           )}
@@ -267,7 +280,7 @@ export function DetalleProductoRequerimiento({
           )}
         </div>
 
-        <div>
+        <div className="max-w-sm">
           <p className="text-[11px] uppercase tracking-wide text-ink-400">
             En tránsito por sucursal
           </p>
@@ -278,21 +291,24 @@ export function DetalleProductoRequerimiento({
           ) : (
             <ul className="mt-1 space-y-0.5 text-[12.5px]">
               {enTransito.slice(0, 8).map((t, i) => (
-                <li key={`${t.sucursal_id}-${i}`} className="flex justify-between gap-3">
-                  <span className="truncate text-ink-600">
-                    {t.sucursal_id ?? "—"}
-                    {t.pedido_desde && (
-                      <span className="text-ink-400"> · {formatoFecha(t.pedido_desde)}</span>
-                    )}
-                  </span>
-                  <span className="tabular font-medium">{formatoNumero(t.cantidad)}</span>
-                </li>
+                <Renglon
+                  key={`${t.sucursal_id}-${i}`}
+                  izquierda={
+                    <>
+                      {t.sucursal_id ?? "—"}
+                      {t.pedido_desde && (
+                        <span className="text-ink-400"> · {formatoFecha(t.pedido_desde)}</span>
+                      )}
+                    </>
+                  }
+                  derecha={formatoNumero(t.cantidad)}
+                />
               ))}
             </ul>
           )}
         </div>
 
-        <div className="space-y-3">
+        <div className="max-w-sm space-y-3">
           <div>
             <p className="text-[11px] uppercase tracking-wide text-ink-400">Precio</p>
             <p className="mt-1 text-[12.5px]">
@@ -342,12 +358,11 @@ export function DetalleProductoRequerimiento({
                   ]
                     .filter(([, v]) => v != null)
                     .map(([etiqueta, valor]) => (
-                      <li key={String(etiqueta)} className="flex justify-between gap-3">
-                        <span className="text-ink-500">{etiqueta}</span>
-                        <span className="tabular font-medium">
-                          {typeof valor === "number" ? formatoNumero(valor) : valor}
-                        </span>
-                      </li>
+                      <Renglon
+                        key={String(etiqueta)}
+                        izquierda={etiqueta}
+                        derecha={typeof valor === "number" ? formatoNumero(valor) : valor}
+                      />
                     ))}
                 </ul>
               </>
