@@ -82,6 +82,10 @@ export interface SugeridoRow {
   unidades_pedidas: number | null;
   /** Código vigente cuando FORD dio de baja este. En blanco si sigue vigente. */
   reemplazado_por_ford: string | null;
+  /** La cadena completa de reemplazos, en código de FORD (con barras). */
+  cadena_ford: string | null;
+  /** Cuándo se consultó el portal por esa cadena ("2026-08-22 16:17:53"). */
+  reemplazo_extraido_en: string | null;
   /** Repuesto de pauta de mantención que no puede faltar (services/instock_service.py). */
   instock: boolean | null;
   /** Modelos de la pauta que lo usan ("F-150, Ranger"). */
@@ -934,6 +938,8 @@ export interface ReemplazoFord {
   cadena: string | null;
   /** Códigos de Curifor que ESTA pieza reemplazó. */
   reemplaza_a: string[];
+  /** Cuándo se consultó el portal por esta fila. */
+  extraido_en: string | null;
   sucesor_confirmado: boolean;
   agrupado: boolean;
   aviso: string | null;

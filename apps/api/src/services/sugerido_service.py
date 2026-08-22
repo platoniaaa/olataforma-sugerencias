@@ -1317,6 +1317,13 @@ def _agregar_reemplazo_ford(items: list[dict], db: Session) -> None:
         it["reemplazado_por_ford"] = (
             (r.get("reemplazado_por") or r.get("reemplazado_por_ford")) if r else None
         )
+        # La cadena completa, para ver el historico y no solo el ultimo salto.
+        # Viene en codigo de FORD ("MB3Z/19N619/C/ > MB3Z/19N619/A/"), que NO es
+        # el de la grilla: por eso la columna lo dice en su encabezado.
+        it["cadena_ford"] = r.get("cadena") if r else None
+        # Cuando se le pregunto al portal. Sin esto un dato de hace tres semanas
+        # se ve igual que uno de hoy.
+        it["reemplazo_extraido_en"] = r.get("extraido_en") if r else None
 
 
 def _aporte_manuales(db: Session, f: SugeridoFiltros, man: dict | None = None) -> dict:

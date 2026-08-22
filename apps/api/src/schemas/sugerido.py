@@ -95,6 +95,10 @@ class SugeridoRow(BaseModel):
     # Codigo vigente cuando FORD dio de baja este (services/reemplazo_service.py).
     # Trae el de Curifor si lo hay, y si no el de FORD para buscarlo en el portal.
     reemplazado_por_ford: str | None = None
+    # La cadena completa de reemplazos, en codigo de FORD (con barras).
+    cadena_ford: str | None = None
+    # Cuando se consulto el portal por esa cadena (services/reemplazo_service.py).
+    reemplazo_extraido_en: str | None = None
     # Regla InStock (services/instock_service.py): repuesto de pauta que no puede
     # faltar en las sucursales con taller.
     instock: bool | None = None

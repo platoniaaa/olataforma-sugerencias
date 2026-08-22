@@ -124,6 +124,13 @@ export const COLUMNAS: DefColumna[] = [
   // equivalentes del mix): esto dice que el codigo ya no se fabrica.
   { key: "reemplazado_por_ford", label: "Reemplazado por (FORD)", tipo: "texto", visiblePorDefecto: false,
     info: "Código vigente cuando FORD dio de baja este repuesto. Trae el código de Curifor si lo tenemos, y si no el de FORD para buscarlo en el portal. En blanco si el código sigue vigente." },
+  // La cadena entera, no solo el ultimo salto. Va en codigo de FORD (con barras)
+  // y no en el de Curifor: es como la publica el portal, y traducir cada eslabon
+  // no siempre se puede -hay codigos de la cadena que Curifor nunca tuvo-.
+  { key: "cadena_ford", label: "Cadena de reemplazos (FORD)", tipo: "texto", visiblePorDefecto: false,
+    info: "El historial completo del repuesto según FORD: qué código reemplazó a cuál, hasta el vigente. Va en el formato de FORD (con barras), no en el de Curifor. En blanco si el código nunca fue reemplazado." },
+  { key: "reemplazo_extraido_en", label: "Reemplazo consultado el", tipo: "texto", visiblePorDefecto: false,
+    info: "Cuándo se le preguntó al portal de FORD por esta cadena. Sirve para saber si el dato está fresco: la consulta corre una vez por semana, y si esa corrida falla la plataforma sigue mostrando lo de la semana anterior." },
   // Precios FORD (cruce por codigo con la tabla Precios; en blanco si el codigo no esta en la lista de FORD).
   { key: "precio_flota_ford", label: "Precio Flota FORD", tipo: "clp", visiblePorDefecto: false,
     info: "Precio de flota de FORD para el repuesto (cruce por código). En blanco si el código no está en la lista de precios de FORD." },

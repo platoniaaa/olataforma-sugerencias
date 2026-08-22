@@ -140,6 +140,14 @@ export default function DetalleCatalogoPage({ params }: { params: { producto: st
           {d.reemplazo_ford.aviso && (
             <p className="mt-1 text-xs text-rose-700">{d.reemplazo_ford.aviso}</p>
           )}
+          {/* Cuando se le pregunto al portal. Sin esto un dato de hace tres
+              semanas se ve igual que uno de hoy, y si la corrida semanal falla
+              nadie tiene como notarlo. */}
+          {d.reemplazo_ford.extraido_en && (
+            <p className="mt-2 text-[11px] text-rose-600">
+              Consultado a FORD el {d.reemplazo_ford.extraido_en.slice(0, 10)}
+            </p>
+          )}
         </div>
       )}
 

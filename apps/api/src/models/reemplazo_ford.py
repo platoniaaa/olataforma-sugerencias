@@ -55,6 +55,16 @@ class ReemplazoFord(Base):
     # Bifurcaciones, ciclos o "revisar a mano". Vacio = sin nada raro.
     aviso: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Cuando se le pregunto al portal por ESTA fila ("2026-08-22 16:17:53").
+    # Va por fila y no como un valor global de la tabla porque el motor combina
+    # dos archivos y cada uno se extrae por su lado: al 22-08-2026 la lista de
+    # FORD era del 5 al 7 de agosto y la de los codigos de Curifor de ese mismo
+    # dia. Un solo valor mentiria sobre la mitad de la tabla.
+    #
+    # Sin esto, un reemplazo de hace tres semanas se ve igual que uno de hoy, y
+    # si la corrida semanal falla nadie tiene como notarlo.
+    extraido_en: Mapped[str | None] = mapped_column(String, nullable=True)
+
     __table_args__ = (
         Index("ix_reemplazo_producto", "producto", "tenant_id"),
     )

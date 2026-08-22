@@ -76,6 +76,8 @@ class ReemplazoFordRow(BaseModel):
     sucesor_confirmado: bool = False
     agrupado: bool = False
     aviso: str | None = None
+    # Cuando se consulto el portal por esta fila. Ver `models/reemplazo_ford.py`.
+    extraido_en: str | None = None
 
 
 class CatalogoDetalle(CatalogoRow):

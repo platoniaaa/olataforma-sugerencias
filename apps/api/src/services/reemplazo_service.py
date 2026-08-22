@@ -51,6 +51,7 @@ def reemplazar(db: Session, filas: list[dict]) -> dict:
             "sucesor_confirmado": bool(f.get("sucesor_confirmado")),
             "agrupado": bool(f.get("agrupado")),
             "aviso": _texto(f.get("aviso")),
+            "extraido_en": _texto(f.get("extraido_en")),
         })
 
     # Mismo criterio que el transito y el stock: una tanda vacia NO borra lo que
@@ -80,6 +81,7 @@ def _fila(r: ReemplazoFord) -> dict:
         "sucesor_confirmado": bool(r.sucesor_confirmado),
         "agrupado": bool(r.agrupado),
         "aviso": r.aviso,
+        "extraido_en": r.extraido_en,
     }
 
 

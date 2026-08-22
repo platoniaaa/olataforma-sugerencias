@@ -90,6 +90,8 @@ LABELS: dict[str, str] = {
     "sobrecosto_vs_dealer_pct": "Sobrecosto vs Dealer %",
     "unidades_pedidas": "Ya Pedido (unidades)",
     "reemplazado_por_ford": "Reemplazado por (FORD)",
+    "cadena_ford": "Cadena de reemplazos (FORD)",
+    "reemplazo_extraido_en": "Reemplazo consultado el",
     # Regla InStock (repuestos de pauta que no pueden faltar).
     "instock": "InStock",
     "instock_modelos": "InStock Modelos",
