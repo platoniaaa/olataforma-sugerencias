@@ -27,6 +27,7 @@ from sqlalchemy import delete, distinct, func, insert, select
 from ..config import get_settings
 from ..db import SessionLocal, create_all
 from ..models import ProductoCatalogo, RepuestoInstock, StockUnificado, Sugerido
+from ..services import reemplazo_service
 from ..services.instock_service import MINIMO_DEFECTO
 
 DEFAULT_PATH = Path(__file__).resolve().parents[1] / "data" / "pautas_instock.csv"
@@ -96,6 +97,30 @@ def _indice_de_codigos(db) -> dict[str, set[str]]:
     return indice
 
 
+def vigentes_de(db, codigos: set[str]) -> dict[str, str]:
+    """{codigo dado de baja: su vigente} para los que el motor SI agrupo.
+
+    La pauta del fabricante trae part numbers que FORD despues descontinuo, y el
+    indice de arriba no ayuda con eso: busca el MISMO part number bajo otro
+    rubro, y el vigente es un part number distinto ("BR3Z8620S" -> "RB5Z8620D").
+    Sin este paso la fila InStock queda colgada del codigo muerto, que es lo que
+    se veia en pantalla: el sugerido pedia `19 BR3Z8620S` teniendo el vigente.
+
+    Solo se siguen los reemplazos que el motor efectivamente agrupo
+    (`agrupado`). Si no agrupo, el stock de los dos codigos se cuenta por
+    separado y colgar el minimo del vigente pediria de mas: se estaria exigiendo
+    el minimo completo del vigente sin descontar lo que hay del viejo.
+    """
+    if not codigos:
+        return {}
+    salida: dict[str, str] = {}
+    for producto, f in reemplazo_service.por_producto(db, codigos).items():
+        vigente = f.get("reemplazado_por")
+        if vigente and vigente != producto and f.get("agrupado"):
+            salida[producto] = vigente
+    return salida
+
+
 def _leer_csv(path: Path) -> list[dict]:
     if not path.exists():
         raise FileNotFoundError(f"No encuentro la lista de pautas: {path}")
@@ -122,6 +147,12 @@ def cargar_en(db, pautas: list[dict]) -> dict:
     candidatos: set[str] = set()
     for fila in pautas:
         candidatos |= indice.get(_norm(fila["part_number"].strip()), set())
+    # Los vigentes entran como candidatos mas. Van ANTES de mirar el sugerido y
+    # el stock, porque son justamente esos dos datos los que hacen que
+    # `elegir_codigo` prefiera el vigente: al estar agrupado, el que aparece en
+    # el sugerido es el master del grupo, o sea el vigente.
+    vigentes = vigentes_de(db, candidatos)
+    candidatos |= set(vigentes.values())
     en_sugerido = {
         p for (p,) in db.execute(
             select(distinct(Sugerido.producto)).where(Sugerido.producto.in_(candidatos))
@@ -145,6 +176,10 @@ def cargar_en(db, pautas: list[dict]) -> dict:
         if not codigos:
             sin_codigo.append(fila)
             continue
+        # Si alguno de los codigos de este part number esta dado de baja y el
+        # motor lo agrupo, su vigente compite tambien. `elegir_codigo` se queda
+        # con el que esta en el sugerido, que es el master del grupo.
+        codigos = set(codigos) | {vigentes[c] for c in codigos if c in vigentes}
         producto = elegir_codigo(codigos, en_sugerido, stock)
         otros = sorted(c for c in codigos if c != producto)
         if otros:
