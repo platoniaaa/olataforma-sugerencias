@@ -12,6 +12,10 @@ class ProductoOut(BaseModel):
     costo_unitario: float | None = None
     proveedor: str | None = None
     es_importado: bool | None = None
+    # Cuando FORD dio de baja el codigo, cual lo reemplaza (en codigo de Curifor).
+    # Viaja en el autocomplete para que el modal de sugerencia manual pueda avisar
+    # mientras se escribe, sin una segunda llamada por cada tecla.
+    reemplazado_por: str | None = None
 
 
 class ProductoPage(BaseModel):

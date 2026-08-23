@@ -74,6 +74,11 @@ export function ModalSugerenciaManual({
   // guardarlo termina en una fila sin descripcion, proveedor ni costo (el backend
   // lo rechaza, pero es mejor decirlo antes que al apretar Guardar).
   const [codigoDesconocido, setCodigoDesconocido] = useState(false);
+  // El codigo escrito existe, pero FORD lo dio de baja. Se AVISA, no se bloquea:
+  // si el vigente no tiene stock en FORD la orden va con otro codigo del grupo, o
+  // sea que pedir el viejo a veces es lo correcto. Bloquearlo dejaria al comprador
+  // sin poder trabajar.
+  const [vigenteSugerido, setVigenteSugerido] = useState<string | null>(null);
 
   // Grupo
   const [gSucursales, setGSucursales] = useState<string[]>([]);
@@ -127,6 +132,7 @@ export function ModalSugerenciaManual({
       setProducto(productoInicial ?? "");
       setSucursal(sucursalInicial ?? "");
       setCodigoDesconocido(false);
+      setVigenteSugerido(null);
       setGSucursales([]);
       setGProveedores([]);
       setGAbc([]);
@@ -145,12 +151,19 @@ export function ModalSugerenciaManual({
     if (modo !== "individual" || !producto || producto === productoInicial) {
       setSugerencias([]);
       setCodigoDesconocido(false);
+      setVigenteSugerido(null);
       return;
     }
     const t = setTimeout(async () => {
       try {
         const r = await api.productos(producto);
         setSugerencias(r.items.slice(0, 6));
+        // El dato viaja en el propio autocomplete: no hay una segunda llamada
+        // por cada tecla.
+        const exacto = r.items.find(
+          (p) => p.producto.toUpperCase() === producto.trim().toUpperCase()
+        );
+        setVigenteSugerido(exacto?.reemplazado_por ?? null);
         // Ni una coincidencia parcial. Mientras se escribe un codigo valido siempre
         // hay alguna, asi que cero resultados es señal de codigo inexistente y no
         // ruido de tipeo.
@@ -159,6 +172,7 @@ export function ModalSugerenciaManual({
         // Sin respuesta del servidor no se puede afirmar que el codigo no existe.
         setSugerencias([]);
         setCodigoDesconocido(false);
+        setVigenteSugerido(null);
       }
     }, 250);
     return () => clearTimeout(t);
@@ -475,6 +489,26 @@ export function ModalSugerenciaManual({
                   <span>
                     Ese código no existe en el catálogo. Revísalo: si lo guardas así, la
                     fila queda sin descripción, proveedor ni costo.
+                  </span>
+                </p>
+              )}
+              {vigenteSugerido && (
+                <p className="mt-1 flex items-start gap-1.5 text-[11.5px] text-rose-700">
+                  <TriangleAlert size={13} className="mt-px shrink-0" />
+                  <span>
+                    FORD dio de baja este código. El vigente es{" "}
+                    <span className="font-mono font-semibold">{vigenteSugerido}</span>.{" "}
+                    <button
+                      type="button"
+                      onClick={() => setProducto(vigenteSugerido)}
+                      className="font-medium underline hover:no-underline"
+                    >
+                      Usar el vigente
+                    </button>
+                    {" · "}
+                    <span className="text-rose-500">
+                      Puedes pedir el viejo igual si sabes lo que haces.
+                    </span>
                   </span>
                 </p>
               )}

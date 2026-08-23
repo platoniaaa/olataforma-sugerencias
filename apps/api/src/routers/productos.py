@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..models import DimProducto, DimSucursal, ProductoCatalogo
 from ..schemas import ProductoOut, ProductoPage, SucursalOut
+from ..services import reemplazo_service
 from ..services.auth import sucursales_permitidas
 from ..services.sugerido_service import SUCURSALES_OCULTAS
 
@@ -88,6 +89,14 @@ def listar_productos(
                 .subquery()
             )
         ) or 0
+
+    # Cuales de los que se van a mostrar estan dados de baja. Un solo `IN` sobre
+    # los <=20 del autocomplete, no sobre el catalogo entero.
+    reem = reemplazo_service.por_producto(db, {i.producto for i in items_list})
+    for it in items_list:
+        f = reem.get(it.producto)
+        if f:
+            it.reemplazado_por = f.get("reemplazado_por") or f.get("reemplazado_por_ford")
 
     return ProductoPage(items=items_list, total=total, page=page, limit=limit)
 
