@@ -1954,3 +1954,81 @@ def ventas_12m(db: Session, producto: str, sucursal_id: str | None = None) -> di
         "total_general": sum(c for _, c in general),
         "total_sucursal": sum(c for _, c in suc),
     }
+
+
+def grupo_ventas(db: Session, producto: str) -> dict:
+    """Venta mes a mes de CADA codigo del grupo de reemplazos.
+
+    El comprador ve un numero consolidado y no sabe de donde viene. Con esto puede
+    responder "¿este repuesto se vende o se dejo de vender?" cuando el codigo
+    cambio tres veces en dos años: sin el desglose, un repuesto que siempre se
+    vendio igual parece nuevo cada vez que FORD lo renumera.
+
+    El dato ya estaba: `venta_historica` guarda la venta POR CODIGO CRUDO desde
+    2018, asi que no hay que cargar nada ni pedirle nada al motor.
+
+    Ojo con `agrupado`: la tabla tiene que mostrar el grupo que el MOTOR armo, no
+    el que FORD declara. FORD puede declarar un reemplazo que el motor descarto
+    por ambiguo, y eso queda con `agrupado=False`. Si el total del pie sumara
+    codigos que el motor no junto, no cuadraria con lo que muestra el sugerido y
+    el comprador confiaria en el numero equivocado. Esos codigos se muestran
+    igual, pero marcados y FUERA del total.
+    """
+    miembros = reemplazo_service.miembros_del_grupo(db, producto)
+    if len(miembros) < 2:
+        # Un solo codigo no es un grupo: la tarjeta no se muestra.
+        return {"producto": producto, "miembros": [], "meses": []}
+
+    filas = reemplazo_service.por_producto(db, set(miembros))
+    vigente = miembros[0]
+
+    stock = {}
+    for m in miembros:
+        stock[m] = sum(r["stock"] for r in stock_service.stock_por_sucursal(db, m))
+
+    meses: dict[str, dict[str, float]] = {}
+    salida = []
+    for m in miembros:
+        stmt = (
+            select(VentaHistorica.periodo,
+                   func.coalesce(func.sum(VentaHistorica.cantidad), 0))
+            .where(VentaHistorica.producto == m)
+            .group_by(VentaHistorica.periodo)
+            .order_by(VentaHistorica.periodo.asc())
+        )
+        serie = [(p, float(c)) for p, c in db.execute(stmt).all()]
+        ult12 = serie[-12:]
+        for p, c in ult12:
+            meses.setdefault(p, {})[m] = c
+        f = filas.get(m) or {}
+        # `agrupado` vive en la fila del codigo DADO DE BAJA, no en la del
+        # vigente: el vigente siempre cuenta.
+        cuenta = m == vigente or bool(f.get("agrupado"))
+        salida.append({
+            "producto": m,
+            "es_vigente": m == vigente,
+            "sku_ford": f.get("reemplazado_por_ford") if m != vigente else None,
+            "venta_12m": sum(c for _, c in ult12),
+            "venta_total": sum(c for _, c in serie),
+            "ultimo_mes_con_venta": next(
+                (p for p, c in reversed(serie) if c > 0), None),
+            "stock": stock.get(m, 0),
+            "cuenta_en_el_total": cuenta,
+            # Por que no cuenta, para que la pantalla lo pueda decir.
+            "motivo_fuera": None if cuenta else (
+                "FORD lo declara reemplazo pero el motor no los agrupo: su stock "
+                "y su venta se cuentan por separado."
+            ),
+        })
+
+    return {
+        "producto": producto,
+        "vigente": vigente,
+        "miembros": salida,
+        "meses": [
+            {"mes": p, **{m: v.get(m, 0.0) for m in miembros}}
+            for p, v in sorted(meses.items())
+        ],
+        "total_venta_12m": sum(m["venta_12m"] for m in salida if m["cuenta_en_el_total"]),
+        "total_stock": sum(m["stock"] for m in salida if m["cuenta_en_el_total"]),
+    }

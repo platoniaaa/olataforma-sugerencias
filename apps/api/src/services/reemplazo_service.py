@@ -106,3 +106,37 @@ def por_producto(db: Session, productos: set[str]) -> dict[str, dict]:
 def de_producto(db: Session, producto: str) -> dict | None:
     """El reemplazo de UN producto, o None si no tiene."""
     return por_producto(db, {producto}).get(producto)
+
+
+def miembros_del_grupo(db: Session, producto: str) -> list[str]:
+    """Todos los codigos del grupo de reemplazos de `producto`, vigente primero.
+
+    Entrando por CUALQUIER miembro devuelve el grupo entero, y esa es la razon de
+    ser de la funcion. Con los equivalentes del mix ya paso lo contrario: el motor
+    escribe la lista solo en la fila del master, asi que entrando por otro miembro
+    parecia que el producto no tenia reemplazos (ver
+    `catalogo_service.py::_reemplazos`, que existe por eso).
+
+    Aca hay dos direcciones que mirar:
+      - la fila del propio codigo, si esta dado de baja (`reemplazado_por`)
+      - la fila del vigente, que lista en `reemplaza_a` a todos los que reemplazo
+
+    Devuelve [] cuando el codigo no tiene reemplazos: la pantalla no muestra nada
+    en vez de una tabla de una sola fila, que no dice nada.
+    """
+    fila = de_producto(db, producto)
+    if not fila:
+        return []
+    # El vigente del grupo: el que este codigo apunta, o el codigo mismo si ya
+    # es el vigente.
+    vigente = fila.get("reemplazado_por") or producto
+    grupo = {producto, vigente}
+    # Los predecesores viven en la fila del vigente, no en la del viejo.
+    fila_vigente = de_producto(db, vigente) if vigente != producto else fila
+    if fila_vigente:
+        grupo.update(fila_vigente.get("reemplaza_a") or [])
+    grupo.discard("")
+    # El vigente primero; el resto alfabetico, para que dos cargas de la misma
+    # ficha muestren la tabla en el mismo orden.
+    otros = sorted(c for c in grupo if c != vigente)
+    return [vigente, *otros]

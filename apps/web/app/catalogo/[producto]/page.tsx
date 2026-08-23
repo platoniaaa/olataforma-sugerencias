@@ -6,6 +6,7 @@ import { ArrowLeft, CheckCircle2, Plus } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { formatoCLP, formatoNumero } from "@/lib/formato";
 import { GraficoVentas } from "@/components/grafico-ventas";
+import { GrupoReemplazos } from "@/components/grupo-reemplazos";
 import { ModalSugerenciaManual } from "@/components/modal-sugerencia-manual";
 import { Button } from "@/components/ui/button";
 import { getSoloLectura } from "@/lib/auth";
@@ -174,6 +175,8 @@ export default function DetalleCatalogoPage({ params }: { params: { producto: st
           </div>
         </div>
       )}
+
+      <GrupoReemplazos producto={d.producto} />
 
       <GraficoVentas producto={d.producto} />
 

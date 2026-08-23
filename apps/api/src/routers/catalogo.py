@@ -60,6 +60,18 @@ def ventas(producto: str, db: Session = Depends(get_db)):
     return VentasResponse(**sugerido_service.ventas_12m(db, producto))
 
 
+# Mismo cuidado con el orden que el de arriba: va ANTES del catch-all.
+@router.get("/{producto:path}/grupo-ventas")
+def grupo_ventas(producto: str, db: Session = Depends(get_db)) -> dict:
+    """Venta mes a mes de cada codigo del grupo de reemplazos.
+
+    Entrando por CUALQUIER miembro devuelve el grupo completo, no solo ese
+    codigo. Si el producto no tiene reemplazos, `miembros` viene vacio y la
+    pantalla no muestra la tarjeta.
+    """
+    return sugerido_service.grupo_ventas(db, producto)
+
+
 @router.get("/{producto:path}", response_model=CatalogoDetalle)
 def detalle(producto: str, db: Session = Depends(get_db)):
     """Datos del catálogo del producto + desglose de stock por sucursal/bodega."""

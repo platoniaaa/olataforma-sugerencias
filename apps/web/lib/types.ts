@@ -184,6 +184,8 @@ export interface Producto {
   costo_unitario: number | null;
   proveedor: string | null;
   es_importado: boolean | null;
+  /** Si FORD dio de baja el código, cuál lo reemplaza. null si sigue vigente. */
+  reemplazado_por: string | null;
 }
 
 export interface SugerenciaManual {
@@ -368,6 +370,33 @@ export interface StockSucursalRow {
   sucursal_id: string | null;
   stock: number;
   origen: string | null;
+}
+
+/** Una fila de la tabla de venta por código del grupo de reemplazos. */
+export interface MiembroGrupo {
+  producto: string;
+  es_vigente: boolean;
+  /** El código como lo escribe FORD, cuando este fue dado de baja. */
+  sku_ford: string | null;
+  venta_12m: number;
+  venta_total: number;
+  /** Último período con venta ("202506"), para ver cuándo se apagó. */
+  ultimo_mes_con_venta: string | null;
+  stock: number;
+  /** false cuando FORD lo declara reemplazo pero el motor no los agrupó. */
+  cuenta_en_el_total: boolean;
+  motivo_fuera: string | null;
+}
+
+export interface GrupoVentas {
+  producto: string;
+  vigente?: string;
+  /** Vacío si el código no tiene reemplazos: la tarjeta no se muestra. */
+  miembros: MiembroGrupo[];
+  /** Un objeto por mes: { mes, [codigo]: cantidad, ... }. */
+  meses: Array<Record<string, string | number>>;
+  total_venta_12m?: number;
+  total_stock?: number;
 }
 
 export interface CatalogoDetalle extends CatalogoRow {

@@ -15,6 +15,7 @@ import type {
   DetalleSugerencia,
   DimensionAgrupado,
   EstadoActualizacion,
+  GrupoVentas,
   InstockResumen,
   MisSucursales,
   NotificacionesResponse,
@@ -375,6 +376,12 @@ export const api = {
 
   async catalogoVentas(producto: string): Promise<VentasResponse> {
     return getJSON(`/api/catalogo/${encodeURIComponent(producto)}/ventas`);
+  },
+
+  /** Venta por código del grupo de reemplazos. Sirve entrando por cualquier
+   *  miembro: devuelve el grupo entero, no solo ese código. */
+  async grupoVentas(producto: string): Promise<GrupoVentas> {
+    return getJSON(`/api/catalogo/${encodeURIComponent(producto)}/grupo-ventas`);
   },
 
   async sugerenciasManuales(

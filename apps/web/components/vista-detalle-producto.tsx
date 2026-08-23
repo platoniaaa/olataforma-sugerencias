@@ -13,6 +13,7 @@ import { GraficoStock } from "@/components/grafico-stock";
 import { GraficoReposicion } from "@/components/grafico-reposicion";
 import { GraficoComposicion } from "@/components/grafico-composicion";
 import { GraficoVentas } from "@/components/grafico-ventas";
+import { GrupoReemplazos } from "@/components/grupo-reemplazos";
 import { GraficoHistoria } from "@/components/grafico-historia";
 import { BloquePedidos } from "@/components/bloque-pedidos";
 import { api } from "@/lib/api-client";
@@ -331,6 +332,10 @@ export function VistaDetalleProducto({
           </CardContent>
         </Card>
       )}
+
+      {/* El historial de reemplazos. Va antes del grafico de venta: si el codigo
+          cambio, saberlo cambia como se lee todo lo de abajo. */}
+      <GrupoReemplazos producto={d.producto} />
 
       {/* Tendencia de venta (últimos 12 meses) */}
       <GraficoVentas
