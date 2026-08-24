@@ -1344,6 +1344,34 @@ def _agregar_reemplazo_ford(items: list[dict], db: Session) -> None:
             and r.get("reemplazado_por_ford")
             and r.get("sucesor_confirmado")
         )
+    _resolver_padre_sin_stock(items, db)
+
+
+def _resolver_padre_sin_stock(items: list[dict], db: Session) -> None:
+    """El codigo viejo solo representa al grupo mientras quede stock que vender.
+
+    Cuando FORD nombra un vigente que Curifor no tiene en el maestro, el ERP no
+    puede comprar ese numero, asi que la fila sigue colgando del codigo viejo. Eso
+    es correcto MIENTRAS quede stock: hay unidades que despachar y es el codigo con
+    el que estan.
+
+    Sin stock ya no hay nada que representar: mostrar un codigo muerto esconde lo
+    unico accionable, que es pedirle a Repuestos que cree el vigente. Por eso ahi
+    la pantalla pasa a mostrar el codigo de FORD con la pegatina.
+
+    Se mira el stock OPERATIVO. Una unidad en Bodega Dañados no se le vende a
+    nadie: `19 DG1Z8501D` tenia stock 1 y era eso, y contarlo habria dejado el
+    codigo viejo a la vista sin que hubiera nada que despachar.
+    """
+    candidatos = [i for i in items if i.get("vigente_por_crear")]
+    if not candidatos:
+        return
+    stock = stock_service.stock_operativo_por_producto(
+        db, sorted({str(i["producto"]) for i in candidatos})
+    )
+    for i in candidatos:
+        if stock.get(str(i["producto"]), 0) > 0:
+            i["vigente_por_crear"] = False
 
 
 def _aporte_manuales(db: Session, f: SugeridoFiltros, man: dict | None = None) -> dict:

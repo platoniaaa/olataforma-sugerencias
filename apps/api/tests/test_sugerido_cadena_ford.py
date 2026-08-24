@@ -185,3 +185,52 @@ def test_no_manda_a_crear_un_codigo_que_ford_dice_que_no_se_puede_pedir(db_sessi
     assert items[0]["vigente_por_crear"] is False
     # El aviso no se pierde: la columna sigue nombrando lo que FORD dijo.
     assert items[0]["reemplazado_por_ford"] == "7C3Z/9601/C/"
+
+
+# --- El codigo viejo representa al grupo solo mientras haya que despachar --------
+
+
+def _stock(db, producto, sucursal, cantidad):
+    from src.models import DimSucursal, StockUnificado
+    if not db.get(DimSucursal, sucursal):
+        db.add(DimSucursal(sucursal_id=sucursal, tenant_id="curifor", nombre=sucursal))
+    db.add(StockUnificado(tenant_id="curifor", producto=producto, bodega=sucursal,
+                          sucursal_id=sucursal, stock=cantidad, origen="CURIFOR"))
+
+
+def test_con_stock_del_viejo_manda_el_viejo(vigente_ajeno):
+    """Quedan unidades que despachar, y estan bajo ese codigo."""
+    _stock(vigente_ajeno, "19 7C3Z9601A", "CURICO", 3)
+    vigente_ajeno.commit()
+    items = [{"producto": "19 7C3Z9601A"}]
+
+    sugerido_service._agregar_reemplazo_ford(items, vigente_ajeno)
+
+    assert items[0]["vigente_por_crear"] is False
+
+
+def test_sin_stock_del_viejo_manda_el_vigente_de_ford(vigente_ajeno):
+    """Ya no hay nada que despachar: lo unico accionable es crear el vigente."""
+    items = [{"producto": "19 7C3Z9601A"}]
+
+    sugerido_service._agregar_reemplazo_ford(items, vigente_ajeno)
+
+    assert items[0]["vigente_por_crear"] is True
+
+
+def test_el_stock_en_una_bodega_virtual_no_cuenta(vigente_ajeno):
+    """Una unidad en Bodega Dañados no se le vende a nadie.
+
+    Es el caso de `19 DG1Z8501D`, que tenia stock 1 y era eso. Si contara, el
+    codigo muerto quedaria a la vista sin nada que despachar detras.
+    """
+    from src.models import StockUnificado
+    vigente_ajeno.add(StockUnificado(
+        tenant_id="curifor", producto="19 7C3Z9601A", bodega="BODEGA DAÑADOS",
+        sucursal_id="BODEGA DANADOS", stock=1, origen="CURIFOR"))
+    vigente_ajeno.commit()
+    items = [{"producto": "19 7C3Z9601A"}]
+
+    sugerido_service._agregar_reemplazo_ford(items, vigente_ajeno)
+
+    assert items[0]["vigente_por_crear"] is True

@@ -5,7 +5,7 @@ from sqlalchemy import delete, func, insert, select
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
-from ..models import StockUnificado
+from ..models import DimSucursal, StockUnificado
 
 settings = get_settings()
 
@@ -68,6 +68,33 @@ def stock_total_por_producto(db: Session, productos: list[str]) -> dict[str, flo
         return {}
     stmt = (
         select(StockUnificado.producto, func.coalesce(func.sum(StockUnificado.stock), 0))
+        .where(StockUnificado.producto.in_(productos))
+        .group_by(StockUnificado.producto)
+    )
+    try:
+        return {p: float(t) for p, t in db.execute(stmt).all()}
+    except Exception:
+        db.rollback()
+        return {}
+
+
+def stock_operativo_por_producto(db: Session, productos: list[str]) -> dict[str, float]:
+    """Stock que se puede vender, por codigo. Devuelve {producto: total}.
+
+    Distinto de `stock_total_por_producto`, que suma TODO lo que hay en
+    `stock_unificado`, incluidas las bodegas virtuales: Dañados, Scrap, Devolucion,
+    Mercado Libre, Importacion, Comex. Una unidad en Dañados no se le puede vender
+    a nadie, y contarla como stock hace creer que el repuesto todavia se mueve.
+
+    El filtro no es una lista escrita a mano: `dim_sucursal` trae solo las
+    sucursales operativas (13 al 24-08-2026) y las bodegas virtuales no estan.
+    Cuando Curifor abra o cierre una sucursal, esto se entera solo.
+    """
+    if not productos:
+        return {}
+    stmt = (
+        select(StockUnificado.producto, func.coalesce(func.sum(StockUnificado.stock), 0))
+        .join(DimSucursal, DimSucursal.sucursal_id == StockUnificado.sucursal_id)
         .where(StockUnificado.producto.in_(productos))
         .group_by(StockUnificado.producto)
     )
