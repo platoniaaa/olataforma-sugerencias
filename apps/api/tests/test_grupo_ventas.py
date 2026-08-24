@@ -185,3 +185,58 @@ def test_el_que_el_motor_dejo_aparte_si_lo_dice(db_session):
     viejo = next(m for m in r["miembros"] if m["producto"] == "25 MB3Z19N619C")
     assert viejo["cuenta_en_el_total"] is False
     assert "el motor no los agrupo" in viejo["motivo_fuera"]
+
+
+# --- La ventana de 12 meses -----------------------------------------------------
+
+
+def test_la_venta_de_hace_dos_anos_no_cuenta_como_venta_del_ano(db_session):
+    """`venta_historica` solo trae los meses CON venta.
+
+    Tomar "las ultimas 12 filas" no es lo mismo que "los ultimos 12 meses": para
+    un codigo que vendio 8 meses de 2024 y nunca mas, esas 8 filas eran sus
+    "ultimos 12". `19 CYFS12F1X` mostraba 65 unidades vendidas hasta 09-2024 como
+    Venta 12m en agosto de 2026, y la tarjeta existe justamente para responder
+    "¿este repuesto se vende o se dejo de vender?".
+
+    La señal de que la ventana no filtraba era que `venta_12m` daba igual que
+    `venta_total`.
+    """
+    db_session.add(ReemplazoFord(
+        tenant_id="curifor", producto="19 VIGENTE",
+        reemplaza_a="19 MUERTO", sucesor_confirmado=True, agrupado=True,
+        extraido_en="2026-08-22 16:17:53",
+    ))
+    # El vigente vende hoy; el viejo vendio hace dos años y nunca mas.
+    db_session.add_all([
+        VentaHistorica(tenant_id="curifor", periodo="202607",
+                       producto="19 VIGENTE", cantidad=10),
+        VentaHistorica(tenant_id="curifor", periodo="202404",
+                       producto="19 MUERTO", cantidad=65),
+    ])
+    db_session.commit()
+
+    r = sugerido_service.grupo_ventas(db_session, "19 VIGENTE")
+
+    muerto = next(m for m in r["miembros"] if m["producto"] == "19 MUERTO")
+    assert muerto["venta_12m"] == 0, "la venta de 2024 no es venta de los ultimos 12 meses"
+    assert muerto["venta_total"] == 65, "pero el historico completo si la conserva"
+    assert muerto["ultimo_mes_con_venta"] == "202404"
+
+
+def test_el_grafico_trae_los_12_meses_aunque_no_haya_venta(db_session):
+    """Sin los meses en cero, un repuesto que se apago no muestra la caida."""
+    db_session.add(ReemplazoFord(
+        tenant_id="curifor", producto="19 VIGENTE",
+        reemplaza_a="19 MUERTO", sucesor_confirmado=True, agrupado=True,
+        extraido_en="2026-08-22 16:17:53",
+    ))
+    db_session.add(VentaHistorica(tenant_id="curifor", periodo="202607",
+                                  producto="19 VIGENTE", cantidad=10))
+    db_session.commit()
+
+    r = sugerido_service.grupo_ventas(db_session, "19 VIGENTE")
+
+    assert len(r["meses"]) == 12
+    assert r["meses"][-1]["mes"] == "202607"
+    assert r["meses"][0]["mes"] == "202508"

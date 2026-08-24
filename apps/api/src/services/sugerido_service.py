@@ -2010,6 +2010,34 @@ def ventas_12m(db: Session, producto: str, sucursal_id: str | None = None) -> di
     }
 
 
+def _ventana_12_meses(db: Session) -> list[str]:
+    """Los 12 periodos "YYYYMM" que terminan en el ultimo mes cargado.
+
+    `venta_historica` solo tiene filas de los meses en que hubo venta, asi que
+    tomar "las ultimas 12 filas" NO es lo mismo que "los ultimos 12 meses": para
+    un codigo que vendio 8 meses de 2024 y nunca mas, esas 8 filas eran sus
+    "ultimos 12" y su venta de hace dos años se mostraba como venta del año.
+    Paso con `19 CYFS12F1X`: 65 unidades vendidas hasta 09-2024 salian como
+    "Venta 12m" en agosto de 2026, y `venta_12m` era igual a `venta_total`, que es
+    justo la señal de que la ventana no estaba filtrando nada.
+
+    El ancla es el ultimo periodo CARGADO y no la fecha de hoy: el motor publica
+    hasta el ultimo mes cerrado, y anclar en hoy dejaria el mes en curso -siempre
+    incompleto- dentro de la ventana.
+    """
+    tope = db.scalar(select(func.max(VentaHistorica.periodo)))
+    if not tope or len(str(tope)) != 6:
+        return []
+    anio, mes = int(str(tope)[:4]), int(str(tope)[4:])
+    salida = []
+    for _ in range(12):
+        salida.append(f"{anio:04d}{mes:02d}")
+        mes -= 1
+        if mes == 0:
+            anio, mes = anio - 1, 12
+    return sorted(salida)
+
+
 def grupo_ventas(db: Session, producto: str) -> dict:
     """Venta mes a mes de CADA codigo del grupo de reemplazos.
 
@@ -2035,6 +2063,7 @@ def grupo_ventas(db: Session, producto: str) -> dict:
 
     filas = reemplazo_service.por_producto(db, set(miembros))
     vigente = miembros[0]
+    ventana = set(_ventana_12_meses(db))
 
     stock = {}
     for m in miembros:
@@ -2051,7 +2080,8 @@ def grupo_ventas(db: Session, producto: str) -> dict:
             .order_by(VentaHistorica.periodo.asc())
         )
         serie = [(p, float(c)) for p, c in db.execute(stmt).all()]
-        ult12 = serie[-12:]
+        # Solo los periodos de la ventana: ver `_ventana_12_meses`.
+        ult12 = [(p, c) for p, c in serie if p in ventana]
         for p, c in ult12:
             meses.setdefault(p, {})[m] = c
         f = filas.get(m)
@@ -2090,9 +2120,12 @@ def grupo_ventas(db: Session, producto: str) -> dict:
         "producto": producto,
         "vigente": vigente,
         "miembros": salida,
+        # Los 12 periodos completos, no solo los que tuvieron venta: un repuesto
+        # que se dejo de vender tiene que MOSTRAR la caida, y con el eje lleno de
+        # huecos el grafico la esconde.
         "meses": [
-            {"mes": p, **{m: v.get(m, 0.0) for m in miembros}}
-            for p, v in sorted(meses.items())
+            {"mes": p, **{m: meses.get(p, {}).get(m, 0.0) for m in miembros}}
+            for p in sorted(ventana)
         ],
         "total_venta_12m": sum(m["venta_12m"] for m in salida if m["cuenta_en_el_total"]),
         "total_stock": sum(m["stock"] for m in salida if m["cuenta_en_el_total"]),
