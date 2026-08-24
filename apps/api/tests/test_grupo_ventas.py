@@ -133,3 +133,55 @@ def test_un_codigo_sin_reemplazos_no_devuelve_grupo(db_session):
 
 def test_miembros_del_grupo_sin_reemplazo_es_vacio(db_session):
     assert reemplazo_service.miembros_del_grupo(db_session, "17 GK2Z9601B") == []
+
+
+def test_un_miembro_sin_ficha_no_se_acusa_de_no_estar_agrupado(db_session):
+    """Sin fila no se sabe si el motor agrupo: decir que no lo hizo es inventar.
+
+    Hasta el 23-08-2026 este era el caso NORMAL. El motor publicaba una fila por
+    codigo consultado a FORD y no una por miembro del grupo, asi que 3.713
+    codigos llegaban aca sin ficha propia y la pantalla los acusaba -en 2.935
+    fichas- de algo que nadie habia comprobado.
+
+    Se siguen dejando fuera del total, porque no se puede afirmar que el sugerido
+    los junte, pero el aviso tiene que decir la verdad: falta el dato.
+    """
+    db_session.add(ReemplazoFord(
+        tenant_id="curifor", producto="19 MB3Z19N619A",
+        reemplaza_a="25 MB3Z19N619C",
+        sucesor_confirmado=True, agrupado=True,
+        extraido_en="2026-08-22 16:17:53",
+    ))
+    db_session.commit()
+
+    r = sugerido_service.grupo_ventas(db_session, "19 MB3Z19N619A")
+
+    viejo = next(m for m in r["miembros"] if m["producto"] == "25 MB3Z19N619C")
+    assert viejo["cuenta_en_el_total"] is False
+    assert "no trajo su ficha" in viejo["motivo_fuera"]
+    assert "el motor no los agrupo" not in viejo["motivo_fuera"]
+
+
+def test_el_que_el_motor_dejo_aparte_si_lo_dice(db_session):
+    """El otro caso si esta comprobado, y el aviso tiene que seguir diciendolo."""
+    db_session.add_all([
+        ReemplazoFord(
+            tenant_id="curifor", producto="19 MB3Z19N619A",
+            reemplaza_a="25 MB3Z19N619C",
+            sucesor_confirmado=True, agrupado=True,
+            extraido_en="2026-08-22 16:17:53",
+        ),
+        ReemplazoFord(
+            tenant_id="curifor", producto="25 MB3Z19N619C",
+            reemplazado_por="19 MB3Z19N619A",
+            sucesor_confirmado=True, agrupado=False,
+            extraido_en="2026-08-22 16:17:53",
+        ),
+    ])
+    db_session.commit()
+
+    r = sugerido_service.grupo_ventas(db_session, "19 MB3Z19N619A")
+
+    viejo = next(m for m in r["miembros"] if m["producto"] == "25 MB3Z19N619C")
+    assert viejo["cuenta_en_el_total"] is False
+    assert "el motor no los agrupo" in viejo["motivo_fuera"]

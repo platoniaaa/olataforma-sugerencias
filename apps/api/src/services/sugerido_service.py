@@ -2000,14 +2000,22 @@ def grupo_ventas(db: Session, producto: str) -> dict:
         ult12 = serie[-12:]
         for p, c in ult12:
             meses.setdefault(p, {})[m] = c
-        f = filas.get(m) or {}
+        f = filas.get(m)
         # `agrupado` vive en la fila del codigo DADO DE BAJA, no en la del
         # vigente: el vigente siempre cuenta.
-        cuenta = m == vigente or bool(f.get("agrupado"))
+        cuenta = m == vigente or bool((f or {}).get("agrupado"))
+        # Sin fila no se sabe si el motor agrupo o no, y decir que no lo hizo
+        # seria inventar. Se deja fuera del total igual -no se puede afirmar que
+        # el sugerido los junto- pero el aviso dice la verdad: falta el dato.
+        # Hasta el 23-08-2026 este era el caso NORMAL y no el raro: el motor
+        # publicaba una fila por codigo consultado a FORD, no una por miembro del
+        # grupo, asi que 3.713 codigos caian aca y la pantalla los acusaba de algo
+        # que nadie habia comprobado.
+        sin_dato = f is None
         salida.append({
             "producto": m,
             "es_vigente": m == vigente,
-            "sku_ford": f.get("reemplazado_por_ford") if m != vigente else None,
+            "sku_ford": (f or {}).get("reemplazado_por_ford") if m != vigente else None,
             "venta_12m": sum(c for _, c in ult12),
             "venta_total": sum(c for _, c in serie),
             "ultimo_mes_con_venta": next(
@@ -2016,6 +2024,9 @@ def grupo_ventas(db: Session, producto: str) -> dict:
             "cuenta_en_el_total": cuenta,
             # Por que no cuenta, para que la pantalla lo pueda decir.
             "motivo_fuera": None if cuenta else (
+                "FORD lo nombra en el grupo pero la ultima corrida no trajo su "
+                "ficha: no se puede confirmar que el sugerido los junte."
+                if sin_dato else
                 "FORD lo declara reemplazo pero el motor no los agrupo: su stock "
                 "y su venta se cuentan por separado."
             ),
