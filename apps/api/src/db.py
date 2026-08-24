@@ -139,6 +139,13 @@ def create_all() -> None:
         # 2026-08: notificaciones dirigidas ("tu requerimiento fue comprado").
         "ALTER TABLE notificacion ADD COLUMN IF NOT EXISTS para_email VARCHAR",
         "CREATE INDEX IF NOT EXISTS ix_notificacion_para_email ON notificacion (para_email)",
+        # 2026-08: cuando se consulto el portal de FORD por cada reemplazo.
+        # Sin esta linea el modelo pide una columna que la tabla no tiene, y como
+        # `reemplazo_service.por_producto` se traga la excepcion para no reventar
+        # las pantallas, el efecto es que TODOS los avisos de FORD desaparecen sin
+        # ningun error visible: la ficha, la columna del sugerido, el autocomplete
+        # y la tabla del grupo quedan en blanco. Paso en produccion el 23-08-2026.
+        "ALTER TABLE reemplazo_ford ADD COLUMN IF NOT EXISTS extraido_en VARCHAR",
     ]
     # SQLite NO soporta "ADD COLUMN IF NOT EXISTS" (error de sintaxis que se
     # tragaba el try, dejando bases locales viejas sin las columnas nuevas):
