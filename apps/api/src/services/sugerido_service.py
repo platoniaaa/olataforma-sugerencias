@@ -1324,6 +1324,12 @@ def _agregar_reemplazo_ford(items: list[dict], db: Session) -> None:
         # Cuando se le pregunto al portal. Sin esto un dato de hace tres semanas
         # se ve igual que uno de hoy.
         it["reemplazo_extraido_en"] = r.get("extraido_en") if r else None
+        # El veredicto del portal sobre la cadena: cual candidato quedo descartado
+        # por no estar activo/pedible/con precio, si hubo bifurcacion, o si ningun
+        # codigo sirve. El extractor ya elige el sucesor PEDIBLE -esa es la regla 3
+        # y vive en `runner.py::_sirve`- pero hasta ahora ese razonamiento solo se
+        # veia en la ficha. Aca llega a la grilla, que es donde se decide la compra.
+        it["reemplazo_aviso"] = r.get("aviso") if r else None
         # FORD nombra un vigente que Curifor NO tiene en el maestro. El motor no
         # puede colgar el grupo de un codigo que el ERP no conoce, asi que la fila
         # sigue saliendo con el viejo; la pantalla lo marca "POR CREAR" para que se

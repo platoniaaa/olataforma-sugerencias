@@ -131,6 +131,11 @@ export const COLUMNAS: DefColumna[] = [
     info: "El historial completo del repuesto según FORD: qué código reemplazó a cuál, hasta el vigente. Va en el formato de FORD (con barras), no en el de Curifor. En blanco si el código nunca fue reemplazado." },
   { key: "reemplazo_extraido_en", label: "Reemplazo consultado el", tipo: "texto", visiblePorDefecto: false,
     info: "Cuándo se le preguntó al portal de FORD por esta cadena. Sirve para saber si el dato está fresco: la consulta corre una vez por semana, y si esa corrida falla la plataforma sigue mostrando lo de la semana anterior." },
+  // El razonamiento del portal al elegir el vigente. La regla 3 -que la orden
+  // salga con un codigo pedible- ya la aplica el extractor al recorrer la cadena;
+  // esta columna es para que el comprador vea POR QUE quedo ese codigo y no otro.
+  { key: "reemplazo_aviso", label: "Aviso de FORD", tipo: "texto", visiblePorDefecto: false,
+    info: "Lo que dijo el portal al resolver la cadena: qué candidato se descartó por no estar activo, pedible o con precio; si hubo una bifurcación; o si ningún código de la cadena sirve y hay que mirarlo a mano. En blanco cuando no hubo nada que decidir." },
   // Precios FORD (cruce por codigo con la tabla Precios; en blanco si el codigo no esta en la lista de FORD).
   { key: "precio_flota_ford", label: "Precio Flota FORD", tipo: "clp", visiblePorDefecto: false,
     info: "Precio de flota de FORD para el repuesto (cruce por código). En blanco si el código no está en la lista de precios de FORD." },

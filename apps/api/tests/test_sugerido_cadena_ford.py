@@ -234,3 +234,35 @@ def test_el_stock_en_una_bodega_virtual_no_cuenta(vigente_ajeno):
     sugerido_service._agregar_reemplazo_ford(items, vigente_ajeno)
 
     assert items[0]["vigente_por_crear"] is True
+
+
+def test_el_aviso_del_portal_llega_a_la_grilla(db_session):
+    """Regla 3: que la orden salga con un codigo que se pueda pedir.
+
+    La eleccion la hace el extractor -recorre la cadena y se queda con el primer
+    candidato activo, pedible y con precio: `runner.py::_sirve`- pero hasta ahora
+    ese razonamiento solo se veia en la ficha del producto. El comprador decide en
+    la grilla, y ahi no tenia forma de saber por que quedo ese codigo y no otro.
+    """
+    db_session.add(ReemplazoFord(
+        tenant_id="curifor", producto="25 KV6Z9155D",
+        reemplazado_por="25 KV6Z9155E", reemplazado_por_ford="KV6Z/9155/E/",
+        sucesor_confirmado=True, agrupado=True,
+        aviso="2 candidato(s) evaluados; sin stock Ford descartado(s): KV6Z/9155/G/",
+        extraido_en="2026-08-22 16:17:53",
+    ))
+    db_session.commit()
+    items = [{"producto": "25 KV6Z9155D"}]
+
+    sugerido_service._agregar_reemplazo_ford(items, db_session)
+
+    assert "sin stock Ford descartado(s): KV6Z/9155/G/" in items[0]["reemplazo_aviso"]
+
+
+def test_sin_aviso_la_columna_queda_vacia(con_reemplazo):
+    """La mayoria de las cadenas se resuelven sin nada que contar."""
+    items = [{"producto": "19 MB3Z19N619A"}]
+
+    sugerido_service._agregar_reemplazo_ford(items, con_reemplazo)
+
+    assert items[0]["reemplazo_aviso"] is None

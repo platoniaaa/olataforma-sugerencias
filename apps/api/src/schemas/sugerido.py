@@ -101,6 +101,8 @@ class SugeridoRow(BaseModel):
     reemplazo_extraido_en: str | None = None
     # El vigente que nombra FORD no existe en el maestro: hay que crearlo.
     vigente_por_crear: bool = False
+    # Que dijo el portal al resolver la cadena (descartes, bifurcaciones).
+    reemplazo_aviso: str | None = None
     # Regla InStock (services/instock_service.py): repuesto de pauta que no puede
     # faltar en las sucursales con taller.
     instock: bool | None = None
