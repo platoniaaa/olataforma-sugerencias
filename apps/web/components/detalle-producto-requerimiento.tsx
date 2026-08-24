@@ -130,7 +130,11 @@ export function DetalleProductoRequerimiento({
               <>
                 Lo reemplaza{" "}
                 <strong className="tabular">{d.reemplazo_ford.reemplazado_por_ford}</strong>{" "}
-                (código de FORD), que no está en el catálogo de Curifor.
+                {/* Misma pegatina que en el sugerido y en la ficha del catalogo. */}
+                <span className="rounded bg-rose-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                  Por crear
+                </span>{" "}
+                — es el código de FORD y no está en el maestro de Curifor.
               </>
             )}{" "}
             {d.reemplazo_ford.sucesor_confirmado ? (

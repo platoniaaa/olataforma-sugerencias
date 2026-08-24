@@ -99,6 +99,8 @@ class SugeridoRow(BaseModel):
     cadena_ford: str | None = None
     # Cuando se consulto el portal por esa cadena (services/reemplazo_service.py).
     reemplazo_extraido_en: str | None = None
+    # El vigente que nombra FORD no existe en el maestro: hay que crearlo.
+    vigente_por_crear: bool = False
     # Regla InStock (services/instock_service.py): repuesto de pauta que no puede
     # faltar en las sucursales con taller.
     instock: bool | None = None

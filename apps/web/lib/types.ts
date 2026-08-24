@@ -86,6 +86,9 @@ export interface SugeridoRow {
   cadena_ford: string | null;
   /** Cuándo se consultó el portal por esa cadena ("2026-08-22 16:17:53"). */
   reemplazo_extraido_en: string | null;
+  /** El vigente que nombra FORD no está en el maestro de Curifor: hay que crearlo
+   *  en el ERP antes de poder pedirlo. La fila sigue saliendo con el código viejo. */
+  vigente_por_crear: boolean | null;
   /** Repuesto de pauta de mantención que no puede faltar (services/instock_service.py). */
   instock: boolean | null;
   /** Modelos de la pauta que lo usan ("F-150, Ranger"). */

@@ -96,3 +96,66 @@ def test_sin_fecha_no_revienta(db_session):
 
     assert items[0]["cadena_ford"] == "A/1/ > B/2/"
     assert items[0]["reemplazo_extraido_en"] is None
+
+
+# --- El vigente que Curifor todavia no tiene -------------------------------------
+# FORD nombra un sucesor que no esta en el maestro. El motor no puede colgar el
+# grupo de un codigo que el ERP no conoce, asi que la fila sigue saliendo con el
+# viejo. La columna Producto lo marca "POR CREAR" para que se vea que ese numero
+# hay que dar de alta antes de poder pedirlo. Al 24-08-2026 eran 22 filas.
+
+
+@pytest.fixture()
+def vigente_ajeno(db_session):
+    """FORD dice `7C3Z/9601/C/`, que Curifor no tiene: no hay codigo de Curifor."""
+    db_session.add(ReemplazoFord(
+        tenant_id="curifor", producto="19 7C3Z9601A",
+        reemplazado_por=None, reemplazado_por_ford="7C3Z/9601/C/",
+        cadena="7C3Z/9601/A/ > 7C3Z/9601/C/",
+        sucesor_confirmado=True, agrupado=False,
+        extraido_en="2026-08-22 16:17:53",
+    ))
+    db_session.commit()
+    return db_session
+
+
+def test_marca_el_vigente_que_hay_que_crear(vigente_ajeno):
+    """La bandera va del servidor, no se deduce en la pantalla.
+
+    Se podria mirar si el codigo trae barras -los de FORD las tienen y los de
+    Curifor no- pero ese formato es una casualidad del proveedor, no un contrato:
+    el dia que FORD cambie de notacion, la pantalla dejaria de avisar sin que
+    nadie lo note.
+    """
+    items = [{"producto": "19 7C3Z9601A"}]
+
+    sugerido_service._agregar_reemplazo_ford(items, vigente_ajeno)
+
+    assert items[0]["vigente_por_crear"] is True
+    assert items[0]["reemplazado_por_ford"] == "7C3Z/9601/C/"
+
+
+def test_un_vigente_que_si_esta_en_el_maestro_no_se_marca(con_reemplazo):
+    """Solo se marca lo que falta crear; si el codigo existe, no hay nada que pedirle
+    a Repuestos."""
+    con_reemplazo.add(ReemplazoFord(
+        tenant_id="curifor", producto="25 MB3Z19N619C",
+        reemplazado_por="19 MB3Z19N619A", reemplazado_por_ford="MB3Z/19N619/A/",
+        sucesor_confirmado=True, agrupado=True,
+        extraido_en="2026-08-22 16:17:53",
+    ))
+    con_reemplazo.commit()
+    items = [{"producto": "25 MB3Z19N619C"}]
+
+    sugerido_service._agregar_reemplazo_ford(items, con_reemplazo)
+
+    assert items[0]["vigente_por_crear"] is False
+
+
+def test_un_codigo_vigente_tampoco_se_marca(con_reemplazo):
+    """Sin reemplazo no hay nada que crear."""
+    items = [{"producto": "19 MB3Z19N619A"}]
+
+    sugerido_service._agregar_reemplazo_ford(items, con_reemplazo)
+
+    assert items[0]["vigente_por_crear"] is False

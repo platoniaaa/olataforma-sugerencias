@@ -120,8 +120,14 @@ export default function DetalleCatalogoPage({ params }: { params: { producto: st
                 <span className="rounded bg-rose-100 px-1.5 py-0.5 font-mono text-[12px] font-semibold text-rose-900">
                   {d.reemplazo_ford.reemplazado_por_ford}
                 </span>{" "}
+                {/* Misma pegatina que en el sugerido: el vigente existe en FORD
+                    pero el ERP no lo conoce, asi que no se puede pedir hasta que
+                    Repuestos lo cree. */}
+                <span className="rounded bg-rose-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                  Por crear
+                </span>{" "}
                 <span className="text-rose-700">
-                  (código de FORD; no está en el catálogo de Curifor)
+                  — es el código de FORD y no está en el maestro de Curifor
                 </span>
               </>
             )}

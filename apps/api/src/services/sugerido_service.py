@@ -1324,6 +1324,16 @@ def _agregar_reemplazo_ford(items: list[dict], db: Session) -> None:
         # Cuando se le pregunto al portal. Sin esto un dato de hace tres semanas
         # se ve igual que uno de hoy.
         it["reemplazo_extraido_en"] = r.get("extraido_en") if r else None
+        # FORD nombra un vigente que Curifor NO tiene en el maestro. El motor no
+        # puede colgar el grupo de un codigo que el ERP no conoce, asi que la fila
+        # sigue saliendo con el viejo; la pantalla lo marca "POR CREAR" para que se
+        # vea que ese numero hay que darlo de alta antes de poder pedirlo.
+        #
+        # Se manda como bandera y no se deduce en el front mirando si el codigo
+        # trae barras: el formato es una casualidad del proveedor, no un contrato.
+        it["vigente_por_crear"] = bool(
+            r and not r.get("reemplazado_por") and r.get("reemplazado_por_ford")
+        )
 
 
 def _aporte_manuales(db: Session, f: SugeridoFiltros, man: dict | None = None) -> dict:

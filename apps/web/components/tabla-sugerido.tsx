@@ -77,11 +77,33 @@ const BADGES: Record<string, { texto: string; cls: string }> = {
 function ProductoCelda(p: { value: unknown; data?: SugeridoRow }) {
   const v = (p.value as string | null) ?? "";
   const badge = p.data?.origen ? BADGES[p.data.origen] : undefined;
-  if (!badge) return <>{v}</>;
+  // FORD dio de baja este codigo y nombra un vigente que Curifor no tiene en el
+  // maestro. Se muestra el vigente REAL -el numero al que FORD va a reponer- y no
+  // el viejo, que es lo que el comprador necesita ver para pedirle a Repuestos que
+  // lo cree. El codigo viejo no se pierde: queda en el tooltip, y es el que sigue
+  // identificando la fila por dentro.
+  const porCrear = p.data?.vigente_por_crear
+    ? p.data?.reemplazado_por_ford ?? null
+    : null;
+  if (!badge && !porCrear) return <>{v}</>;
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span>{v}</span>
-      <span className={badge.cls}>{badge.texto}</span>
+      {porCrear ? (
+        <>
+          <span className="font-mono" title={`Reemplaza a ${v}, que es el código que Curifor tiene hoy`}>
+            {porCrear}
+          </span>
+          <span
+            className="rounded bg-rose-50 px-1.5 py-px text-[10px] font-semibold text-rose-700"
+            title="FORD lo da como vigente pero no existe en el maestro de Curifor: hay que crearlo en el ERP para poder pedirlo."
+          >
+            POR CREAR
+          </span>
+        </>
+      ) : (
+        <span>{v}</span>
+      )}
+      {badge ? <span className={badge.cls}>{badge.texto}</span> : null}
     </span>
   );
 }
