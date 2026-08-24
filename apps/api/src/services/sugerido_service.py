@@ -1331,8 +1331,18 @@ def _agregar_reemplazo_ford(items: list[dict], db: Session) -> None:
         #
         # Se manda como bandera y no se deduce en el front mirando si el codigo
         # trae barras: el formato es una casualidad del proveedor, no un contrato.
+        #
+        # Exige `sucesor_confirmado`, y esa es la parte que importa. Cuando FORD
+        # avisa "ningun codigo de la cadena quedo activo, pedible y con precio",
+        # igual deja un numero escrito en `reemplazado_por_ford` -el ultimo de la
+        # cadena- pero ese codigo NO se puede comprar. Marcarlo "POR CREAR" mandaria
+        # a Repuestos a dar de alta un numero muerto. Medido el 24-08-2026: de 16
+        # productos que traen un vigente ajeno al maestro, 12 estan en ese caso.
         it["vigente_por_crear"] = bool(
-            r and not r.get("reemplazado_por") and r.get("reemplazado_por_ford")
+            r
+            and not r.get("reemplazado_por")
+            and r.get("reemplazado_por_ford")
+            and r.get("sucesor_confirmado")
         )
 
 

@@ -159,3 +159,29 @@ def test_un_codigo_vigente_tampoco_se_marca(con_reemplazo):
     sugerido_service._agregar_reemplazo_ford(items, con_reemplazo)
 
     assert items[0]["vigente_por_crear"] is False
+
+
+def test_no_manda_a_crear_un_codigo_que_ford_dice_que_no_se_puede_pedir(db_session):
+    """El caso que hace inutil la pegatina si no se filtra.
+
+    Cuando FORD avisa "ningun codigo de la cadena quedo activo, pedible y con
+    precio", igual deja escrito el ultimo numero de la cadena. Ese codigo no se
+    puede comprar: marcarlo POR CREAR mandaria a Repuestos a dar de alta un numero
+    muerto. Al 24-08-2026 eran 12 de los 16 productos con vigente ajeno.
+    """
+    db_session.add(ReemplazoFord(
+        tenant_id="curifor", producto="19 7C3Z9601A",
+        reemplazado_por=None, reemplazado_por_ford="7C3Z/9601/C/",
+        cadena="7C3Z/9601/A/ > 7C3Z/9601/C/",
+        sucesor_confirmado=False, agrupado=False,
+        aviso="ningun codigo de la cadena quedo activo, pedible y con precio: revisar a mano",
+        extraido_en="2026-08-22 16:17:53",
+    ))
+    db_session.commit()
+    items = [{"producto": "19 7C3Z9601A"}]
+
+    sugerido_service._agregar_reemplazo_ford(items, db_session)
+
+    assert items[0]["vigente_por_crear"] is False
+    # El aviso no se pierde: la columna sigue nombrando lo que FORD dijo.
+    assert items[0]["reemplazado_por_ford"] == "7C3Z/9601/C/"
