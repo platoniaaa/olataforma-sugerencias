@@ -1101,11 +1101,57 @@ def contexto_de_pares(
     return filas
 
 
-def _enriquecer_con_catalogo(items: list[dict], db: Session) -> None:
-    """Agrega campos del ProductoCatalogo que NO vienen del modelo Sugerido.
+def _grupos_publicados(db: Session) -> dict[str, str]:
+    """{cualquier miembro del grupo: los OTROS, en el formato del motor}.
 
-    Hoy solo `reemplazos` (catalogo.reemplazo). Un solo SELECT por todos los
-    productos distintos de la lista. Muta `items` in-place.
+    El motor escribe la lista SOLO en la fila del master. Este mapa la reparte a
+    todos los miembros, para que la columna diga lo mismo entrando por cualquiera.
+
+    Un solo SELECT: son ~150 grupos y la consulta sale deduplicada por sucursal.
+    """
+    # Sin filtro de tenant, igual que el resto de las consultas del modulo.
+    try:
+        filas = db.execute(
+            select(Sugerido.producto, Sugerido.reemplazos)
+            .where(Sugerido.reemplazos.is_not(None),
+                   Sugerido.reemplazos != "")
+            .distinct()
+        ).all()
+    except Exception:
+        db.rollback()
+        return {}
+    salida: dict[str, str] = {}
+    for master, txt in filas:
+        grupo = [master, *[x.strip() for x in str(txt).split(",") if x.strip()]]
+        for m in grupo:
+            salida[m] = ", ".join(sorted(x for x in grupo if x != m))
+    return salida
+
+
+def _normalizar_reemplazos(txt: str | None) -> str | None:
+    """El texto del mix viene con backslash; la columna se muestra con comas.
+
+    `GK2Z9365A\\GK2Z9365C` y `17 2005485, 17 GK2Z9365A` convivian en la misma
+    columna y parecian datos distintos. Son el mismo tipo de dato con dos
+    formatos, y eso fue lo que hizo desconfiar a Abastecimiento.
+    """
+    if not txt:
+        return None
+    partes = [x.strip() for x in str(txt).replace("\\", ",").split(",") if x.strip()]
+    return ", ".join(partes) or None
+
+
+def _enriquecer_con_catalogo(items: list[dict], db: Session) -> None:
+    """Deja la columna `reemplazos` con UNA sola fuente: el grupo del motor.
+
+    Antes se llenaba de dos lados y quedaba incoherente entre filas del mismo
+    grupo: la fila del master traia el grupo del motor, y las demas -InStock,
+    manuales, catalogo- caian al texto crudo del mix, con backslash y sin rubro.
+    Tres codigos hermanos mostraban tres cosas distintas.
+
+    Ahora manda el grupo publicado por el motor, que es el mismo con el que se
+    consolida el stock y se compra. El equivalente del mix queda de plan B para un
+    producto que el motor no agrupo, ya con el separador normalizado.
     """
     if not items:
         return
@@ -1117,14 +1163,17 @@ def _enriquecer_con_catalogo(items: list[dict], db: Session) -> None:
         .where(ProductoCatalogo.producto.in_(productos))
     ).all()
     cat_map = {p: r for p, r in rows}
+    publicados = _grupos_publicados(db)
     for it in items:
         p = it.get("producto")
-        # Enriquecer solo si la fila no tiene reemplazo. El modelo Sugerido tiene
-        # la columna `reemplazos` pero el BI no la llena (siempre None), asi que
-        # la traemos del catalogo. Las filas de _row_desde_catalogo ya vienen con
-        # su propio valor; no las pisamos.
-        if p and not it.get("reemplazos"):
-            it["reemplazos"] = cat_map.get(p)
+        if not p:
+            continue
+        if p in publicados:
+            it["reemplazos"] = publicados[p]
+        elif not it.get("reemplazos"):
+            it["reemplazos"] = _normalizar_reemplazos(cat_map.get(p))
+        else:
+            it["reemplazos"] = _normalizar_reemplazos(it.get("reemplazos"))
 
 
 def listar(
