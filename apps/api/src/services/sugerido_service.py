@@ -644,18 +644,33 @@ def _resolver_instock(db: Session, f: SugeridoFiltros, manuales: dict, man: dict
     cat = instock_service.catalogo(db)
     if not cat:
         return vacio
+
+    # `cat` viaja SIEMPRE completo, aunque no haya nada que inyectar ni unidades
+    # que sumar: es lo que usa `instock_service.aplicar` para marcar la fila, y ser
+    # repuesto de pauta no depende de la pantalla en la que estes.
+    #
+    # Antes se devolvia `vacio` en cuanto no habia faltantes, y el efecto era que
+    # el badge INSTOCK desaparecia al buscar: en el listado `17 GK2Z9365C` salia
+    # marcado en sus 4 filas, y buscando el codigo salia sin marcar en las 10. Lo
+    # noto Abastecimiento, que revisa buscando codigo por codigo y por eso nunca
+    # veia marcado ninguno de los 60.
+    solo_cat: dict = {**vacio, "cat": cat}
+
     sucursales = _sucursales_instock(f)
     if not sucursales:
-        return vacio
+        return solo_cat
 
+    # El acotado por texto es SOLO para decidir que inyectar: con busqueda, meter
+    # todos los repuestos de pauta encima seria ruido. No puede tocar `cat`, y
+    # ademas se queda corto a proposito -compara contra el codigo y la grilla
+    # tambien busca por descripcion-, asi que usarlo para marcar dejaba sin badge
+    # a media pantalla.
     productos = set(cat)
     q_text = (f.q or "").strip()
     if q_text:
-        # Con busqueda, la pantalla muestra lo que matchea el texto: inyectar todos
-        # los repuestos de pauta encima seria ruido. Mismo criterio que las manuales.
         productos = {p for p in productos if q_text.lower() in p.lower()}
         if not productos:
-            return vacio
+            return solo_cat
 
     # Datos del BI para los pares candidatos, en una query.
     filas = db.execute(
@@ -694,7 +709,7 @@ def _resolver_instock(db: Session, f: SugeridoFiltros, manuales: dict, man: dict
             if falta > 0:
                 faltantes[par] = falta
     if not faltantes:
-        return vacio
+        return solo_cat
 
     pares = set(faltantes)
     cols = select(Sugerido.producto, Sugerido.sucursal_id)
