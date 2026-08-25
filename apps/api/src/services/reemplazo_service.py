@@ -8,7 +8,7 @@ from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
-from ..models import ReemplazoFord
+from ..models import ReemplazoFord, Sugerido
 
 settings = get_settings()
 
@@ -108,6 +108,59 @@ def de_producto(db: Session, producto: str) -> dict | None:
     return por_producto(db, {producto}).get(producto)
 
 
+def _miembros_publicados(db: Session, producto: str) -> list[str] | None:
+    """El grupo tal como lo dejo el MOTOR, o None si no publico ninguno.
+
+    Es la fuente correcta y la unica completa. Reconstruir el grupo desde
+    `reemplazo_ford` se queda corto por dos razones:
+
+      - **Solo ve un salto.** Si A lo reemplaza B y a B lo reemplaza C, entrando
+        por A se armaba {A, B} en vez de {A, B, C}. Paso con `17 2005485`, que
+        mostraba 2 codigos mientras `17 GK2Z9365C` mostraba 3, siendo el mismo
+        grupo.
+      - **No ve al mix.** Un grupo que armo el mix de Andres no tiene nada en
+        `reemplazo_ford`, asi que la tarjeta mostraba 3 de 5 miembros en
+        `20 BXO5W30AA`.
+
+    Medido el 24-08-2026: 76 de 178 entradas mostraban un grupo distinto segun por
+    donde se entrara a la ficha.
+
+    El motor publica el grupo en `sugerido.reemplazos`: la fila del master lista a
+    los demas. Entrando por el master se lee directo; entrando por un miembro hay
+    que encontrar quien lo nombra.
+    """
+    tenant = settings.default_tenant_id
+
+    def partir(txt: str | None) -> list[str]:
+        return [x.strip() for x in str(txt or "").split(",") if x.strip()]
+
+    # ¿Es el master? Su propia fila trae a los demas.
+    propio = db.scalar(
+        select(Sugerido.reemplazos)
+        .where(Sugerido.tenant_id == tenant,
+               Sugerido.producto == producto,
+               Sugerido.reemplazos.is_not(None))
+        .limit(1)
+    )
+    if propio:
+        return [producto, *sorted(partir(propio))]
+
+    # ¿Es miembro? Se busca al master que lo nombra. El LIKE es un pre-filtro
+    # barato -los codigos no traen comodines- y la pertenencia se confirma
+    # partiendo el texto, para no capturar a `17 200548` dentro de `17 2005485`.
+    candidatos = db.execute(
+        select(Sugerido.producto, Sugerido.reemplazos)
+        .where(Sugerido.tenant_id == tenant,
+               Sugerido.reemplazos.like(f"%{producto}%"))
+        .limit(200)
+    ).all()
+    for master, reem in candidatos:
+        miembros = partir(reem)
+        if producto in miembros:
+            return [master, *sorted(miembros)]
+    return None
+
+
 def miembros_del_grupo(db: Session, producto: str) -> list[str]:
     """Todos los codigos del grupo de reemplazos de `producto`, vigente primero.
 
@@ -124,6 +177,13 @@ def miembros_del_grupo(db: Session, producto: str) -> list[str]:
     Devuelve [] cuando el codigo no tiene reemplazos: la pantalla no muestra nada
     en vez de una tabla de una sola fila, que no dice nada.
     """
+    # El grupo del motor manda. Lo de abajo es el plan B para un producto que el
+    # motor no publico en el sugerido -por ejemplo uno sin venta ni stock, que la
+    # ficha del catalogo igual deja abrir-.
+    publicados = _miembros_publicados(db, producto)
+    if publicados:
+        return publicados
+
     fila = de_producto(db, producto)
     if not fila:
         return []

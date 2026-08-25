@@ -240,3 +240,82 @@ def test_el_grafico_trae_los_12_meses_aunque_no_haya_venta(db_session):
     assert len(r["meses"]) == 12
     assert r["meses"][-1]["mes"] == "202607"
     assert r["meses"][0]["mes"] == "202508"
+
+
+# --- El grupo tiene que ser el mismo entre por donde se entre --------------------
+
+
+@pytest.fixture()
+def cadena_de_tres(db_session):
+    """A -> B -> C, con el motor publicando el grupo bajo C.
+
+    Es el caso de `17 2005485` -> `17 GK2Z9365A` -> `17 GK2Z9365C`.
+    """
+    from src.models import Sugerido
+    db_session.add_all([
+        ReemplazoFord(tenant_id="curifor", producto="17 A",
+                      reemplazado_por="17 B", sucesor_confirmado=True, agrupado=True,
+                      extraido_en="2026-08-22 16:17:53"),
+        ReemplazoFord(tenant_id="curifor", producto="17 B",
+                      reemplazado_por="17 C", reemplaza_a="17 A",
+                      sucesor_confirmado=True, agrupado=True,
+                      extraido_en="2026-08-22 16:17:53"),
+        ReemplazoFord(tenant_id="curifor", producto="17 C",
+                      reemplaza_a="17 A; 17 B",
+                      sucesor_confirmado=True, agrupado=True,
+                      extraido_en="2026-08-22 16:17:53"),
+    ])
+    # Lo que el motor publico: C es el master y arrastra a los otros dos.
+    db_session.add(Sugerido(tenant_id="curifor", producto="17 C",
+                            sucursal_id="LINDEROS", reemplazos="17 A, 17 B"))
+    db_session.commit()
+    return db_session
+
+
+def test_el_grupo_es_el_mismo_entrando_por_cualquier_miembro(cadena_de_tres):
+    """Reconstruirlo desde `reemplazo_ford` solo veia UN salto.
+
+    Entrando por A se armaba {A, B} y entrando por C se armaba {A, B, C}: el mismo
+    grupo mostraba dos cosas distintas. Al 24-08-2026 pasaba en 76 de 178 entradas.
+    """
+    esperado = {"17 A", "17 B", "17 C"}
+
+    for entrada in ("17 A", "17 B", "17 C"):
+        miembros = reemplazo_service.miembros_del_grupo(cadena_de_tres, entrada)
+        assert set(miembros) == esperado, f"entrando por {entrada}"
+
+
+def test_el_master_del_motor_va_primero(cadena_de_tres):
+    """La tarjeta lo marca como vigente y suma su venta al total."""
+    for entrada in ("17 A", "17 B", "17 C"):
+        assert reemplazo_service.miembros_del_grupo(cadena_de_tres, entrada)[0] == "17 C"
+
+
+def test_un_grupo_del_mix_tambien_se_ve_completo(db_session):
+    """El mix no deja nada en `reemplazo_ford`, asi que antes era invisible.
+
+    `20 BXO5W30AA` mostraba 3 de sus 5 miembros por esto.
+    """
+    from src.models import Sugerido
+    db_session.add(Sugerido(tenant_id="curifor", producto="20 MASTER",
+                            sucursal_id="LINDEROS",
+                            reemplazos="20 UNO, 20 DOS, 20 TRES"))
+    db_session.commit()
+
+    miembros = reemplazo_service.miembros_del_grupo(db_session, "20 DOS")
+
+    assert set(miembros) == {"20 MASTER", "20 UNO", "20 DOS", "20 TRES"}
+    assert miembros[0] == "20 MASTER"
+
+
+def test_un_codigo_parecido_no_se_cuela(db_session):
+    """El pre-filtro es un LIKE; la pertenencia se confirma partiendo el texto.
+
+    Sin eso, `17 200548` entraria al grupo de `17 2005485` por ser subcadena.
+    """
+    from src.models import Sugerido
+    db_session.add(Sugerido(tenant_id="curifor", producto="17 MASTER",
+                            sucursal_id="LINDEROS", reemplazos="17 2005485"))
+    db_session.commit()
+
+    assert reemplazo_service.miembros_del_grupo(db_session, "17 200548") == []
