@@ -13,6 +13,28 @@ export interface SugeridoRow {
   meses_con_venta_3m: number | null;
   meses_con_venta_6m: number | null;
   meses_con_venta_12m: number | null;
+  /** Venta mes a mes del grupo de reemplazos en esa sucursal. La posición es
+   *  fija: `venta_mes_01` es el último mes cerrado y `venta_mes_12` el más
+   *  antiguo; `periodo_ultimo_mes` dice a qué mes corresponde el 01. */
+  venta_mes_01: number | null;
+  venta_mes_02: number | null;
+  venta_mes_03: number | null;
+  venta_mes_04: number | null;
+  venta_mes_05: number | null;
+  venta_mes_06: number | null;
+  venta_mes_07: number | null;
+  venta_mes_08: number | null;
+  venta_mes_09: number | null;
+  venta_mes_10: number | null;
+  venta_mes_11: number | null;
+  venta_mes_12: number | null;
+  /** Promedio simple de los meses de arriba, sin winsorizar: se puede comprobar
+   *  sumando las columnas. No es lo mismo que `demanda_mensual`. */
+  prom_vta_3m: number | null;
+  prom_vta_6m: number | null;
+  prom_vta_12m: number | null;
+  /** "YYYYMM" del mes al que corresponde `venta_mes_01`. */
+  periodo_ultimo_mes: string | null;
   proveedor: string | null;
   filtro1_final: string | null;
   tipo_origen: string | null;

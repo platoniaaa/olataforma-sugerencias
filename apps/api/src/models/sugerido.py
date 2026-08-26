@@ -35,6 +35,32 @@ class Sugerido(Base):
     meses_con_venta_3m: Mapped[int | None] = mapped_column(Integer, nullable=True)
     meses_con_venta_6m: Mapped[int | None] = mapped_column(Integer, nullable=True)
     meses_con_venta_12m: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Venta mes a mes de los ultimos 12, del grupo de reemplazos en esa sucursal.
+    # El nombre es POSICIONAL: `venta_mes_01` es el ultimo mes cerrado y
+    # `venta_mes_12` el mas antiguo. Nombrarlas por mes obligaria a agregar y
+    # borrar columnas en cada corrida; a que mes corresponde el 01 lo dice
+    # `periodo_ultimo_mes`, que el motor publica en la misma fila.
+    # Float y no Integer: hay granel (litros, ml) y las notas de credito restan.
+    venta_mes_01: Mapped[float | None] = mapped_column(Float, nullable=True)
+    venta_mes_02: Mapped[float | None] = mapped_column(Float, nullable=True)
+    venta_mes_03: Mapped[float | None] = mapped_column(Float, nullable=True)
+    venta_mes_04: Mapped[float | None] = mapped_column(Float, nullable=True)
+    venta_mes_05: Mapped[float | None] = mapped_column(Float, nullable=True)
+    venta_mes_06: Mapped[float | None] = mapped_column(Float, nullable=True)
+    venta_mes_07: Mapped[float | None] = mapped_column(Float, nullable=True)
+    venta_mes_08: Mapped[float | None] = mapped_column(Float, nullable=True)
+    venta_mes_09: Mapped[float | None] = mapped_column(Float, nullable=True)
+    venta_mes_10: Mapped[float | None] = mapped_column(Float, nullable=True)
+    venta_mes_11: Mapped[float | None] = mapped_column(Float, nullable=True)
+    venta_mes_12: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Promedio simple de las columnas de arriba, SIN winsorizar: el comprador tiene
+    # que poder sumar los meses y que le de esto. `demanda_mensual` recorta los
+    # peaks a proposito y por eso no coincide con `prom_vta_12m`.
+    prom_vta_3m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    prom_vta_6m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    prom_vta_12m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # "YYYYMM" del mes al que corresponde `venta_mes_01`.
+    periodo_ultimo_mes: Mapped[str | None] = mapped_column(String, nullable=True)
     # Clase ABC del producto a nivel AGREGADO (todas las sucursales), no local.
     clasificacion_abc_agregada: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     proveedor: Mapped[str | None] = mapped_column(String, nullable=True, index=True)

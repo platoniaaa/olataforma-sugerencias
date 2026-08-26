@@ -38,6 +38,40 @@ export const COLUMNAS: DefColumna[] = [
     info: "Ídem sobre los últimos 6 meses. Es el que define la clase ABC: 5 o más es A, 4 es B." },
   { key: "meses_con_venta_12m", label: "Meses c/Venta 12m", tipo: "numero", visiblePorDefecto: false,
     info: "Ídem sobre los últimos 12 meses. Distingue el repuesto que se mueve poco pero constante del que se vendió una sola vez." },
+  // Venta mes a mes y sus promedios. Salen del motor, de la MISMA serie con la que
+  // calcula la demanda -mismo grano: el grupo de reemplazos, no el codigo suelto-
+  // pero sin winsorizar, para que las doce columnas sumen el promedio de al lado.
+  // El mes en curso NO entra: esta a medias y se veria como una caida.
+  { key: "venta_mes_01", label: "Venta Mes 01", tipo: "decimal", visiblePorDefecto: false,
+    info: "Unidades vendidas ese mes por el grupo de reemplazos en esta sucursal. La posición es fija: 01 es el último mes cerrado. El título de la columna muestra el mes real." },
+  { key: "venta_mes_02", label: "Venta Mes 02", tipo: "decimal", visiblePorDefecto: false,
+    info: "Unidades vendidas ese mes por el grupo de reemplazos en esta sucursal. La posición es fija: 01 es el último mes cerrado. El título de la columna muestra el mes real." },
+  { key: "venta_mes_03", label: "Venta Mes 03", tipo: "decimal", visiblePorDefecto: false,
+    info: "Unidades vendidas ese mes por el grupo de reemplazos en esta sucursal. La posición es fija: 01 es el último mes cerrado. El título de la columna muestra el mes real." },
+  { key: "venta_mes_04", label: "Venta Mes 04", tipo: "decimal", visiblePorDefecto: false,
+    info: "Unidades vendidas ese mes por el grupo de reemplazos en esta sucursal. La posición es fija: 01 es el último mes cerrado. El título de la columna muestra el mes real." },
+  { key: "venta_mes_05", label: "Venta Mes 05", tipo: "decimal", visiblePorDefecto: false,
+    info: "Unidades vendidas ese mes por el grupo de reemplazos en esta sucursal. La posición es fija: 01 es el último mes cerrado. El título de la columna muestra el mes real." },
+  { key: "venta_mes_06", label: "Venta Mes 06", tipo: "decimal", visiblePorDefecto: false,
+    info: "Unidades vendidas ese mes por el grupo de reemplazos en esta sucursal. La posición es fija: 01 es el último mes cerrado. El título de la columna muestra el mes real." },
+  { key: "venta_mes_07", label: "Venta Mes 07", tipo: "decimal", visiblePorDefecto: false,
+    info: "Unidades vendidas ese mes por el grupo de reemplazos en esta sucursal. La posición es fija: 01 es el último mes cerrado. El título de la columna muestra el mes real." },
+  { key: "venta_mes_08", label: "Venta Mes 08", tipo: "decimal", visiblePorDefecto: false,
+    info: "Unidades vendidas ese mes por el grupo de reemplazos en esta sucursal. La posición es fija: 01 es el último mes cerrado. El título de la columna muestra el mes real." },
+  { key: "venta_mes_09", label: "Venta Mes 09", tipo: "decimal", visiblePorDefecto: false,
+    info: "Unidades vendidas ese mes por el grupo de reemplazos en esta sucursal. La posición es fija: 01 es el último mes cerrado. El título de la columna muestra el mes real." },
+  { key: "venta_mes_10", label: "Venta Mes 10", tipo: "decimal", visiblePorDefecto: false,
+    info: "Unidades vendidas ese mes por el grupo de reemplazos en esta sucursal. La posición es fija: 01 es el último mes cerrado. El título de la columna muestra el mes real." },
+  { key: "venta_mes_11", label: "Venta Mes 11", tipo: "decimal", visiblePorDefecto: false,
+    info: "Unidades vendidas ese mes por el grupo de reemplazos en esta sucursal. La posición es fija: 01 es el último mes cerrado. El título de la columna muestra el mes real." },
+  { key: "venta_mes_12", label: "Venta Mes 12", tipo: "decimal", visiblePorDefecto: false,
+    info: "Unidades vendidas ese mes por el grupo de reemplazos en esta sucursal. La posición es fija: 01 es el último mes cerrado. El título de la columna muestra el mes real." },
+  { key: "prom_vta_3m", label: "Prom Vta 3m", tipo: "decimal", visiblePorDefecto: true,
+    info: "Promedio de unidades vendidas por mes en los últimos 3 meses cerrados, contando como cero los meses sin venta. Es la suma de las tres columnas de venta mensual dividida por 3." },
+  { key: "prom_vta_6m", label: "Prom Vta 6m", tipo: "decimal", visiblePorDefecto: true,
+    info: "Ídem sobre los últimos 6 meses cerrados." },
+  { key: "prom_vta_12m", label: "Prom Vta 12m", tipo: "decimal", visiblePorDefecto: true,
+    info: "Ídem sobre los últimos 12 meses cerrados. Ojo: no es igual a la Demanda Mensual. La demanda recorta los peaks a propósito (winsoriza) y mira 6 o 12 meses según la clase ABC; este promedio es el crudo, y por eso se puede comprobar sumando los meses." },
   { key: "clasificacion_abc", label: "ABC", tipo: "abc", visiblePorDefecto: true,
     info: "Clase ABC de la sucursal según en cuántos meses hubo venta (A = más frecuente … D = esporádica). Define la ventana de demanda y el nivel de servicio." },
   { key: "clasificacion_abc_agregada", label: "ABC Agregada", tipo: "abc", visiblePorDefecto: false,
@@ -202,4 +236,40 @@ const COLS_DISTRIBUCION = [
 // Set de columnas por defecto segun la vista del proceso de compras.
 export function columnasPorDefectoVista(vista: string): string[] {
   return vista === "distribucion" ? COLS_DISTRIBUCION : KEYS_POR_DEFECTO;
+}
+
+
+const MES_CORTO = ["ene", "feb", "mar", "abr", "may", "jun",
+                   "jul", "ago", "sep", "oct", "nov", "dic"];
+
+/**
+ * "202606" y la posición 3 -> "Venta abr-26".
+ *
+ * La posición 01 es el último mes cerrado y de ahí hacia atrás. Sin el período no
+ * se puede etiquetar: devuelve null y la columna se queda con "Venta Mes 03", que
+ * es feo pero no le pone fecha a algo que no la tiene. Es la misma cuenta que hace
+ * `etiqueta_mes` en el export, para que la grilla y el Excel digan lo mismo.
+ */
+export function etiquetaMes(
+  periodoUltimo: string | null | undefined,
+  posicion: number
+): string | null {
+  if (!periodoUltimo || !/^\d{6}$/.test(periodoUltimo)) return null;
+  const mes = Number(periodoUltimo.slice(4));
+  if (mes < 1 || mes > 12) return null;
+  const total =
+    Number(periodoUltimo.slice(0, 4)) * 12 + (mes - 1) - (posicion - 1);
+  const anio = Math.floor(total / 12) % 100;
+  return `Venta ${MES_CORTO[total % 12]}-${String(anio).padStart(2, "0")}`;
+}
+
+/** La misma definición, con el mes de verdad en el título cuando se puede saber. */
+export function conMesReal(
+  def: DefColumna,
+  periodoUltimo: string | null | undefined
+): DefColumna {
+  const k = def.key as string;
+  if (!k.startsWith("venta_mes_")) return def;
+  const label = etiquetaMes(periodoUltimo, Number(k.slice(-2)));
+  return label ? { ...def, label } : def;
 }

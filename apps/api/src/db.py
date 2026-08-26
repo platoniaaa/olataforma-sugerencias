@@ -134,6 +134,23 @@ def create_all() -> None:
         "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS meses_con_venta_3m INTEGER",
         "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS meses_con_venta_6m INTEGER",
         "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS meses_con_venta_12m INTEGER",
+        # 2026-08: venta mes a mes de los ultimos 12 y sus promedios a 3/6/12.
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS venta_mes_01 DOUBLE PRECISION",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS venta_mes_02 DOUBLE PRECISION",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS venta_mes_03 DOUBLE PRECISION",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS venta_mes_04 DOUBLE PRECISION",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS venta_mes_05 DOUBLE PRECISION",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS venta_mes_06 DOUBLE PRECISION",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS venta_mes_07 DOUBLE PRECISION",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS venta_mes_08 DOUBLE PRECISION",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS venta_mes_09 DOUBLE PRECISION",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS venta_mes_10 DOUBLE PRECISION",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS venta_mes_11 DOUBLE PRECISION",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS venta_mes_12 DOUBLE PRECISION",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS prom_vta_3m DOUBLE PRECISION",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS prom_vta_6m DOUBLE PRECISION",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS prom_vta_12m DOUBLE PRECISION",
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS periodo_ultimo_mes VARCHAR",
         # 2026-08: vendedor de sucursal (arma requerimientos, no ve el sugerido).
         "ALTER TABLE usuario ADD COLUMN IF NOT EXISTS es_vendedor BOOLEAN NOT NULL DEFAULT FALSE",
         # 2026-08: notificaciones dirigidas ("tu requerimiento fue comprado").

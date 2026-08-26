@@ -17,7 +17,7 @@ import type {
   ValueGetterParams,
 } from "ag-grid-community";
 import { Check, Copy, Info } from "lucide-react";
-import { COLUMNAS, type DefColumna } from "@/lib/columnas";
+import { COLUMNAS, conMesReal, type DefColumna } from "@/lib/columnas";
 import { formatoCLP, formatoNumero } from "@/lib/formato";
 import { STORAGE_KEYS, guardar, leer } from "@/lib/persistencia-dashboard";
 import type { ColumnaFiltro, SugeridoFiltros, SugeridoKpis, SugeridoRow } from "@/lib/types";
@@ -472,9 +472,18 @@ export const TablaSugerido = forwardRef<TablaSugeridoHandle, Props>(function Tab
     []
   );
 
+  // A que mes corresponde `venta_mes_01`. Viaja en las filas y no en una constante
+  // del front porque lo decide la corrida del motor: si el motor se atrasa un mes,
+  // el titulo tiene que atrasarse con el, no adelantarse solo.
+  const periodoUltimoMes = useMemo(
+    () => rows.find((r) => r.periodo_ultimo_mes)?.periodo_ultimo_mes ?? null,
+    [rows]
+  );
+
   const columnDefs = useMemo<ColDef[]>(() => {
-    return COLUMNAS.filter((c) => columnasVisibles.includes(c.key as string)).map(colDef);
-  }, [columnasVisibles]);
+    return COLUMNAS.filter((c) => columnasVisibles.includes(c.key as string))
+      .map((c) => colDef(conMesReal(c, periodoUltimoMes)));
+  }, [columnasVisibles, periodoUltimoMes]);
 
   const defaultColDef = useMemo<ColDef>(
     () => ({

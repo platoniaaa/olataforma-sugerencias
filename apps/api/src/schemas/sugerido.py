@@ -25,6 +25,24 @@ class SugeridoRow(BaseModel):
     meses_con_venta_3m: int | None = None
     meses_con_venta_6m: int | None = None
     meses_con_venta_12m: int | None = None
+    # Venta mes a mes del grupo de reemplazos. `venta_mes_01` es el ultimo mes
+    # cerrado; `periodo_ultimo_mes` dice cual es, para poder etiquetarlas.
+    venta_mes_01: float | None = None
+    venta_mes_02: float | None = None
+    venta_mes_03: float | None = None
+    venta_mes_04: float | None = None
+    venta_mes_05: float | None = None
+    venta_mes_06: float | None = None
+    venta_mes_07: float | None = None
+    venta_mes_08: float | None = None
+    venta_mes_09: float | None = None
+    venta_mes_10: float | None = None
+    venta_mes_11: float | None = None
+    venta_mes_12: float | None = None
+    prom_vta_3m: float | None = None
+    prom_vta_6m: float | None = None
+    prom_vta_12m: float | None = None
+    periodo_ultimo_mes: str | None = None
     proveedor: str | None = None
     filtro1_final: str | None = None
     tipo_origen: str | None = None

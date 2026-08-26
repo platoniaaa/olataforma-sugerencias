@@ -28,6 +28,23 @@ LABELS: dict[str, str] = {
     "meses_con_venta_3m": "Meses con Venta 3m",
     "meses_con_venta_6m": "Meses con Venta 6m",
     "meses_con_venta_12m": "Meses con Venta 12m",
+    # Etiquetas de reserva: en el archivo se reemplazan por el mes de verdad
+    # ("Venta jun-25"). Ver `_cabeceras`.
+    "venta_mes_01": "Venta Mes 01",
+    "venta_mes_02": "Venta Mes 02",
+    "venta_mes_03": "Venta Mes 03",
+    "venta_mes_04": "Venta Mes 04",
+    "venta_mes_05": "Venta Mes 05",
+    "venta_mes_06": "Venta Mes 06",
+    "venta_mes_07": "Venta Mes 07",
+    "venta_mes_08": "Venta Mes 08",
+    "venta_mes_09": "Venta Mes 09",
+    "venta_mes_10": "Venta Mes 10",
+    "venta_mes_11": "Venta Mes 11",
+    "venta_mes_12": "Venta Mes 12",
+    "prom_vta_3m": "Prom Vta 3m",
+    "prom_vta_6m": "Prom Vta 6m",
+    "prom_vta_12m": "Prom Vta 12m",
     "clasificacion_abc_agregada": "ABC Agregada",
     "nombre_sucursal": "Sucursal",
     "sucursal_id": "ID Sucursal",
@@ -131,6 +148,40 @@ UNIDADES_COLUMNS = {
     "stock_diez_de_julio_2", "stock_chillan", "stock_cd_repuestos", "stock_brasil_18",
     "stock_placilla", "stock_chillan_viejo", "stock_talca_2",
 }
+_MES_CORTO = ("ene", "feb", "mar", "abr", "may", "jun",
+              "jul", "ago", "sep", "oct", "nov", "dic")
+
+
+def etiqueta_mes(periodo_ultimo: str | None, posicion: int) -> str | None:
+    """"202606" y la posicion 3 -> "Venta abr-26".
+
+    La posicion 01 es el ultimo mes cerrado y va hacia atras. Sin el periodo no se
+    puede etiquetar: se devuelve None y el caller deja "Venta Mes 03", que es feo
+    pero no miente. Poner un mes inventado seria peor: el archivo se guarda y se
+    mira semanas despues.
+    """
+    if not periodo_ultimo or len(periodo_ultimo) != 6 or not periodo_ultimo.isdigit():
+        return None
+    total = int(periodo_ultimo[:4]) * 12 + (int(periodo_ultimo[4:]) - 1) - (posicion - 1)
+    return f"Venta {_MES_CORTO[total % 12]}-{(total // 12) % 100:02d}"
+
+
+def _cabeceras(cols: list[str], rows: list[dict]) -> list[str]:
+    """Los titulos de la primera fila, con los meses ya resueltos."""
+    periodo = next(
+        (r.get("periodo_ultimo_mes") for r in rows if isinstance(r, dict)
+         and r.get("periodo_ultimo_mes")),
+        None,
+    )
+    salida = []
+    for c in cols:
+        etiqueta = None
+        if c.startswith("venta_mes_"):
+            etiqueta = etiqueta_mes(periodo, int(c[-2:]))
+        salida.append(etiqueta or LABELS.get(c, c))
+    return salida
+
+
 HEADER_FILL = PatternFill("solid", fgColor="1E40AF")
 HEADER_FONT = Font(color="FFFFFF", bold=True)
 
@@ -143,8 +194,9 @@ def generar_excel(rows: list[dict], columnas: list[str] | None) -> bytes:
     ws.title = "Sugerido"
 
     # Cabecera.
-    for j, col in enumerate(cols, start=1):
-        cell = ws.cell(row=1, column=j, value=LABELS.get(col, col))
+    titulos = _cabeceras(cols, rows)
+    for j, (col, titulo) in enumerate(zip(cols, titulos), start=1):
+        cell = ws.cell(row=1, column=j, value=titulo)
         cell.fill = HEADER_FILL
         cell.font = HEADER_FONT
         cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -173,7 +225,7 @@ def generar_excel(rows: list[dict], columnas: list[str] | None) -> bytes:
 
     # Ancho de columnas aproximado.
     for j, col in enumerate(cols, start=1):
-        width = max(12, min(40, len(LABELS.get(col, col)) + 4))
+        width = max(12, min(40, len(titulos[j - 1]) + 4))
         ws.column_dimensions[get_column_letter(j)].width = width
 
     ws.freeze_panes = "A2"

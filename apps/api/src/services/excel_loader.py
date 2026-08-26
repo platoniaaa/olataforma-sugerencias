@@ -53,6 +53,23 @@ HEADER_ALIASES: dict[str, str] = {
     "meses_con_venta_3m": "meses_con_venta_3m",
     "meses_con_venta_6m": "meses_con_venta_6m",
     "meses_con_venta_12m": "meses_con_venta_12m",
+    # El motor las manda como "Venta Mes 01" y "Prom Vta 3m" -> _norm.
+    "venta_mes_01": "venta_mes_01",
+    "venta_mes_02": "venta_mes_02",
+    "venta_mes_03": "venta_mes_03",
+    "venta_mes_04": "venta_mes_04",
+    "venta_mes_05": "venta_mes_05",
+    "venta_mes_06": "venta_mes_06",
+    "venta_mes_07": "venta_mes_07",
+    "venta_mes_08": "venta_mes_08",
+    "venta_mes_09": "venta_mes_09",
+    "venta_mes_10": "venta_mes_10",
+    "venta_mes_11": "venta_mes_11",
+    "venta_mes_12": "venta_mes_12",
+    "prom_vta_3m": "prom_vta_3m",
+    "prom_vta_6m": "prom_vta_6m",
+    "prom_vta_12m": "prom_vta_12m",
+    "periodo_ultimo_mes": "periodo_ultimo_mes",
     "abc": "clasificacion_abc",
     "clasificacion_abc_agregada": "clasificacion_abc_agregada",
     "abc_agregada": "clasificacion_abc_agregada",
@@ -149,8 +166,15 @@ FLOAT_FIELDS = {
     "sugerido_suc", "stock_activo_suc", "stock_en_transito_suc", "stock_en_cd",
     "sugerido_traslado", "sugerido_compra_neto", "total_sugerido_suc",
     "total_valor_sugerido_clp",
+    "venta_mes_01", "venta_mes_02", "venta_mes_03", "venta_mes_04", "venta_mes_05", "venta_mes_06", "venta_mes_07", "venta_mes_08", "venta_mes_09", "venta_mes_10", "venta_mes_11", "venta_mes_12",
+    "prom_vta_3m", "prom_vta_6m", "prom_vta_12m",
 }
 BOOL_FIELDS = {"es_importado", "tiene_stock_cd"}
+# Periodos "YYYYMM". Van como texto, pero si el archivo es un Excel la celda llega
+# como numero y `str()` la deja en "202607.0": seis digitos mas basura, con lo que
+# el titulo de las columnas de venta mensual cae a "Venta Mes 01" en toda la
+# grilla. No revienta nada, y por eso costaria darse cuenta.
+PERIODO_FIELDS = {"periodo_ultimo_mes"}
 
 
 def _to_float(v: Any) -> float | None:
@@ -188,7 +212,19 @@ def _to_bool(v: Any) -> bool | None:
     return None
 
 
+def _to_periodo(v: Any) -> str | None:
+    """Deja el periodo en "YYYYMM" venga como texto, entero o float del Excel."""
+    if v is None or v == "":
+        return None
+    if isinstance(v, float) and v.is_integer():
+        v = int(v)
+    s = str(v).strip()
+    return s if len(s) == 6 and s.isdigit() else None
+
+
 def _cast(field: str, value: Any) -> Any:
+    if field in PERIODO_FIELDS:
+        return _to_periodo(value)
     if field in INT_FIELDS:
         return _to_int(value)
     if field in FLOAT_FIELDS:
