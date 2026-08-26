@@ -146,6 +146,13 @@ def create_all() -> None:
         # ningun error visible: la ficha, la columna del sugerido, el autocomplete
         # y la tabla del grupo quedan en blanco. Paso en produccion el 23-08-2026.
         "ALTER TABLE reemplazo_ford ADD COLUMN IF NOT EXISTS extraido_en VARCHAR",
+        # 2026-08: repuestos InStock agregados a mano desde la plataforma. Sin
+        # `origen` la carga desde el CSV se los lleva por delante, porque borra la
+        # tabla entera antes de reinsertar.
+        "ALTER TABLE repuesto_instock ADD COLUMN IF NOT EXISTS origen VARCHAR NOT NULL DEFAULT 'pauta'",
+        "ALTER TABLE repuesto_instock ADD COLUMN IF NOT EXISTS motivo TEXT",
+        "ALTER TABLE repuesto_instock ADD COLUMN IF NOT EXISTS creado_por VARCHAR",
+        "ALTER TABLE repuesto_instock ADD COLUMN IF NOT EXISTS creado_en VARCHAR",
     ]
     # SQLite NO soporta "ADD COLUMN IF NOT EXISTS" (error de sintaxis que se
     # tragaba el try, dejando bases locales viejas sin las columnas nuevas):

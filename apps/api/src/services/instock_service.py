@@ -18,17 +18,23 @@ el mismo codigo es un repuesto cualquiera.
   regla no hace nada.
 - **El mínimo**: la compra. Mismas cuatro sucursales.
 
-La lista de repuestos vive en `repuesto_instock` y sale de las pautas del
-fabricante (ver `models/repuesto_instock.py` y `jobs/cargar_instock.py`).
+La lista vive en `repuesto_instock` y tiene dos origenes: las pautas del
+fabricante (`jobs/cargar_instock.py`, que recarga sola en cada corrida del
+motor) y lo que se agrega a mano desde la plataforma. La columna `origen`
+distingue las dos, y es lo que evita que la recarga se lleve lo manual.
 """
 from __future__ import annotations
 
+import datetime as dt
 import math
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import DimSucursal, RepuestoInstock
+from ..config import get_settings
+from ..models import DimSucursal, ProductoCatalogo, RepuestoInstock
+
+settings = get_settings()
 
 # Sucursales con taller de mantención: son las únicas donde el mínimo obliga a
 # comprar. Decisión de Abastecimiento (jul-2026). Mismo criterio de comparación
@@ -193,3 +199,110 @@ def aplicar(items: list[dict], cat: dict[str, dict]) -> None:
         _marcar(fila, info)
         if info and en_alcance(fila.get("sucursal_id")):
             aplicar_a_fila(fila, info["minimo"])
+
+
+def listar(db: Session, solo_manuales: bool = False) -> list[dict]:
+    """La lista completa, con de donde salio cada fila."""
+    stmt = select(RepuestoInstock).where(
+        RepuestoInstock.tenant_id == settings.default_tenant_id)
+    if solo_manuales:
+        stmt = stmt.where(RepuestoInstock.origen == "manual")
+    filas = db.scalars(stmt.order_by(RepuestoInstock.producto.asc())).all()
+    return [
+        {
+            "producto": f.producto,
+            "part_number": f.part_number,
+            "marca": f.marca,
+            "modelos": f.modelos,
+            "operacion": f.operacion,
+            "minimo": f.minimo,
+            "activo": f.activo,
+            "origen": f.origen or "pauta",
+            "motivo": f.motivo,
+            "creado_por": f.creado_por,
+            "creado_en": f.creado_en,
+        }
+        for f in filas
+    ]
+
+
+def agregar_manual(db: Session, producto: str, minimo: int, motivo: str | None,
+                   email: str, modelos: str | None = None) -> dict:
+    """Suma un repuesto a la lista InStock desde la plataforma.
+
+    Vale lo mismo que uno de la pauta: nunca puede haber menos de `minimo`
+    unidades en las sucursales con taller. La diferencia es que este lo puso una
+    persona, y por eso queda con motivo y autor.
+
+    Se valida contra el catalogo: un codigo que el ERP no conoce no se puede
+    comprar, y dejarlo entrar solo produciria una fila que pide algo inexistente.
+    """
+    producto = (producto or "").strip()
+    if not producto:
+        raise ValueError("Falta el codigo del producto")
+    if minimo < 1:
+        raise ValueError("El minimo tiene que ser 1 o mas")
+
+    existe = db.scalar(
+        select(ProductoCatalogo.producto).where(
+            ProductoCatalogo.tenant_id == settings.default_tenant_id,
+            ProductoCatalogo.producto == producto,
+        ).limit(1)
+    )
+    if not existe:
+        raise LookupError(f"{producto} no esta en el catalogo")
+
+    ya = db.scalar(
+        select(RepuestoInstock).where(
+            RepuestoInstock.tenant_id == settings.default_tenant_id,
+            RepuestoInstock.producto == producto,
+        ).limit(1)
+    )
+    if ya is not None:
+        # Ya esta: se reactiva y se ajusta el minimo en vez de fallar. Que el
+        # comprador tenga que adivinar si ya estaba no aporta nada.
+        ya.activo = True
+        ya.minimo = minimo
+        if ya.origen == "manual":
+            ya.motivo = motivo or ya.motivo
+        db.commit()
+        return {"producto": producto, "origen": ya.origen or "pauta",
+                "minimo": ya.minimo, "ya_estaba": True}
+
+    db.add(RepuestoInstock(
+        tenant_id=settings.default_tenant_id,
+        producto=producto,
+        minimo=minimo,
+        modelos=modelos,
+        activo=True,
+        origen="manual",
+        motivo=(motivo or "").strip() or None,
+        creado_por=email,
+        creado_en=dt.datetime.now().isoformat(timespec="seconds"),
+    ))
+    db.commit()
+    return {"producto": producto, "origen": "manual", "minimo": minimo,
+            "ya_estaba": False}
+
+
+def quitar_manual(db: Session, producto: str) -> None:
+    """Saca de la lista un repuesto agregado a mano.
+
+    Los de la pauta NO se pueden borrar desde aca: vienen del fabricante y la
+    proxima carga los repondria igual, asi que el boton mentiria. Para sacar uno
+    de esos hay que cambiar la pauta.
+    """
+    fila = db.scalar(
+        select(RepuestoInstock).where(
+            RepuestoInstock.tenant_id == settings.default_tenant_id,
+            RepuestoInstock.producto == producto,
+        ).limit(1)
+    )
+    if fila is None:
+        raise LookupError(f"{producto} no esta en la lista InStock")
+    if (fila.origen or "pauta") != "manual":
+        raise PermissionError(
+            f"{producto} viene de la pauta del fabricante: no se puede quitar "
+            "desde la plataforma porque la proxima carga lo repondria")
+    db.delete(fila)
+    db.commit()

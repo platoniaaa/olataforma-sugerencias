@@ -43,6 +43,20 @@ class RepuestoInstock(Base):
 
     # Unidades que nunca pueden faltar en una sucursal con taller.
     minimo: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+
+    # De donde salio la fila: "pauta" (el CSV del fabricante) o "manual" (alguien
+    # la agrego desde la plataforma).
+    #
+    # No es informativo: la carga BORRA la lista entera y la reinserta desde el
+    # CSV, y desde ago-2026 esa carga se dispara sola en cada corrida del motor.
+    # Sin esta columna, un repuesto agregado a mano desapareceria en horas y nadie
+    # se enteraria. `cargar_instock` borra solo las filas con origen "pauta".
+    origen: Mapped[str] = mapped_column(String, nullable=False, default="pauta",
+                                        index=True)
+    # Por que se agrego. Solo para las manuales: la pauta ya se explica sola.
+    motivo: Mapped[str | None] = mapped_column(Text, nullable=True)
+    creado_por: Mapped[str | None] = mapped_column(String, nullable=True)
+    creado_en: Mapped[str | None] = mapped_column(String, nullable=True)
     activo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
 
     __table_args__ = (

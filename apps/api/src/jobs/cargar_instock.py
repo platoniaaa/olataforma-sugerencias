@@ -202,9 +202,41 @@ def cargar_en(db, pautas: list[dict]) -> dict:
             "detalle": (fila.get("detalle") or "").strip() or None,
             "minimo": MINIMO_DEFECTO,
             "activo": True,
+            "origen": "pauta",
         }
 
-    db.execute(delete(RepuestoInstock).where(RepuestoInstock.tenant_id == tenant))
+    # Se borran SOLO las filas de la pauta. Las que alguien agrego a mano desde la
+    # plataforma sobreviven: esta carga se dispara sola en cada corrida del motor,
+    # asi que borrarlas seria perderlas el mismo dia sin que nadie lo note.
+    db.execute(
+        delete(RepuestoInstock).where(
+            RepuestoInstock.tenant_id == tenant,
+            RepuestoInstock.origen != "manual",
+        )
+    )
+
+    # Un producto que alguien agrego a mano y que DESPUES aparecio en la pauta: la
+    # pauta manda -es el fabricante- y ademas el indice unico no admite las dos
+    # filas. Se quita la manual y se informa, para que se sepa que dejo de estar
+    # bajo la responsabilidad de quien la agrego.
+    manuales = {
+        p for (p,) in db.execute(
+            select(RepuestoInstock.producto).where(
+                RepuestoInstock.tenant_id == tenant,
+                RepuestoInstock.origen == "manual",
+            )
+        ).all()
+    }
+    absorbidos = sorted(manuales & set(registros))
+    if absorbidos:
+        db.execute(
+            delete(RepuestoInstock).where(
+                RepuestoInstock.tenant_id == tenant,
+                RepuestoInstock.origen == "manual",
+                RepuestoInstock.producto.in_(absorbidos),
+            )
+        )
+
     if registros:
         db.execute(insert(RepuestoInstock).values(list(registros.values())))
     db.commit()
@@ -212,6 +244,8 @@ def cargar_en(db, pautas: list[dict]) -> dict:
     return {
         "pautas_leidas": len(pautas),
         "productos": len(registros),
+        "manuales_conservados": len(manuales) - len(absorbidos),
+        "manuales_absorbidos_por_la_pauta": absorbidos,
         "sin_codigo": len(sin_codigo),
         "part_numbers_en_maestro": len(indice),
         # Detalle para revisar con Repuestos, no para la operacion del dia a dia.
