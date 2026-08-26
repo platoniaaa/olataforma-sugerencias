@@ -1105,3 +1105,19 @@ export interface MisSucursales {
   es_vendedor: boolean;
   puede_elegir: boolean;
 }
+
+/** Una fila de la lista InStock. `origen` dice si viene de la pauta del
+ *  fabricante o si alguien la agregó desde la plataforma. */
+export interface RepuestoInstock {
+  producto: string;
+  part_number: string | null;
+  marca: string | null;
+  modelos: string | null;
+  operacion: string | null;
+  minimo: number;
+  activo: boolean;
+  origen: "pauta" | "manual";
+  motivo: string | null;
+  creado_por: string | null;
+  creado_en: string | null;
+}

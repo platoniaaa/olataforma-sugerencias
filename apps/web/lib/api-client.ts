@@ -22,6 +22,7 @@ import type {
   Producto,
   ProductoBuscado,
   Requerimiento,
+  RepuestoInstock,
   RequerimientosPage,
   Sucursal,
   SugerenciaManual,
@@ -508,6 +509,37 @@ export const api = {
 
   async recurrentes(): Promise<Recurrente[]> {
     return getJSON("/api/sugerencias-manuales/recurrentes");
+  },
+
+  async instockLista(soloManuales = false): Promise<RepuestoInstock[]> {
+    return getJSON(`/api/instock${soloManuales ? "?solo_manuales=true" : ""}`);
+  },
+
+  async agregarInstock(payload: {
+    producto: string;
+    minimo: number;
+    motivo?: string;
+  }): Promise<{ producto: string; origen: string; minimo: number; ya_estaba: boolean }> {
+    const res = await req("/api/instock", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail ?? "No se pudo agregar el repuesto");
+    }
+    return res.json();
+  },
+
+  async quitarInstock(producto: string): Promise<void> {
+    const res = await req(`/api/instock/${encodeURIComponent(producto)}`, {
+      method: "DELETE",
+    });
+    if (!res.ok && res.status !== 204) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail ?? "No se pudo quitar el repuesto");
+    }
   },
 
   async instockResumen(): Promise<InstockResumen> {
