@@ -101,7 +101,10 @@ def listar_productos(
     return ProductoPage(items=items_list, total=total, page=page, limit=limit)
 
 
-@router.get("/productos/{producto}", response_model=ProductoOut)
+# `producto:path` por los 34 codigos con "/" adentro: el servidor decodifica el
+# %2F antes de enrutar y un `{producto}` de un solo segmento no calza. Mismo caso
+# que la ficha del sugerido.
+@router.get("/productos/{producto:path}", response_model=ProductoOut)
 def detalle_producto(producto: str, db: Session = Depends(get_db)):
     p = db.get(DimProducto, producto)
     if not p:

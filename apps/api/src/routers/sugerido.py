@@ -115,7 +115,7 @@ def _sin_acceso(sucursal_id: str, permitidas: list[str] | None) -> bool:
     return permitidas is not None and sucursal_id not in permitidas
 
 
-@router.get("/{producto}/{sucursal_id}/ventas", response_model=VentasResponse)
+@router.get("/{producto:path}/{sucursal_id}/ventas", response_model=VentasResponse)
 def ventas(
     producto: str, sucursal_id: str, db: Session = Depends(get_db),
     permitidas: list[str] | None = Depends(sucursales_permitidas),
@@ -126,7 +126,7 @@ def ventas(
     return VentasResponse(**sugerido_service.ventas_12m(db, producto, sucursal_id))
 
 
-@router.get("/{producto}/{sucursal_id}/historia")
+@router.get("/{producto:path}/{sucursal_id}/historia")
 def historia(
     producto: str, sucursal_id: str,
     dias: int = Query(90, ge=7, le=365),
@@ -139,7 +139,13 @@ def historia(
     return {"items": snapshot_service.serie(db, producto, sucursal_id, dias=dias)}
 
 
-@router.get("/{producto}/{sucursal_id}", response_model=SugeridoRow)
+# `producto:path` y no `producto`: hay 34 codigos con "/" adentro
+# (`80 PR/51822`, `13 7153-6206/6306`). El front los encodea como %2F, pero el
+# servidor decodifica ANTES de enrutar, asi que la ruta veia tres segmentos donde
+# esperaba dos y devolvia 404 al abrir la ficha. El catalogo ya lo hacia asi.
+# El comodin es codicioso, y eso es lo que queremos: el ULTIMO segmento es la
+# sucursal y todo lo anterior es el codigo.
+@router.get("/{producto:path}/{sucursal_id}", response_model=SugeridoRow)
 def detalle(
     producto: str, sucursal_id: str, db: Session = Depends(get_db),
     permitidas: list[str] | None = Depends(sucursales_permitidas),
