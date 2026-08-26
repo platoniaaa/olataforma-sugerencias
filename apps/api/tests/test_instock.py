@@ -110,9 +110,14 @@ def test_solo_completa_el_minimo_en_las_sucursales_con_taller(client, db_session
     sin_taller = _fila(client, "INS-SUC", "PLACILLA", solo_pedir=False)
 
     assert con_taller["total_sugerido_suc"] == 2
-    # En Placilla la marca es informativa: sirve para reconocer el repuesto, pero
-    # el mínimo no la obliga a comprar (no tiene taller de mantención).
-    assert sin_taller["instock"] is True
+    # En Placilla no pasa nada: InStock es producto-SUCURSAL y ahi no hay taller.
+    #
+    # Hasta el 25-08-2026 la marca se ponia igual, "informativa". Se saco porque
+    # confundia: el comprador veia "Si" en una sucursal donde el minimo no aplica y
+    # esperaba que se completara solo. La regla existe por el taller, y donde no
+    # hay taller el repuesto es uno cualquiera.
+    assert sin_taller["instock"] is False
+    assert sin_taller["instock_minimo"] is None
     assert not sin_taller["instock_agregado"]
     assert sin_taller["total_sugerido_suc"] == 0
 

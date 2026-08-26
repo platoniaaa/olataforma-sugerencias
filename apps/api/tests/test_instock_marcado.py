@@ -50,23 +50,48 @@ def test_el_badge_sobrevive_a_la_busqueda(pauta_con_stock):
     items, _ = sugerido_service.listar(
         pauta_con_stock, SugeridoFiltros(q="17 GK2Z9365C"), limit=50)
 
-    filas = [i for i in items if i["producto"] == "17 GK2Z9365C"]
-    assert filas, "la busqueda no devolvio el producto"
-    assert all(i["instock"] for i in filas), "el badge se perdio al buscar"
-    assert all(i["instock_minimo"] == 2 for i in filas)
+    dentro = [i for i in items
+              if i["producto"] == "17 GK2Z9365C"
+              and i["sucursal_id"] in ("LINDEROS", "RANCAGUA", "CURICO", "CHILLAN")]
+    assert dentro, "la busqueda no devolvio el producto"
+    assert all(i["instock"] for i in dentro), "el badge se perdio al buscar"
+    assert all(i["instock_minimo"] == 2 for i in dentro)
 
 
-def test_el_badge_es_el_mismo_buscando_y_sin_buscar(pauta_con_stock):
-    """Dos caminos, una sola verdad."""
-    con, _ = sugerido_service.listar(
+def test_fuera_de_las_sucursales_con_taller_no_se_marca(pauta_con_stock):
+    """InStock es producto-SUCURSAL: en Talca el mismo codigo es uno cualquiera.
+
+    Marcarlo en todas confundia: el comprador veia "Si" en Talca y esperaba el
+    minimo de 2, que ahi no aplica.
+    """
+    items, _ = sugerido_service.listar(
         pauta_con_stock, SugeridoFiltros(q="17 GK2Z9365C"), limit=50)
-    sin, _ = sugerido_service.listar(pauta_con_stock, SugeridoFiltros(), limit=50)
 
-    marcado_con = {i["producto"] for i in con if i.get("instock")}
-    marcado_sin = {i["producto"] for i in sin if i.get("instock")}
+    talca = [i for i in items
+             if i["producto"] == "17 GK2Z9365C" and i["sucursal_id"] == "TALCA"]
+    assert talca, "no se devolvio la fila de Talca"
+    assert all(not i["instock"] for i in talca)
+    assert all(i["instock_minimo"] is None for i in talca)
 
-    assert "17 GK2Z9365C" in marcado_con
-    assert "17 GK2Z9365C" in marcado_sin
+
+def test_el_marcado_no_depende_del_camino(pauta_con_stock):
+    """Dos caminos, una sola regla.
+
+    No se comparan los conjuntos de filas -sin busqueda el filtro por defecto deja
+    solo las que piden- sino la REGLA: toda fila devuelta que este en una sucursal
+    con taller tiene que salir marcada, entre por donde entre.
+    """
+    ALCANCE = ("LINDEROS", "RANCAGUA", "CURICO", "CHILLAN")
+
+    for filtros in (SugeridoFiltros(q="17 GK2Z9365C"), SugeridoFiltros()):
+        items, _ = sugerido_service.listar(pauta_con_stock, filtros, limit=50)
+        mias = [i for i in items if i["producto"] == "17 GK2Z9365C"]
+        assert mias, f"no devolvio el producto con {filtros.q!r}"
+        for i in mias:
+            esperado = i["sucursal_id"] in ALCANCE
+            assert bool(i["instock"]) is esperado, (
+                f"{i['sucursal_id']} deberia estar {'marcada' if esperado else 'sin marcar'}"
+                f" y salio {i['instock']} (busqueda={filtros.q!r})")
 
 
 def test_buscando_por_descripcion_tambien_queda_marcado(pauta_con_stock):

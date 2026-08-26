@@ -91,6 +91,8 @@ export interface SugeridoRow {
   vigente_por_crear: boolean | null;
   /** Qué dijo el portal al resolver la cadena (descartes, bifurcaciones). */
   reemplazo_aviso: string | null;
+  /** Categoría del ERP (CAMIONES, COLISION, MECANICA, MANTENCION...). */
+  categoria: string | null;
   /** Repuesto de pauta de mantención que no puede faltar (services/instock_service.py). */
   instock: boolean | null;
   /** Modelos de la pauta que lo usan ("F-150, Ranger"). */

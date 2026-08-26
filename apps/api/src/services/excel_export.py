@@ -93,6 +93,7 @@ LABELS: dict[str, str] = {
     "cadena_ford": "Cadena de reemplazos (FORD)",
     "reemplazo_extraido_en": "Reemplazo consultado el",
     "reemplazo_aviso": "Aviso de FORD",
+    "categoria": "Categoria",
     # Regla InStock (repuestos de pauta que no pueden faltar).
     "instock": "InStock",
     "instock_modelos": "InStock Modelos",

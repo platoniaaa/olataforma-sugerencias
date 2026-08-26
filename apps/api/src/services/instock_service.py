@@ -8,11 +8,15 @@ nada (típico caso de un repuesto clase D, sin venta registrada, con stock 0).
 
 Dos cosas separadas, y conviene no confundirlas:
 
-- **La marca** (`instock`): informativa. Dice "este repuesto es de pauta". Se
-  pone en TODAS las filas del producto, en cualquier sucursal, para que el
-  comprador lo reconozca en la grilla y pueda filtrar por la columna.
-- **El mínimo**: la compra. Solo se aplica en `SUCURSALES_INSTOCK` (las que
-  tienen taller); en el resto la marca es solo informativa.
+InStock es producto-SUCURSAL, no producto: la regla existe porque esas cuatro
+sucursales tienen taller y no pueden quedarse sin el repuesto. En Talca o en el CD
+el mismo codigo es un repuesto cualquiera.
+
+- **La marca** (`instock`): solo en `SUCURSALES_INSTOCK`. Marcarla en todas las
+  sucursales confundia -un comprador veia "Si" en Talca y esperaba el minimo, que
+  ahi no aplica- y ademas hacia que el filtro de la columna trajera filas donde la
+  regla no hace nada.
+- **El mínimo**: la compra. Mismas cuatro sucursales.
 
 La lista de repuestos vive en `repuesto_instock` y sale de las pautas del
 fabricante (ver `models/repuesto_instock.py` y `jobs/cargar_instock.py`).
@@ -141,9 +145,11 @@ def faltante_de_fila(fila: dict, minimo: int) -> int:
 
 
 def _marcar(fila: dict, info: dict | None) -> None:
-    fila["instock"] = bool(info)
-    fila["instock_modelos"] = info.get("modelos") if info else None
-    fila["instock_minimo"] = info.get("minimo") if info else None
+    """Marca la fila solo donde la regla existe: producto Y sucursal con taller."""
+    aplica = bool(info) and en_alcance(fila.get("sucursal_id"))
+    fila["instock"] = aplica
+    fila["instock_modelos"] = info.get("modelos") if aplica else None
+    fila["instock_minimo"] = info.get("minimo") if aplica else None
 
 
 def aplicar_a_fila(fila: dict, minimo: int) -> int:

@@ -103,6 +103,8 @@ class SugeridoRow(BaseModel):
     vigente_por_crear: bool = False
     # Que dijo el portal al resolver la cadena (descartes, bifurcaciones).
     reemplazo_aviso: str | None = None
+    # Categoria del ERP (CAMIONES, COLISION, MECANICA, MANTENCION...).
+    categoria: str | None = None
     # Regla InStock (services/instock_service.py): repuesto de pauta que no puede
     # faltar en las sucursales con taller.
     instock: bool | None = None

@@ -26,6 +26,10 @@ export const COLUMNAS: DefColumna[] = [
     info: "Código del producto (SKU maestro del grupo de reemplazos)." },
   { key: "descripcion", label: "Descripcion", tipo: "texto", visiblePorDefecto: true, pin: "left",
     info: "Descripción del producto según el catálogo maestro." },
+  // La categoria del ERP. Sale de `producto_catalogo`, no del sugerido: por eso se
+  // pega en `_enriquecer_con_catalogo` y no viene en el CSV del motor.
+  { key: "categoria", label: "Categoria", tipo: "texto", visiblePorDefecto: false,
+    info: "Categoría del producto según el ERP: CAMIONES, COLISION, MECANICA, MANTENCION, ACCESORIOS, NEUMATICOS Y LLANTAS, entre otras. Sirve para separar lo que es repuesto de taller de lo que no." },
   // Frecuencia de venta: en cuantos de los ultimos N meses se vendio. Es lo que
   // mira un comprador para decidir rapido, y de aca sale la clase ABC.
   { key: "meses_con_venta_3m", label: "Meses c/Venta 3m", tipo: "numero", visiblePorDefecto: false,

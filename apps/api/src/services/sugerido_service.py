@@ -1174,15 +1174,21 @@ def _enriquecer_con_catalogo(items: list[dict], db: Session) -> None:
     if not productos:
         return
     rows = db.execute(
-        select(ProductoCatalogo.producto, ProductoCatalogo.reemplazo)
+        select(ProductoCatalogo.producto, ProductoCatalogo.reemplazo,
+               ProductoCatalogo.categoria)
         .where(ProductoCatalogo.producto.in_(productos))
     ).all()
-    cat_map = {p: r for p, r in rows}
+    cat_map = {p: r for p, r, _ in rows}
+    # La categoria del ERP (CAMIONES, COLISION, MECANICA, MANTENCION...). Vive en
+    # `producto_catalogo` y no en el sugerido, asi que se pega aca junto con lo
+    # demas del catalogo y en la misma consulta.
+    categoria_map = {p: c for p, _, c in rows}
     publicados = _grupos_publicados(db)
     for it in items:
         p = it.get("producto")
         if not p:
             continue
+        it["categoria"] = categoria_map.get(p)
         if p in publicados:
             it["reemplazos"] = publicados[p]
         elif not it.get("reemplazos"):

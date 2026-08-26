@@ -76,7 +76,15 @@ const BADGES: Record<string, { texto: string; cls: string }> = {
 
 function ProductoCelda(p: { value: unknown; data?: SugeridoRow }) {
   const v = (p.value as string | null) ?? "";
-  const badge = p.data?.origen ? BADGES[p.data.origen] : undefined;
+  const origen = p.data?.origen ? BADGES[p.data.origen] : undefined;
+  // La pegatina de InStock sigue a la COLUMNA, no al origen de la fila. Antes solo
+  // la llevaban las filas que la regla habia inventado, asi que dos repuestos de
+  // pauta se veian distinto segun si el sugerido ya los traia o no. Es la misma
+  // marca para la misma condicion: este repuesto no puede faltar en esta sucursal.
+  const badge = p.data?.instock ? BADGES.instock : origen;
+  // Si la fila ademas es manual o de catalogo, se muestran las dos: dicen cosas
+  // distintas -de donde salio la fila, y que el repuesto es de pauta-.
+  const extra = p.data?.instock && origen && origen !== BADGES.instock ? origen : undefined;
   // FORD dio de baja este codigo y nombra un vigente que Curifor no tiene en el
   // maestro. Se muestra el vigente REAL -el numero al que FORD va a reponer- y no
   // el viejo, que es lo que el comprador necesita ver para pedirle a Repuestos que
@@ -104,6 +112,7 @@ function ProductoCelda(p: { value: unknown; data?: SugeridoRow }) {
         <span>{v}</span>
       )}
       {badge ? <span className={badge.cls}>{badge.texto}</span> : null}
+      {extra ? <span className={extra.cls}>{extra.texto}</span> : null}
     </span>
   );
 }
