@@ -24,6 +24,7 @@ from .routers import (
     incidencias,
     instock,
     inventario,
+    tablero,
     productos,
     requerimiento,
     requerimientos,
@@ -102,6 +103,7 @@ app.include_router(catalogo.router, dependencies=_abastecimiento)
 app.include_router(auditoria.router, dependencies=_protegido)
 app.include_router(ventas_historicas.router, dependencies=_abastecimiento)
 app.include_router(inventario.router, dependencies=_abastecimiento)
+app.include_router(tablero.router, dependencies=_abastecimiento)
 # Incidencias: todos reportan y ven lo suyo; gestionar exige admin en el endpoint.
 app.include_router(incidencias.router, dependencies=_protegido)
 # Admin: requiere flag es_admin (no solo estar logueado).

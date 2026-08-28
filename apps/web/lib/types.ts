@@ -1143,3 +1143,71 @@ export interface RepuestoInstock {
   creado_por: string | null;
   creado_en: string | null;
 }
+
+
+/** Una fila del bloque "Salud del dato" del tablero mensual. */
+export interface FilaSaludDato {
+  que: string;
+  valor: number;
+  /** Denominador, cuando el número se lee como "N de M". */
+  de: number | null;
+  alerta: boolean;
+  detalle: string;
+}
+
+/** El tablero mensual de Abastecimiento. */
+export interface Tablero {
+  /** "YYYY-MM". */
+  periodo: string;
+  servicio: {
+    /** Días del mes que alcanzaron a guardar foto. Si faltan, los días de
+     *  quiebre no se comparan directo contra otro mes. */
+    dias_medidos: number;
+    dias_del_mes: number;
+    mes_completo: boolean;
+    dias_quiebre_por_clase: { clase: string; dias: number }[];
+    dias_quiebre_sin_clase: number;
+    dias_quiebre_total: number;
+    dias_quiebre_instock: number;
+    repuestos_instock: number;
+    quiebre_con_demanda_hoy: number;
+  };
+  inventario: {
+    resumen: {
+      valor_inventario_clp: number;
+      unidades: number;
+      n_filas: number;
+      inmovilizado_clp: number;
+      inmovilizado_n: number;
+      inmovilizado_pct: number;
+      sobre_stock_clp: number;
+      sobre_stock_n: number;
+      sobre_stock_pct: number;
+      quiebre_con_demanda_n: number;
+      bajo_punto_pedido_n: number;
+      sin_costo_n: number;
+      cobertura_dias_mediana: number | null;
+    };
+    por_sucursal: {
+      sucursal_id: string;
+      nombre_sucursal: string;
+      valor_clp: number;
+      unidades: number;
+      inmovilizado_clp: number;
+    }[];
+    dias_sobre_stock: number;
+  };
+  obsolescencia: {
+    valor_clp: number;
+    n_codigos: number;
+    top: { producto: string; descripcion: string | null; unidades: number; valor_clp: number }[];
+  };
+  salud_del_dato: FilaSaludDato[];
+  /** Los indicadores que hoy no se pueden calcular. Viajan igual, con el motivo:
+   *  esconderlos haría creer que el tablero está completo. */
+  ejecucion_compra: {
+    disponible: boolean;
+    motivo: string;
+    indicadores: string[];
+  };
+}

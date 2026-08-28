@@ -9,6 +9,7 @@ import {
   Bell,
   BookOpen,
   Boxes,
+  Gauge,
   ClipboardList,
   ClipboardPaste,
   Database,
@@ -55,6 +56,7 @@ const NAV_VENDEDOR: NavItem[] = [
 
 const NAV: NavItem[] = [
   { href: "/", label: "Sugerido", icon: BarChart3 },
+  { href: "/tablero", label: "Tablero mensual", icon: Gauge },
   { href: "/compras", label: "Compras", icon: ShoppingCart },
   { href: "/requerimientos", label: "Requerimientos", icon: Inbox, ocultarSoloLectura: true },
   { href: "/requerimiento", label: "Pegar lista", icon: ClipboardPaste, ocultarSoloLectura: true },

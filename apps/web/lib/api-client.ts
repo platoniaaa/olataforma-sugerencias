@@ -23,6 +23,7 @@ import type {
   ProductoBuscado,
   Requerimiento,
   RepuestoInstock,
+  Tablero,
   RequerimientosPage,
   Sucursal,
   SugerenciaManual,
@@ -509,6 +510,10 @@ export const api = {
 
   async recurrentes(): Promise<Recurrente[]> {
     return getJSON("/api/sugerencias-manuales/recurrentes");
+  },
+
+  async tablero(periodo?: string): Promise<Tablero> {
+    return getJSON(`/api/tablero${periodo ? `?periodo=${periodo}` : ""}`);
   },
 
   async instockLista(soloManuales = false): Promise<RepuestoInstock[]> {
