@@ -43,6 +43,8 @@ class SugeridoRow(BaseModel):
     prom_vta_6m: float | None = None
     prom_vta_12m: float | None = None
     periodo_ultimo_mes: str | None = None
+    # El menor de los precios de COMPRA de FORD. No incluye los de publico.
+    precio_recomendado_compra: int | None = None
     proveedor: str | None = None
     filtro1_final: str | None = None
     tipo_origen: str | None = None

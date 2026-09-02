@@ -70,6 +70,7 @@ HEADER_ALIASES: dict[str, str] = {
     "prom_vta_6m": "prom_vta_6m",
     "prom_vta_12m": "prom_vta_12m",
     "periodo_ultimo_mes": "periodo_ultimo_mes",
+    "precio_recomendado_compra": "precio_recomendado_compra",
     "abc": "clasificacion_abc",
     "clasificacion_abc_agregada": "clasificacion_abc_agregada",
     "abc_agregada": "clasificacion_abc_agregada",
@@ -160,6 +161,7 @@ INT_FIELDS = {
     "precio_publico_iva_ford", "precio_reposicion_ford", "precio_urgente_vor_ford",
     "precio_promociones_ford", "precio_urgente_recargo15_ford",
     "precio_sugerido_gilde", "precio_dealer_gilde", "precio_final_dealer_gilde",
+    "precio_recomendado_compra",
 }
 FLOAT_FIELDS = {
     "demanda_mensual", "demanda_diaria", "desv_std_mensual", "costo_unitario",

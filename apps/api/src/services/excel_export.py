@@ -45,6 +45,7 @@ LABELS: dict[str, str] = {
     "prom_vta_3m": "Prom Vta 3m",
     "prom_vta_6m": "Prom Vta 6m",
     "prom_vta_12m": "Prom Vta 12m",
+    "precio_recomendado_compra": "Precio Recomendado Compra",
     "clasificacion_abc_agregada": "ABC Agregada",
     "nombre_sucursal": "Sucursal",
     "sucursal_id": "ID Sucursal",
@@ -134,6 +135,7 @@ CLP_COLUMNS = {
     "precio_promociones_ford", "precio_urgente_recargo15_ford",
     "margen_unitario_clp", "margen_sugerido_clp",
     "precio_sugerido_gilde", "precio_dealer_gilde", "precio_final_dealer_gilde",
+    "precio_recomendado_compra",
 }
 # Columnas que son UNIDADES: se muestran sin decimales aunque la base las guarde
 # como Float. Sin esto salian "815.138,00" — el fallback de formato miraba el tipo

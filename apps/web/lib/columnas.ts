@@ -175,6 +175,8 @@ export const COLUMNAS: DefColumna[] = [
   { key: "reemplazo_aviso", label: "Aviso de FORD", tipo: "texto", visiblePorDefecto: false,
     info: "Lo que dijo el portal al resolver la cadena: qué candidato se descartó por no estar activo, pedible o con precio; si hubo una bifurcación; o si ningún código de la cadena sirve y hay que mirarlo a mano. En blanco cuando no hubo nada que decidir." },
   // Precios FORD (cruce por codigo con la tabla Precios; en blanco si el codigo no esta en la lista de FORD).
+  { key: "precio_recomendado_compra", label: "Precio Recomendado Compra", tipo: "clp", visiblePorDefecto: true,
+    info: "El menor de los precios de COMPRA de la lista de FORD: dealer, reposición, urgente VOR, promociones, urgente +15% y flota. NO incluye los de público, que son lo que paga el cliente y no lo que Curifor le paga a FORD. Vacío si el producto no está en la lista." },
   { key: "precio_flota_ford", label: "Precio Flota FORD", tipo: "clp", visiblePorDefecto: false,
     info: "Precio de flota de FORD para el repuesto (cruce por código). En blanco si el código no está en la lista de precios de FORD." },
   { key: "precio_dealer_ford", label: "Precio Dealer FORD", tipo: "clp", visiblePorDefecto: false,

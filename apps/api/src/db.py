@@ -151,6 +151,8 @@ def create_all() -> None:
         "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS prom_vta_6m DOUBLE PRECISION",
         "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS prom_vta_12m DOUBLE PRECISION",
         "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS periodo_ultimo_mes VARCHAR",
+        # 2026-09: el menor precio de compra de la lista de FORD.
+        "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS precio_recomendado_compra INTEGER",
         # 2026-08: vendedor de sucursal (arma requerimientos, no ve el sugerido).
         "ALTER TABLE usuario ADD COLUMN IF NOT EXISTS es_vendedor BOOLEAN NOT NULL DEFAULT FALSE",
         # 2026-08: notificaciones dirigidas ("tu requerimiento fue comprado").

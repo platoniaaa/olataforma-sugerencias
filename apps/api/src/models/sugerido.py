@@ -132,6 +132,11 @@ class Sugerido(Base):
     # FORD sin los "/". Vienen en blanco (None) si el producto no esta en la lista
     # de precios FORD. Enteros en CLP.
     precio_flota_ford: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # El MENOR de los precios de compra de FORD (dealer, reposicion, urgente VOR,
+    # promociones, urgente +15% y flota). Los de publico quedan fuera a proposito:
+    # son lo que paga el cliente, no lo que Curifor le paga a FORD. Lo calcula el
+    # motor, que es donde estan las listas.
+    precio_recomendado_compra: Mapped[int | None] = mapped_column(Integer, nullable=True)
     precio_dealer_ford: Mapped[int | None] = mapped_column(Integer, nullable=True)
     precio_publico_ford: Mapped[int | None] = mapped_column(Integer, nullable=True)
     precio_publico_iva_ford: Mapped[int | None] = mapped_column(Integer, nullable=True)

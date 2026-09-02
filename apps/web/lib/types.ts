@@ -35,6 +35,9 @@ export interface SugeridoRow {
   prom_vta_12m: number | null;
   /** "YYYYMM" del mes al que corresponde `venta_mes_01`. */
   periodo_ultimo_mes: string | null;
+  /** El MENOR de los precios de compra de FORD. No incluye los de público, que
+   *  son precio de venta y no lo que Curifor le paga a FORD. */
+  precio_recomendado_compra: number | null;
   proveedor: string | null;
   filtro1_final: string | null;
   tipo_origen: string | null;
