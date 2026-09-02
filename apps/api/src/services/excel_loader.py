@@ -71,6 +71,10 @@ HEADER_ALIASES: dict[str, str] = {
     "prom_vta_12m": "prom_vta_12m",
     "periodo_ultimo_mes": "periodo_ultimo_mes",
     "precio_recomendado_compra": "precio_recomendado_compra",
+    "tipo_precio_recomendado": "tipo_precio_recomendado",
+    # El motor manda "tipo_precio_recomendado"; el Excel que exporta la propia
+    # plataforma dice "Tipo de Precio", y alguien puede volver a subir ese archivo.
+    "tipo_de_precio": "tipo_precio_recomendado",
     "abc": "clasificacion_abc",
     "clasificacion_abc_agregada": "clasificacion_abc_agregada",
     "abc_agregada": "clasificacion_abc_agregada",

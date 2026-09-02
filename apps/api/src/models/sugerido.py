@@ -137,6 +137,10 @@ class Sugerido(Base):
     # son lo que paga el cliente, no lo que Curifor le paga a FORD. Lo calcula el
     # motor, que es donde estan las listas.
     precio_recomendado_compra: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # De que lista de FORD salio ese precio: Dealer, Flota, Promociones,
+    # Reposicion, Urgente VOR o Urgente +15%. Con empate manda "Dealer", que es la
+    # respuesta util: "es el precio normal".
+    tipo_precio_recomendado: Mapped[str | None] = mapped_column(String, nullable=True)
     precio_dealer_ford: Mapped[int | None] = mapped_column(Integer, nullable=True)
     precio_publico_ford: Mapped[int | None] = mapped_column(Integer, nullable=True)
     precio_publico_iva_ford: Mapped[int | None] = mapped_column(Integer, nullable=True)

@@ -45,6 +45,7 @@ class SugeridoRow(BaseModel):
     periodo_ultimo_mes: str | None = None
     # El menor de los precios de COMPRA de FORD. No incluye los de publico.
     precio_recomendado_compra: int | None = None
+    tipo_precio_recomendado: str | None = None
     proveedor: str | None = None
     filtro1_final: str | None = None
     tipo_origen: str | None = None

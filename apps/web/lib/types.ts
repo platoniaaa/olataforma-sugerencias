@@ -38,6 +38,9 @@ export interface SugeridoRow {
   /** El MENOR de los precios de compra de FORD. No incluye los de público, que
    *  son precio de venta y no lo que Curifor le paga a FORD. */
   precio_recomendado_compra: number | null;
+  /** De qué lista de FORD salió ese precio: Dealer, Flota, Promociones,
+   *  Reposición, Urgente VOR o Urgente +15%. */
+  tipo_precio_recomendado: string | null;
   proveedor: string | null;
   filtro1_final: string | null;
   tipo_origen: string | null;

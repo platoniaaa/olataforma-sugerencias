@@ -46,6 +46,7 @@ LABELS: dict[str, str] = {
     "prom_vta_6m": "Prom Vta 6m",
     "prom_vta_12m": "Prom Vta 12m",
     "precio_recomendado_compra": "Precio Recomendado Compra",
+    "tipo_precio_recomendado": "Tipo de Precio",
     "clasificacion_abc_agregada": "ABC Agregada",
     "nombre_sucursal": "Sucursal",
     "sucursal_id": "ID Sucursal",

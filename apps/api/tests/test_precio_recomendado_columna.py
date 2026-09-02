@@ -97,3 +97,65 @@ def test_la_columna_esta_en_el_catalogo_del_frontend():
     texto = columnas.read_text(encoding="utf-8")
 
     assert f'key: "{CAMPO}"' in texto
+
+
+# --- El tipo de precio ----------------------------------------------------------
+
+TIPO = "tipo_precio_recomendado"
+
+
+def _excel_con_tipo(precio, tipo, cabecera: str) -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["producto", "sucursal_id", "Precio Recomendado Compra", cabecera])
+    ws.append(["17 GK2Z9365C", "LINDEROS", precio, tipo])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+@pytest.mark.parametrize("cabecera", [
+    "tipo_precio_recomendado",  # como lo manda el motor
+    "Tipo de Precio",           # como sale en el Excel que exporta la plataforma
+])
+def test_el_tipo_de_precio_llega_por_las_dos_cabeceras(db_session, cabecera):
+    """El motor y el export no le dicen igual a la misma columna.
+
+    Si solo se aceptara la del motor, volver a subir un Excel bajado de la propia
+    plataforma perderia la columna, con un "Columnas ignoradas (sin mapeo)" que
+    nadie lee.
+    """
+    excel_loader.cargar_sugerido(
+        db_session, "sugerido.xlsx", _excel_con_tipo(32422, "Flota", cabecera))
+
+    fila = db_session.query(Sugerido).filter_by(producto="17 GK2Z9365C").one()
+    assert getattr(fila, CAMPO) == 32422
+    assert getattr(fila, TIPO) == "Flota"
+
+
+def test_la_migracion_repone_el_tipo(engine_con_tablas_viejas):
+    eng = engine_con_tablas_viejas
+    with eng.begin() as cx:
+        cx.execute(text(f"ALTER TABLE sugerido DROP COLUMN {TIPO}"))
+
+    create_all()
+
+    assert TIPO in {c["name"] for c in inspect(eng).get_columns("sugerido")}
+
+
+def test_el_export_incluye_el_tipo():
+    assert TIPO in LABELS
+
+    wb = load_workbook(io.BytesIO(generar_excel(
+        [{"producto": "A", CAMPO: 32422, TIPO: "Flota"}], ["producto", CAMPO, TIPO])))
+    hoja = wb.active
+
+    assert [c.value for c in hoja[1]] == ["Producto", "Precio Recomendado Compra", "Tipo de Precio"]
+    assert hoja.cell(row=2, column=3).value == "Flota"
+
+
+def test_el_tipo_esta_en_el_catalogo_del_frontend():
+    from pathlib import Path
+
+    columnas = Path(__file__).resolve().parents[2] / "web" / "lib" / "columnas.ts"
+    assert f'key: "{TIPO}"' in columnas.read_text(encoding="utf-8")
