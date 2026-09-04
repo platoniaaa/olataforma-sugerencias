@@ -237,3 +237,24 @@ def requiere_actualizar(email: str = Depends(requiere_auth), db=Depends(get_db))
     raise HTTPException(
         status_code=403, detail="No autorizado para actualizar los datos de la plataforma"
     )
+
+
+def puede_precios(email: str, db) -> bool:
+    """True si el email puede editar la lista de precios: admin o en EMAILS_PRECIOS.
+
+    Editar un precio (fijarlo, congelarlo, crear un producto) es trabajo de
+    quien mantiene la lista, no del admin de la plataforma. Mismo esquema que
+    Calibracion; la politica de factores sigue siendo de admin."""
+    from ..models import Usuario  # import local para evitar ciclo
+
+    user = db.get(Usuario, email)
+    if user and user.es_admin:
+        return True
+    return (email or "").lower() in settings.emails_precios_set
+
+
+def requiere_precios(email: str = Depends(requiere_auth), db=Depends(get_db)) -> str:
+    """Autoriza editar la lista de precios: admin o email en EMAILS_PRECIOS."""
+    if puede_precios(email, db):
+        return email
+    raise HTTPException(status_code=403, detail="No autorizado para editar la lista de precios")

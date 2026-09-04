@@ -24,6 +24,7 @@ from .routers import (
     incidencias,
     instock,
     inventario,
+    precios,
     tablero,
     productos,
     requerimiento,
@@ -100,6 +101,9 @@ app.include_router(requerimiento.router, dependencies=_abastecimiento)
 # dentro, porque cada uno ve una cosa distinta del mismo dato).
 app.include_router(requerimientos.router, dependencies=_protegido)
 app.include_router(catalogo.router, dependencies=_abastecimiento)
+# Lista de precios: ver es de Abastecimiento; editar exige EMAILS_PRECIOS (o admin)
+# y la politica exige admin. Los gates finos van por endpoint dentro del router.
+app.include_router(precios.router, dependencies=_abastecimiento)
 app.include_router(auditoria.router, dependencies=_protegido)
 app.include_router(ventas_historicas.router, dependencies=_abastecimiento)
 app.include_router(inventario.router, dependencies=_abastecimiento)

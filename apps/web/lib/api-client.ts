@@ -144,7 +144,8 @@ export const api = {
       Boolean(data.puede_calibrar ?? data.es_admin),
       Boolean(data.puede_actualizar ?? data.es_admin),
       Boolean(data.es_vendedor),
-      Array.isArray(data.sucursales) ? data.sucursales : []);
+      Array.isArray(data.sucursales) ? data.sucursales : [],
+      Boolean(data.puede_precios ?? data.es_admin));
   },
 
   async health(): Promise<{ status: string }> {
@@ -875,6 +876,140 @@ export const api = {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail ?? "El asistente no respondio");
     }
+    return res.json();
+  },
+
+  // ------------------------------------------------------- Lista de precios
+
+  async precios(
+    f: import("./types").PrecioFiltros,
+    opts: { page?: number; limit?: number; sort?: string } = {}
+  ): Promise<import("./types").PrecioPage> {
+    const p = new URLSearchParams();
+    if (f.q) p.set("q", f.q);
+    (f.rubro ?? []).forEach((v) => p.append("rubro", v));
+    (f.tipo ?? []).forEach((v) => p.append("tipo", v));
+    (f.procedencia ?? []).forEach((v) => p.append("procedencia", v));
+    (f.estado ?? []).forEach((v) => p.append("estado", v));
+    if (f.origen) p.set("origen", f.origen);
+    if (f.con_cambios) p.set("con_cambios", "true");
+    if (f.con_stock) p.set("con_stock", "true");
+    if (opts.page) p.set("page", String(opts.page));
+    if (opts.limit) p.set("limit", String(opts.limit));
+    if (opts.sort) p.set("sort", opts.sort);
+    return getJSON(`/api/precios?${p.toString()}`);
+  },
+
+  async preciosFiltros(): Promise<import("./types").PrecioOpciones> {
+    return getJSON("/api/precios/filtros");
+  },
+
+  async preciosResumen(): Promise<import("./types").PrecioResumen> {
+    return getJSON("/api/precios/resumen");
+  },
+
+  async precioDetalle(producto: string): Promise<import("./types").PrecioDetalle> {
+    return getJSON(`/api/precios/${encodeURIComponent(producto)}`);
+  },
+
+  async guardarPrecioOverride(
+    producto: string,
+    payload: import("./types").PrecioOverrideIn
+  ): Promise<import("./types").PrecioRow> {
+    const res = await req(`/api/precios/${encodeURIComponent(producto)}/override`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo guardar el precio"));
+    return res.json();
+  },
+
+  async quitarPrecioOverride(producto: string): Promise<import("./types").PrecioRow> {
+    const res = await req(`/api/precios/${encodeURIComponent(producto)}/override`, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo volver a la regla"));
+    return res.json();
+  },
+
+  async crearPrecioProducto(
+    payload: import("./types").PrecioProductoNuevo
+  ): Promise<import("./types").PrecioRow> {
+    const res = await req("/api/precios", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo crear el producto"));
+    return res.json();
+  },
+
+  async recalcularPrecios(): Promise<{ productos: number; cambios: number; productos_con_cambios: number }> {
+    const res = await req("/api/precios/recalcular", { method: "POST" });
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo recalcular"));
+    return res.json();
+  },
+
+  async marcarPreciosVistos(productos: string[] | null): Promise<{ vistos: number }> {
+    const res = await req("/api/precios/cambios/vistos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productos }),
+    });
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo marcar como visto"));
+    return res.json();
+  },
+
+  /** Descarga el Excel para el ERP. Devuelve cuantas filas salieron. */
+  async exportarPrecios(opts: { soloDiferencias: boolean; formato: "erp" | "completa" }): Promise<number> {
+    const p = new URLSearchParams();
+    if (opts.soloDiferencias) p.set("solo_diferencias", "true");
+    p.set("formato", opts.formato);
+    const res = await req(`/api/precios/exportar?${p.toString()}`);
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo generar el archivo"));
+    const filas = Number(res.headers.get("X-Filas") ?? "0");
+    const blob = await res.blob();
+    const cd = res.headers.get("Content-Disposition") ?? "";
+    const nombre = /filename="?([^"]+)"?/.exec(cd)?.[1] ?? "precios.xlsx";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = nombre;
+    a.click();
+    URL.revokeObjectURL(url);
+    return filas;
+  },
+
+  async politicaFactores(): Promise<import("./types").PoliticaFactor[]> {
+    return getJSON("/api/precios/politica/factores");
+  },
+
+  async politicaRubros(): Promise<import("./types").PoliticaRubro[]> {
+    return getJSON("/api/precios/politica/rubros");
+  },
+
+  async guardarPoliticaFactores(
+    filas: import("./types").PoliticaFactor[]
+  ): Promise<{ guardados: number; cambios: string[] }> {
+    const res = await req("/api/precios/politica/factores", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filas }),
+    });
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo guardar la politica"));
+    return res.json();
+  },
+
+  async guardarPoliticaRubros(
+    filas: import("./types").PoliticaRubro[]
+  ): Promise<{ guardados: number; cambios: string[] }> {
+    const res = await req("/api/precios/politica/rubros", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filas }),
+    });
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo guardar los rubros"));
     return res.json();
   },
 };

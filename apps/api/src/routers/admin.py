@@ -13,8 +13,10 @@ from ..services import (
     excel_loader,
     lead_time_service,
     motor_comparacion,
+    politica_precio_service,
     powerbi_desktop_loader,
     powerbi_loader,
+    precios_service,
     proveedor_producto_service,
     reemplazo_service,
     stock_service,
@@ -323,3 +325,78 @@ def cargar_desde_powerbi_desktop(db: Session = Depends(get_db)):
         raise HTTPException(status_code=504, detail="Power BI Desktop no respondio a tiempo.") from e
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
+
+
+# ----------------------------------------------------------- lista de precios
+@router.post("/precios/cargar")
+def cargar_precios(payload: dict, db: Session = Depends(get_db)) -> dict:
+    """Carga la lista de precios desde el Excel (por tandas). Admin.
+
+    payload: {"filas": [...], "reemplazar": bool}
+    La primera tanda va con `reemplazar=true` (borra lo que vino del ERP antes;
+    lo creado a mano en la plataforma sobrevive) y las siguientes con false.
+    Cada fila trae las columnas del maestro: producto, glosa, rubro, tipo,
+    procedencia_maestro, procedencia_final, costo, precio_erp, stock,
+    stock_proyectado, obs_precio, precio_fijo, congelar, ultima_venta,
+    ult_recep_importado, ult_pe_nacional, precio_optimo_excel.
+    """
+    filas = payload.get("filas")
+    if not isinstance(filas, list):
+        raise HTTPException(status_code=400, detail="Falta la lista 'filas'")
+    r = precios_service.cargar_maestro(
+        db, filas, reemplazar=bool(payload.get("reemplazar")), usuario="excel",
+    )
+    auditoria_service.registrar(
+        db, accion="precios_cargados", entidad="sistema",
+        detalle=f"Lista de precios: {r['cargados']} filas ({'reemplazo' if payload.get('reemplazar') else 'agregado'})",
+    )
+    db.commit()
+    return r
+
+
+@router.post("/precios/politica")
+def cargar_politica_precios(payload: dict, db: Session = Depends(get_db)) -> dict:
+    """Siembra la politica (factores y rubros) y la lista de no-productos desde el
+    Excel. No pisa una politica que ya exista salvo `reemplazar=true`.
+
+    payload: {"factores": [...], "rubros": [...], "no_productos": [...], "reemplazar": bool,
+              "conservar_clasificacion_excel": bool}
+    """
+    r = politica_precio_service.sembrar(
+        db, payload.get("factores") or [], payload.get("rubros") or [],
+        usuario="excel", reemplazar=bool(payload.get("reemplazar")),
+    )
+    if payload.get("no_productos"):
+        r["no_productos"] = precios_service.cargar_no_productos(db, payload["no_productos"], "excel")
+    if payload.get("precios_sugeridos"):
+        # La lista de Gildemeister del Excel: el precio de los tipo Sugerido.
+        r["precios_sugeridos"] = precios_service.cargar_precios_sugeridos(db, payload["precios_sugeridos"])
+    if payload.get("conservar_clasificacion_excel"):
+        # Donde el Excel dice otra cosa que la regla, se rescata como manual.
+        r["clasificacion_excel"] = precios_service.conservar_clasificacion_excel(db, "excel")
+    auditoria_service.registrar(
+        db, accion="politica_precio_sembrada", entidad="sistema", detalle=str({k: v for k, v in r.items()})[:500],
+    )
+    db.commit()
+    return r
+
+
+@router.post("/precios/compras")
+def publicar_compras_precios(payload: dict, db: Session = Depends(get_db)) -> dict:
+    """El agente publica la ultima compra por producto, que decide la procedencia.
+
+    payload: {"filas": [{producto, ult_recep_importado?, ult_pe_nacional?}]}
+    Sale de los seguimientos de compra (importado -> Fecha Documento Recepcion;
+    nacional y frontera -> Fecha Documento P/E). Fusiona: solo pisa con una
+    fecha mas nueva, nunca borra.
+    """
+    filas = payload.get("filas")
+    if not isinstance(filas, list):
+        raise HTTPException(status_code=400, detail="Falta la lista 'filas'")
+    r = precios_service.cargar_compras(db, filas)
+    auditoria_service.registrar(
+        db, accion="precios_compras_publicadas", entidad="sistema",
+        detalle=f"Compras para precios: {r['actualizados']} productos",
+    )
+    db.commit()
+    return r

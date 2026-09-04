@@ -23,6 +23,8 @@ class LoginResponse(BaseModel):
     solo_lectura: bool = False
     puede_calibrar: bool = False
     puede_actualizar: bool = False
+    # Puede editar la lista de precios (fijar, congelar, crear productos).
+    puede_precios: bool = False
     # Vendedor de sucursal: la interfaz se recorta a armar y seguir requerimientos.
     es_vendedor: bool = False
     # Sus sucursales, para no preguntarselas al armar el carro.
@@ -46,6 +48,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         es_admin=usuario.es_admin, solo_lectura=usuario.solo_lectura,
         puede_calibrar=auth.puede_calibrar(email, db),
         puede_actualizar=auth.puede_actualizar(email, db),
+        puede_precios=auth.puede_precios(email, db),
         es_vendedor=bool(getattr(usuario, "es_vendedor", False)),
         sucursales=auth.sucursales_del_vendedor(email, db),
     )
@@ -61,6 +64,7 @@ def me(email: str = Depends(auth.requiere_auth), db: Session = Depends(get_db)):
         "solo_lectura": bool(usuario and usuario.solo_lectura),
         "puede_calibrar": auth.puede_calibrar(email, db),
         "puede_actualizar": auth.puede_actualizar(email, db),
+        "puede_precios": auth.puede_precios(email, db),
         "es_vendedor": bool(usuario and getattr(usuario, "es_vendedor", False)),
         "sucursales": auth.sucursales_del_vendedor(email, db),
     }

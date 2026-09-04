@@ -9,6 +9,7 @@ const PUEDE_CALIBRAR = "sugerido_puede_calibrar";
 const PUEDE_ACTUALIZAR = "sugerido_puede_actualizar";
 const ES_VENDEDOR = "sugerido_es_vendedor";
 const SUCURSALES = "sugerido_sucursales";
+const PUEDE_PRECIOS = "sugerido_puede_precios";
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -60,6 +61,18 @@ export function getPuedeActualizar(): boolean {
   return v === "1";
 }
 
+/** True si puede editar la lista de precios (fijar, congelar, crear productos):
+ *  admin o autorizado en EMAILS_PRECIOS. Lo decide el BACKEND y viaja en el
+ *  login; el gate real es el 403 del servidor. Ver la lista puede cualquiera de
+ *  Abastecimiento; esto solo decide si se muestran los controles de edicion. */
+export function getPuedePrecios(): boolean {
+  if (typeof window === "undefined") return false;
+  const v = localStorage.getItem(PUEDE_PRECIOS);
+  // Sesion abierta antes de que existiera el flag: caer a es_admin, como Calibracion.
+  if (v === null) return getEsAdmin();
+  return v === "1";
+}
+
 /** True si el usuario es un vendedor de sucursal: la plataforma se le recorta a
  *  armar y seguir sus requerimientos. El gate real es el 403 del backend
  *  (`requiere_comprador`); esto solo decide que se le muestra. */
@@ -83,7 +96,8 @@ export function getSucursales(): string[] {
 
 export function setSession(
   token: string, email: string, nombre: string | null, esAdmin = false, soloLectura = false,
-  puedeCalibrar = false, puedeActualizar = false, esVendedor = false, sucursales: string[] = []
+  puedeCalibrar = false, puedeActualizar = false, esVendedor = false, sucursales: string[] = [],
+  puedePrecios = false
 ) {
   localStorage.setItem(TOKEN, token);
   localStorage.setItem(EMAIL, email);
@@ -95,6 +109,7 @@ export function setSession(
   localStorage.setItem(PUEDE_ACTUALIZAR, puedeActualizar ? "1" : "0");
   localStorage.setItem(ES_VENDEDOR, esVendedor ? "1" : "0");
   localStorage.setItem(SUCURSALES, JSON.stringify(sucursales ?? []));
+  localStorage.setItem(PUEDE_PRECIOS, puedePrecios ? "1" : "0");
 }
 
 export function clearSession() {
@@ -107,6 +122,7 @@ export function clearSession() {
   localStorage.removeItem(PUEDE_ACTUALIZAR);
   localStorage.removeItem(ES_VENDEDOR);
   localStorage.removeItem(SUCURSALES);
+  localStorage.removeItem(PUEDE_PRECIOS);
 }
 
 export function estaAutenticado(): boolean {

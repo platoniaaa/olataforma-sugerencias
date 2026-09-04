@@ -1217,3 +1217,144 @@ export interface Tablero {
     indicadores: string[];
   };
 }
+
+// ----------------------------------------------------------- Lista de precios
+
+/** Una fila de la lista de precios: lo calculado mas lo decidido a mano. */
+export interface PrecioRow {
+  producto: string;
+  glosa: string | null;
+  rubro: string | null;
+  tipo: string | null;
+  /** "manual" | "rubro" | "glosa" */
+  tipo_origen: string | null;
+  procedencia_maestro: string | null;
+  /** "Nacional" | "Importado" | "SIN REVISION" */
+  procedencia_final: string | null;
+  /** "manual" | "rubro" | "compras" | "maestro" | "default" */
+  procedencia_origen: string | null;
+  factor: number | null;
+  costo: number | null;
+  precio_erp: number | null;
+  stock: number | null;
+  stock_transito: number | null;
+  ult_recep_importado: string | null;
+  ult_pe_nacional: string | null;
+  ultima_venta: string | null;
+  precio_sugerido: number | null;
+  precio_calculado: number | null;
+  precio_final: number | null;
+  /** "OK" | "FIJO" | "CONGELADO" | "SUGERIDO" | "SIN REVISION" | "NO PRODUCTO" | "SIN STOCK" */
+  estado: string | null;
+  cambios_pendientes: number;
+  /** "maestro" (vino del ERP) | "manual" (creado desde la plataforma) */
+  origen: string;
+  desviacion_pesos: number | null;
+  desviacion_pct: number | null;
+  precio_fijo: number | null;
+  congelar: boolean;
+  congelado_precio: number | null;
+  no_producto: boolean;
+  obs: string | null;
+  tipo_manual: string | null;
+  procedencia_manual: string | null;
+  editado_por: string | null;
+  editado_en: string | null;
+  actualizado_en: string | null;
+}
+
+export interface PrecioCambio {
+  campo: string;
+  antes: string | null;
+  despues: string | null;
+  visto: boolean;
+  detectado_en: string | null;
+}
+
+export interface PrecioEnvio {
+  precio: number | null;
+  costo: number | null;
+  lote_id: string;
+  enviado_en: string | null;
+  enviado_por: string | null;
+}
+
+export interface PrecioDetalle extends PrecioRow {
+  cambios: PrecioCambio[];
+  envios: PrecioEnvio[];
+}
+
+export interface PrecioPage {
+  items: PrecioRow[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface PrecioFiltros {
+  q?: string;
+  rubro?: string[];
+  tipo?: string[];
+  procedencia?: string[];
+  estado?: string[];
+  origen?: string;
+  con_cambios?: boolean;
+  con_stock?: boolean;
+}
+
+export interface PrecioOpciones {
+  rubros: string[];
+  tipos: string[];
+  procedencias: string[];
+  estados: string[];
+}
+
+export interface PrecioResumen {
+  productos: number;
+  con_cambios: number;
+  por_estado: Record<string, number>;
+  ultimo_recalculo: string | null;
+  ultimo_envio: string | null;
+  overrides: number;
+  pendientes_envio: number;
+}
+
+/** Lo que una persona decide sobre un precio. Solo viajan los campos que se tocan. */
+export interface PrecioOverrideIn {
+  precio_fijo?: number | null;
+  congelar?: boolean;
+  tipo_manual?: string | null;
+  procedencia_manual?: string | null;
+  no_producto?: boolean;
+  obs?: string | null;
+}
+
+export interface PrecioProductoNuevo {
+  producto: string;
+  glosa?: string;
+  rubro?: string;
+  tipo?: string;
+  procedencia?: string;
+  costo?: number;
+  stock?: number;
+  precio_fijo?: number;
+  obs?: string;
+}
+
+export interface PoliticaFactor {
+  tipo: string;
+  procedencia: string;
+  factor: number;
+  descuento_max: number | null;
+  margen_post: number | null;
+  actualizado_por?: string | null;
+  actualizado_en?: string | null;
+}
+
+export interface PoliticaRubro {
+  rubro: string;
+  tipo: string | null;
+  procedencia_forzada: string | null;
+  actualizado_por?: string | null;
+  actualizado_en?: string | null;
+}

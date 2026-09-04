@@ -73,6 +73,12 @@ class Settings(BaseSettings):
     # administre la plataforma. Los admin siempre pueden. Separados por coma.
     emails_calibracion: str = "mramos@curifor.com"
 
+    # Emails no-admin que pueden EDITAR la lista de precios (fijar o congelar un
+    # precio, crear un producto, marcar cambios como vistos, recalcular). Es el
+    # equipo que mantiene la lista para el ERP; la politica de factores sigue
+    # siendo de admin. Los admin siempre pueden. Separados por coma.
+    emails_precios: str = ""
+
     # --- Historia del sugerido y alertas (post-sincronizacion) ---
     # Guarda una foto diaria del sugerido (solo filas con actividad) para ver la
     # evolucion y, mas adelante, medir la precision del modelo.
@@ -186,6 +192,10 @@ SUMMARIZECOLUMNS(
     @property
     def emails_actualizar_set(self) -> set[str]:
         return {e.strip().lower() for e in self.emails_actualizar.split(",") if e.strip()}
+
+    @property
+    def emails_precios_set(self) -> set[str]:
+        return {e.strip().lower() for e in self.emails_precios.split(",") if e.strip()}
 
     @property
     def powerbi_configurado(self) -> bool:

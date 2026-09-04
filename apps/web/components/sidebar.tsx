@@ -23,6 +23,7 @@ import {
   ShoppingCart,
   Sigma,
   SlidersHorizontal,
+  Tag,
   X,
 } from "lucide-react";
 import {
@@ -65,6 +66,7 @@ const NAV: NavItem[] = [
   { href: "/ventas-historicas", label: "Ventas", icon: History },
   { href: "/inventario", label: "Inventario", icon: Boxes },
   { href: "/instock", label: "InStock", icon: PackageCheck },
+  { href: "/precios", label: "Precios", icon: Tag },
   { href: "/simulador", label: "Simulador", icon: FlaskConical },
   { href: "/incidencias", label: "Incidencias", icon: AlertCircle },
   { href: "/auditoria", label: "Auditoría", icon: FileText },
