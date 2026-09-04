@@ -59,9 +59,14 @@ REVISION` (queda sin precio hasta que alguien decida).
 - **Compras** (la regla de procedencia): `POST /api/admin/precios/compras` con
   la ultima recepcion importada y el ultimo P/E nacional por producto. Fusiona:
   nunca borra una fecha.
-- **Stock, costo, precio del proveedor y ultima venta** los toma el recalculo de
-  las tablas que el motor ya publica (`stock_unificado`, `stock_transito`,
-  `dim_producto` / `producto_catalogo`, `sugerido`, `venta_historica`).
+- **Costos**: `POST /api/admin/precios/costos` con `{producto, costo}` de TODOS
+  los productos (columna Costo del Excel de stock del ERP), en la misma corrida
+  en que el motor publica el stock. Para lo que el sugerido evalua, ademas manda
+  `dim_producto.costo_unitario` (lo reconstruye `cargar-sugerido`). NO se usa
+  `producto_catalogo.costo`: es una carga unica sin fecha.
+- **Stock, precio del proveedor y ultima venta** los toma el recalculo de las
+  tablas que el motor ya publica (`stock_unificado`, `stock_transito`,
+  `sugerido`, `venta_historica`).
 
 ## Exportar al ERP
 

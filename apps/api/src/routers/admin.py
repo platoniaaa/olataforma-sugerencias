@@ -400,3 +400,24 @@ def publicar_compras_precios(payload: dict, db: Session = Depends(get_db)) -> di
     )
     db.commit()
     return r
+
+
+@router.post("/precios/costos")
+def publicar_costos_precios(payload: dict, db: Session = Depends(get_db)) -> dict:
+    """El motor publica el costo de todos los productos (Excel de stock del ERP,
+    columna Costo), en la misma corrida en que publica el stock.
+
+    payload: {"filas": [{producto, costo}]}
+    Es la fuente de costo de la lista de precios para lo que el sugerido no
+    evalua. Un costo vacio no pisa el que hay.
+    """
+    filas = payload.get("filas")
+    if not isinstance(filas, list):
+        raise HTTPException(status_code=400, detail="Falta la lista 'filas'")
+    r = precios_service.cargar_costos(db, filas)
+    auditoria_service.registrar(
+        db, accion="precios_costos_publicados", entidad="sistema",
+        detalle=f"Costos para precios: {r['actualizados']} productos",
+    )
+    db.commit()
+    return r
