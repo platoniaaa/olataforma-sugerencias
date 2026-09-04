@@ -246,6 +246,15 @@ def test_exportar_erp_y_solo_diferencias(client, lista_cargada):
     assert client.get("/api/precios/resumen").json()["pendientes_envio"] == 0
 
 
+def test_el_equipo_de_precios_puede_editar_sin_ser_admin(db_session):
+    # Van por defecto en el codigo (como Calibracion); EMAILS_PRECIOS en Render solo sobreescribe.
+    from src.services import auth
+    for email in ("fmora@curifor.com", "hgarcia@curifor.com", "mramos@curifor.com", "asalinas@curifor.com"):
+        assert auth.puede_precios(email, db_session), email
+    assert not auth.puede_precios("noadmin@curifor.com", db_session)
+    assert auth.puede_precios("test@curifor.com", db_session)  # admin, sin estar en la lista
+
+
 def test_politica_solo_admin_y_recalcula(client, lista_cargada, db_session):
     svc.recalcular(lista_cargada)
     r = client.put("/api/precios/politica/factores",

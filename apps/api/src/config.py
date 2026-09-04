@@ -77,7 +77,11 @@ class Settings(BaseSettings):
     # precio, crear un producto, marcar cambios como vistos, recalcular). Es el
     # equipo que mantiene la lista para el ERP; la politica de factores sigue
     # siendo de admin. Los admin siempre pueden. Separados por coma.
-    emails_precios: str = ""
+    # Igual que Calibracion, el equipo va por defecto en el codigo (no son
+    # secretos) y la variable EMAILS_PRECIOS de Render solo sobreescribe.
+    emails_precios: str = (
+        "fmora@curifor.com,hgarcia@curifor.com,mramos@curifor.com,asalinas@curifor.com"
+    )
 
     # --- Historia del sugerido y alertas (post-sincronizacion) ---
     # Guarda una foto diaria del sugerido (solo filas con actividad) para ver la
