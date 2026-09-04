@@ -42,7 +42,6 @@ from ..models import (
     PrecioEnvio,
     PrecioOverride,
     PrecioProducto,
-    ProductoCatalogo,
     StockTransito,
     StockUnificado,
     Sugerido,
@@ -219,17 +218,17 @@ def _stock(db: Session, codigos: list[str]) -> tuple[dict[str, float], dict[str,
 
 
 def _costos(db: Session, codigos: list[str]) -> dict[str, float]:
-    """El costo mas fresco que tiene la plataforma: el del BI (dim_producto) y,
-    si no esta, el del maestro del ERP (producto_catalogo)."""
+    """El costo que publica el motor en cada corrida: `dim_producto`, que se
+    reconstruye con el sugerido desde el Excel de stock del ERP (columna Costo).
+
+    Cubre solo los productos que el sugerido evalua. Para el resto, el costo
+    vive en `precio_producto.costo` y lo actualiza `cargar_costos` (el motor lo
+    publica con el stock). NO se usa `producto_catalogo.costo`: es una carga
+    unica desde un CSV sin fecha, y el 04-09-2026 pisaba costos vigentes con
+    valores viejos."""
     costo: dict[str, float] = {}
     for lote in _en_lotes(codigos):
         try:
-            for p, c in db.execute(
-                select(ProductoCatalogo.producto, ProductoCatalogo.costo)
-                .where(ProductoCatalogo.producto.in_(lote))
-            ).all():
-                if c and c > 0:
-                    costo[p] = float(c)
             for p, c in db.execute(
                 select(DimProducto.producto, DimProducto.costo_unitario)
                 .where(DimProducto.producto.in_(lote))
@@ -1025,3 +1024,29 @@ def cargar_precios_sugeridos(db: Session, filas: list[dict]) -> dict:
         n += r.rowcount
     db.commit()
     return {"actualizados": n}
+
+
+def cargar_costos(db: Session, filas: list[dict]) -> dict:
+    """El motor publica el costo de TODOS los productos (columna Costo del Excel
+    de stock del ERP), en la misma corrida en que publica el stock.
+
+    Cada fila: producto, costo. Un costo vacio o cero no pisa el que hay: un
+    producto sin costo en el Excel de stock es un producto que no se compro, y
+    el ultimo costo conocido sigue siendo el mejor dato para su precio."""
+    tenant = settings.default_tenant_id
+    existentes = {p for (p,) in db.execute(
+        select(PrecioProducto.producto).where(PrecioProducto.tenant_id == tenant)
+    ).all()}
+    n = 0; ignorados = 0
+    for f in filas:
+        producto = (f.get("producto") or "").strip()
+        costo = _num(f.get("costo"))
+        if not producto or producto not in existentes or not costo or costo <= 0:
+            ignorados += 1
+            continue
+        r = db.execute(update(PrecioProducto).where(
+            PrecioProducto.tenant_id == tenant, PrecioProducto.producto == producto,
+        ).values(costo=costo))
+        n += r.rowcount
+    db.commit()
+    return {"actualizados": n, "ignorados": ignorados}

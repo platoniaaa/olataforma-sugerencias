@@ -246,6 +246,29 @@ def test_exportar_erp_y_solo_diferencias(client, lista_cargada):
     assert client.get("/api/precios/resumen").json()["pendientes_envio"] == 0
 
 
+def test_el_costo_viene_del_motor_no_del_catalogo_viejo(client, lista_cargada, en_catalogo):
+    from src.models import DimProducto
+    db = lista_cargada
+    svc.recalcular(db)
+    # El catalogo (CSV de carga unica) trae otro costo: NO se usa.
+    en_catalogo("71 AAA1", costo=99999)
+    svc.recalcular(db)
+    assert db.query(PrecioProducto).filter_by(producto="71 AAA1").one().costo == 10000
+    # Lo que publica el motor con el sugerido (dim_producto) SI manda.
+    db.add(DimProducto(producto="71 AAA1", tenant_id="curifor", costo_unitario=12000))
+    db.commit()
+    r = svc.recalcular(db)
+    p = db.query(PrecioProducto).filter_by(producto="71 AAA1").one()
+    assert p.costo == 12000 and p.precio_final == round(12000 * 1.78) and r["por_campo"]["costo"] == 1
+    # Y el costo publicado aparte (Excel de stock, todos los productos) tambien.
+    r = client.post("/api/admin/precios/costos", json={"filas": [
+        {"producto": "13 BBB2", "costo": 7000}, {"producto": "13 BBB2 no existe", "costo": 1},
+        {"producto": "71 CCC3", "costo": ""},
+    ]})
+    assert r.status_code == 200 and r.json() == {"actualizados": 1, "ignorados": 2}
+    assert db.query(PrecioProducto).filter_by(producto="13 BBB2").one().costo == 7000
+
+
 def test_el_equipo_de_precios_puede_editar_sin_ser_admin(db_session):
     # Van por defecto en el codigo (como Calibracion); EMAILS_PRECIOS en Render solo sobreescribe.
     from src.services import auth
