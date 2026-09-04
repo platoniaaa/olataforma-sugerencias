@@ -227,7 +227,31 @@ def _salud_del_dato(db: Session, servicio: dict) -> list[dict]:
         ).all())
         por_crear = len(vigentes - existentes)
 
+    # Cuantos dias tienen los datos del portal de FORD.
+    #
+    # Va aca y no en un aviso aparte porque los avisos ya existian -el motor deja
+    # incidencia cuando la corrida semanal falla- y nadie los mira. El 31-08-2026
+    # la extraccion fallo por sesion vencida y se supo 13 dias despues, cuando los
+    # reemplazos y los precios ya estaban viejos. En esta tabla la ve el mismo que
+    # abre el tablero.
+    extraido = db.scalar(
+        select(func.max(ReemplazoFord.extraido_en)).where(
+            ReemplazoFord.tenant_id == tenant)
+    )
+    dias_ford = None
+    if extraido:
+        try:
+            dias_ford = (date.today() - date.fromisoformat(str(extraido)[:10])).days
+        except ValueError:
+            dias_ford = None
+
     return [
+        {"que": "Dias desde la ultima consulta al portal de FORD",
+         "valor": dias_ford if dias_ford is not None else 0, "de": None,
+         # La corrida es semanal: pasados 10 dias hubo al menos una que no corrio.
+         "alerta": dias_ford is None or dias_ford > 10,
+         "detalle": "Trae los reemplazos y los precios. Si se pasa de 10 dias, la "
+                    "corrida semanal fallo -normalmente por la sesion del portal-."},
         {"que": "Filas con sugerido y sin proveedor",
          "valor": sin_proveedor, "de": pide_total,
          "alerta": pide_total > 0 and sin_proveedor / pide_total > 0.03,

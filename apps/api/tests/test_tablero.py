@@ -197,3 +197,53 @@ def test_el_endpoint_responde_el_tablero(client, db_session):
 @pytest.mark.parametrize("malo", ["agosto", "2026-13", "2026/08", "26-08"])
 def test_un_periodo_mal_escrito_lo_dice_en_vez_de_reventar(client, malo):
     assert client.get(f"/api/tablero?periodo={malo}").status_code == 422
+
+
+# --- La antiguedad de los datos de FORD ------------------------------------------
+#
+# La corrida semanal fallo el 31-08-2026 por sesion vencida, dejo incidencia, y se
+# supo 13 dias despues. Los avisos ya existian: lo que faltaba era que el dato
+# estuviera donde alguien mira.
+
+
+def _fila_ford(db):
+    salud = tablero_service.mensual(db, PERIODO)["salud_del_dato"]
+    return next(f for f in salud if "portal de FORD" in f["que"])
+
+
+def test_muestra_cuantos_dias_tienen_los_datos_de_ford(db_session):
+    from datetime import timedelta
+
+    hace_una_semana = (date.today() - timedelta(days=7)).isoformat()
+    db_session.add(ReemplazoFord(tenant_id="curifor", producto="17 A",
+                                 reemplazado_por="17 B", extraido_en=hace_una_semana))
+    db_session.commit()
+
+    f = _fila_ford(db_session)
+
+    assert f["valor"] == 7
+    assert f["alerta"] is False, "una semana es lo normal: la corrida es semanal"
+
+
+def test_avisa_cuando_los_datos_de_ford_pasan_de_una_corrida(db_session):
+    """Pasados 10 dias hubo al menos una corrida semanal que no se hizo."""
+    from datetime import timedelta
+
+    hace_trece = (date.today() - timedelta(days=13)).isoformat()
+    db_session.add(ReemplazoFord(tenant_id="curifor", producto="17 A",
+                                 reemplazado_por="17 B", extraido_en=hace_trece))
+    db_session.commit()
+
+    f = _fila_ford(db_session)
+
+    assert f["valor"] == 13
+    assert f["alerta"] is True
+
+
+def test_sin_fecha_de_extraccion_tambien_avisa(db_session):
+    """No saber cuando se consulto es peor que saber que fue hace mucho."""
+    db_session.add(ReemplazoFord(tenant_id="curifor", producto="17 A",
+                                 reemplazado_por="17 B", extraido_en=None))
+    db_session.commit()
+
+    assert _fila_ford(db_session)["alerta"] is True
