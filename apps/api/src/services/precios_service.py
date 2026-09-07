@@ -1026,6 +1026,65 @@ def cargar_precios_sugeridos(db: Session, filas: list[dict]) -> dict:
     return {"actualizados": n}
 
 
+def eliminar(db: Session, productos: list[str], usuario: str | None) -> dict:
+    """Saca productos de la lista de precios (no del ERP: solo dejan de tener
+    precio calculado aca).
+
+    Se usa cuando la depuracion del maestro decide que un codigo ya no va. Es
+    quirurgico a proposito: recargar la lista entera con `reemplazar` borra
+    60 mil filas e inserta otras tantas en una sola transaccion, y eso se cae
+    por timeout contra Supabase.
+
+    Se conserva el override que tenga un precio fijo o un congelado: es una
+    decision que alguien tomo y su borrado seria irreversible. Los overrides
+    que solo traen la clasificacion deducida (tipo/procedencia) se van con el
+    producto, para no dejar basura."""
+    tenant = settings.default_tenant_id
+    codigos = [p.strip() for p in productos if (p or "").strip()]
+    if not codigos:
+        return {"eliminados": 0, "no_estaban": 0, "overrides_eliminados": 0,
+                "overrides_conservados": 0}
+    n = n_ov = 0
+    conservados: list[str] = []
+    for lote in _en_lotes(codigos):
+        existen = {p for (p,) in db.execute(
+            select(PrecioProducto.producto).where(
+                PrecioProducto.tenant_id == tenant, PrecioProducto.producto.in_(lote),
+            )
+        ).all()}
+        if not existen:
+            continue
+        # Los overrides con decision humana de precio se quedan; el resto se va.
+        con_decision = {p for (p,) in db.execute(
+            select(PrecioOverride.producto).where(
+                PrecioOverride.tenant_id == tenant,
+                PrecioOverride.producto.in_(list(existen)),
+                or_(PrecioOverride.precio_fijo.isnot(None), PrecioOverride.congelar.is_(True)),
+            )
+        ).all()}
+        conservados += sorted(con_decision)
+        borrables = sorted(existen - con_decision)
+        if borrables:
+            n_ov += db.execute(delete(PrecioOverride).where(
+                PrecioOverride.tenant_id == tenant, PrecioOverride.producto.in_(borrables),
+            )).rowcount or 0
+        db.execute(delete(PrecioCambio).where(
+            PrecioCambio.tenant_id == tenant, PrecioCambio.producto.in_(sorted(existen)),
+        ))
+        n += db.execute(delete(PrecioProducto).where(
+            PrecioProducto.tenant_id == tenant, PrecioProducto.producto.in_(sorted(existen)),
+        )).rowcount or 0
+        db.commit()
+    auditoria_service.registrar(
+        db, accion="precios_eliminados", entidad="precios", usuario_email=usuario,
+        detalle=f"{n} productos fuera de la lista de precios",
+    )
+    db.commit()
+    return {"eliminados": n, "no_estaban": len(codigos) - n,
+            "overrides_eliminados": n_ov, "overrides_conservados": len(conservados),
+            "conservados": conservados[:50]}
+
+
 def cargar_costos(db: Session, filas: list[dict]) -> dict:
     """El motor publica el costo de TODOS los productos (columna Costo del Excel
     de stock del ERP), en la misma corrida en que publica el stock.

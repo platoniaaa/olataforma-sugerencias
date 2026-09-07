@@ -402,6 +402,22 @@ def publicar_compras_precios(payload: dict, db: Session = Depends(get_db)) -> di
     return r
 
 
+@router.post("/precios/eliminar")
+def eliminar_precios(payload: dict, db: Session = Depends(get_db)) -> dict:
+    """Saca productos de la lista de precios. Admin.
+
+    payload: {"productos": ["71 2720142", ...]}
+    Para cuando la depuracion del maestro decide que un codigo ya no va. No los
+    da de baja en el ERP: solo dejan de tener precio calculado aca. Un override
+    con precio fijo o congelado se conserva (es una decision humana).
+    """
+    productos = payload.get("productos")
+    if not isinstance(productos, list):
+        raise HTTPException(status_code=400, detail="Falta la lista 'productos'")
+    r = precios_service.eliminar(db, productos, "excel")
+    return r
+
+
 @router.post("/precios/costos")
 def publicar_costos_precios(payload: dict, db: Session = Depends(get_db)) -> dict:
     """El motor publica el costo de todos los productos (Excel de stock del ERP,

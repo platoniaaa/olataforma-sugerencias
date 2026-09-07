@@ -269,6 +269,24 @@ def test_el_costo_viene_del_motor_no_del_catalogo_viejo(client, lista_cargada, e
     assert db.query(PrecioProducto).filter_by(producto="13 BBB2").one().costo == 7000
 
 
+def test_eliminar_saca_productos_pero_respeta_el_precio_fijo(client, lista_cargada):
+    db = lista_cargada
+    svc.recalcular(db)
+    # 13 BBB2 tiene precio fijo puesto a mano: su override sobrevive al borrado.
+    r = client.post("/api/admin/precios/eliminar",
+                    json={"productos": ["71 AAA1", "13 BBB2", "71 NO EXISTE"]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["eliminados"] == 2 and body["no_estaban"] == 1
+    assert body["overrides_conservados"] == 1 and body["conservados"] == ["13 BBB2"]
+    assert client.get("/api/precios").json()["total"] == 1          # queda 71 CCC3
+    assert client.get("/api/precios/71 AAA1").status_code == 404
+    ovs = svc._overrides(db)
+    assert "13 BBB2" in ovs and ovs["13 BBB2"]["precio_fijo"] == 990
+    # Un recalculo despues del borrado no revive nada.
+    assert svc.recalcular(db)["productos"] == 1
+
+
 def test_el_equipo_de_precios_puede_editar_sin_ser_admin(db_session):
     # Van por defecto en el codigo (como Calibracion); EMAILS_PRECIOS en Render solo sobreescribe.
     from src.services import auth
