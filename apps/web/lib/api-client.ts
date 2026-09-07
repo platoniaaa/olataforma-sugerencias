@@ -925,6 +925,13 @@ export const api = {
     return res.json();
   },
 
+  /** Saca el producto de la lista de precios. No lo da de baja en el ERP. */
+  async eliminarPrecioProducto(producto: string): Promise<{ eliminados: number; overrides_conservados: number }> {
+    const res = await req(`/api/precios/${encodeURIComponent(producto)}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo sacar de la lista"));
+    return res.json();
+  },
+
   async quitarPrecioOverride(producto: string): Promise<import("./types").PrecioRow> {
     const res = await req(`/api/precios/${encodeURIComponent(producto)}/override`, {
       method: "DELETE",

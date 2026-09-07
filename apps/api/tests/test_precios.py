@@ -339,3 +339,97 @@ def test_politica_solo_admin_y_recalcula(client, lista_cargada, db_session):
             assert c2.get("/api/precios").status_code == 200  # ver, si puede
     finally:
         app.dependency_overrides[requiere_auth] = lambda: "test@curifor.com"
+
+
+# --- Sacar un producto de la lista ----------------------------------------------
+#
+# `eliminar` ya existia pero solo se llegaba por la ruta de admin y por lotes,
+# pensada para la depuracion del maestro. Quien mantiene la lista necesita sacar
+# UN codigo desde la pantalla, con el mismo permiso con que lo crea.
+
+
+def _producto(db, codigo="71 PARA-BORRAR", **extra):
+    from src.models import PrecioProducto
+
+    datos = {"tenant_id": "curifor", "producto": codigo, "glosa": "REPUESTO",
+             "rubro": "71", "costo": 1000.0, "stock": 5.0, "origen": "maestro"}
+    datos.update(extra)
+    p = PrecioProducto(**datos)
+    db.add(p)
+    db.commit()
+    return p
+
+
+def test_saca_un_producto_de_la_lista(db_session, client):
+    from src.models import PrecioProducto
+
+    _producto(db_session)
+
+    r = client.delete("/api/precios/71 PARA-BORRAR")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["eliminados"] == 1
+    assert db_session.query(PrecioProducto).filter_by(producto="71 PARA-BORRAR").first() is None
+
+
+def test_un_codigo_que_no_esta_da_404(db_session, client):
+    assert client.delete("/api/precios/71 NO-EXISTE").status_code == 404
+
+
+def test_el_precio_fijo_sobrevive_al_borrado(db_session, client):
+    """Es una decision de una persona: si el producto vuelve, la decision vuelve
+    con el. Borrarla seria irreversible y nadie la escribio dos veces."""
+    from src.models import PrecioOverride, PrecioProducto
+
+    _producto(db_session)
+    db_session.add(PrecioOverride(tenant_id="curifor", producto="71 PARA-BORRAR",
+                                  precio_fijo=9990.0, obs="lo pidio el jefe"))
+    db_session.commit()
+
+    r = client.delete("/api/precios/71 PARA-BORRAR")
+
+    assert r.status_code == 200
+    assert r.json()["overrides_conservados"] == 1
+    assert db_session.query(PrecioProducto).filter_by(producto="71 PARA-BORRAR").first() is None
+    ov = db_session.query(PrecioOverride).filter_by(producto="71 PARA-BORRAR").first()
+    assert ov is not None and ov.precio_fijo == 9990.0
+
+
+def test_el_override_de_pura_clasificacion_se_va_con_el_producto(db_session, client):
+    """No es una decision de precio: es lo que dedujo la carga. Dejarlo seria
+    basura que reaparece si el codigo vuelve por otro motivo."""
+    from src.models import PrecioOverride
+
+    _producto(db_session)
+    db_session.add(PrecioOverride(tenant_id="curifor", producto="71 PARA-BORRAR",
+                                  tipo_manual="Liviano"))
+    db_session.commit()
+
+    r = client.delete("/api/precios/71 PARA-BORRAR")
+
+    assert r.json()["overrides_eliminados"] == 1
+    assert db_session.query(PrecioOverride).filter_by(producto="71 PARA-BORRAR").first() is None
+
+
+def test_un_codigo_con_barra_se_puede_borrar(db_session, client):
+    """Los codigos llevan "/" adentro (`80 PR/51822`). Sin `:path` en la ruta, el
+    servidor decodifica el %2F antes de enrutar y no calza con nada."""
+    from src.models import PrecioProducto
+
+    _producto(db_session, codigo="80 PR/51822")
+
+    r = client.delete("/api/precios/80 PR/51822")
+
+    assert r.status_code == 200, r.text
+    assert db_session.query(PrecioProducto).filter_by(producto="80 PR/51822").first() is None
+
+
+def test_borrar_no_toca_el_resto_de_la_lista(db_session, client):
+    from src.models import PrecioProducto
+
+    _producto(db_session, codigo="71 UNO")
+    _producto(db_session, codigo="71 DOS")
+
+    client.delete("/api/precios/71 UNO")
+
+    assert db_session.query(PrecioProducto).filter_by(producto="71 DOS").first() is not None

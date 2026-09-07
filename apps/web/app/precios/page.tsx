@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  AlertCircle, Bell, Columns3, Download, Loader2, Plus, RefreshCw, Search, Sigma, Tag,
+  AlertCircle, Bell, Columns3, Download, Loader2, Plus, RefreshCw, Search, Sigma, Tag, Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -352,6 +352,28 @@ function ModalProducto({ producto, puedeEditar, tipos, onCerrar, onGuardado }: {
     }
   }
 
+  async function sacarDeLaLista() {
+    // Se avisa lo que NO hace: nadie espera que "eliminar" deje el producto
+    // intacto en el ERP, y esa es justo la parte que confunde.
+    if (!confirm(
+      `¿Sacar ${producto} de la lista de precios?
+
+Deja de tener precio calculado y no va a salir en el envío al ERP. NO lo da de baja en el ERP.
+
+Si tiene precio fijo o congelado, esa decisión se conserva por si el producto vuelve.`
+    )) return;
+    setGuardando(true);
+    setError(null);
+    try {
+      await api.eliminarPrecioProducto(producto);
+      await onGuardado();
+      onCerrar();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo sacar de la lista.");
+      setGuardando(false);
+    }
+  }
+
   async function volverALaRegla() {
     if (!confirm(`¿Quitar toda decisión manual de ${producto} y volver a la regla?`)) return;
     setGuardando(true);
@@ -471,9 +493,20 @@ function ModalProducto({ producto, puedeEditar, tipos, onCerrar, onGuardado }: {
             {error && <p className="text-sm text-rose-700">{error}</p>}
             {puedeEditar && (
               <div className="flex items-center justify-between gap-2 border-t border-ink-100 pt-3">
-                {tieneOverride ? (
-                  <Button variant="ghost" size="sm" disabled={guardando} onClick={() => void volverALaRegla()}>Volver a la regla</Button>
-                ) : <span />}
+                <div className="flex gap-2">
+                  {tieneOverride && (
+                    <Button variant="ghost" size="sm" disabled={guardando} onClick={() => void volverALaRegla()}>Volver a la regla</Button>
+                  )}
+                  {/* Sacar de la lista es distinto de "volver a la regla": el
+                      producto deja de existir aca y de salir en el envio al ERP.
+                      Por eso pide confirmacion y dice que NO lo da de baja en el
+                      ERP, que es lo primero que alguien va a suponer. */}
+                  <Button variant="ghost" size="sm" disabled={guardando}
+                          className="text-rose-700 hover:bg-rose-50"
+                          onClick={() => void sacarDeLaLista()}>
+                    <Trash2 size={14} /> Sacar de la lista
+                  </Button>
+                </div>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={onCerrar}>Cerrar</Button>
                   <Button size="sm" disabled={guardando} onClick={() => void guardar()}>

@@ -175,6 +175,29 @@ def quitar_override(
 
 
 # ------------------------------------------------------------------ politica
+@router.delete("/{producto:path}", status_code=200)
+def eliminar(
+    producto: str, db: Session = Depends(get_db), email: str = Depends(requiere_precios),
+) -> dict:
+    """Saca UN producto de la lista de precios.
+
+    No lo da de baja en el ERP: solo deja de tener precio calculado aca y de
+    salir en la exportacion. Vuelve si alguien recarga el maestro.
+
+    Reusa `precios_service.eliminar`, que ya conserva el override cuando trae un
+    precio fijo o un congelado: es una decision de una persona y borrarla seria
+    irreversible. Si el producto vuelve, la decision vuelve con el.
+
+    Va DESPUES de `/{producto}/override` en el archivo: FastAPI resuelve por
+    orden y `{producto:path}` es codicioso, asi que declarado antes se comeria
+    esa ruta.
+    """
+    r = precios_service.eliminar(db, [producto], email)
+    if not r["eliminados"]:
+        raise HTTPException(status_code=404, detail=f"{producto} no esta en la lista de precios")
+    return r
+
+
 @router.put("/politica/factores")
 def guardar_factores(
     payload: FactoresIn, db: Session = Depends(get_db), email: str = Depends(requiere_admin),
