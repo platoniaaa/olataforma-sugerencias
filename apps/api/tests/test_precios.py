@@ -296,6 +296,29 @@ def test_el_equipo_de_precios_puede_editar_sin_ser_admin(db_session):
     assert auth.puede_precios("test@curifor.com", db_session)  # admin, sin estar en la lista
 
 
+def test_pendientes_de_envio_se_cuentan_en_sql_y_coinciden(client, lista_cargada):
+    """El contador de `resumen` tiene que dar lo mismo que la lista del export.
+
+    Se cuenta en SQL porque materializar las 40 mil filas en cada carga de la
+    pantalla hacia que Render cortara la request con un 500."""
+    db = lista_cargada
+    svc.recalcular(db)
+    assert svc.contar_diferencias(db) == len(svc._diferencias(db)) == 3
+    assert client.get("/api/precios/resumen").json()["pendientes_envio"] == 3
+    # Se exporta todo: deja de haber pendientes.
+    client.get("/api/precios/exportar")
+    assert svc.contar_diferencias(db) == len(svc._diferencias(db)) == 0
+    # Cambia un precio: vuelve a haber uno solo.
+    client.put("/api/precios/71 AAA1/override", json={"precio_fijo": 12345})
+    assert svc.contar_diferencias(db) == len(svc._diferencias(db)) == 1
+    # Y si cambia solo el costo, tambien cuenta (el ERP recibe costo).
+    client.get("/api/precios/exportar")
+    p = db.query(PrecioProducto).filter_by(producto="13 BBB2").one()
+    p.costo = (p.costo or 0) + 500
+    db.commit()
+    assert svc.contar_diferencias(db) == len(svc._diferencias(db)) == 1
+
+
 def test_politica_solo_admin_y_recalcula(client, lista_cargada, db_session):
     svc.recalcular(lista_cargada)
     r = client.put("/api/precios/politica/factores",

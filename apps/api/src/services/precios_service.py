@@ -542,7 +542,7 @@ def resumen(db: Session) -> dict:
         "ultimo_recalculo": ultima.isoformat() if ultima else None,
         "ultimo_envio": ultimo_envio.isoformat() if ultimo_envio else None,
         "overrides": overrides,
-        "pendientes_envio": len(_diferencias(db)),
+        "pendientes_envio": contar_diferencias(db),
     }
 
 
@@ -730,25 +730,67 @@ def marcar_vistos(db: Session, productos: list[str] | None, usuario: str | None)
 # --------------------------------------------------------------- exportacion
 def _ultimo_envio(db: Session) -> dict[str, tuple[float | None, float | None]]:
     """{producto: (precio, costo)} del envio mas reciente de cada producto."""
-    tenant = settings.default_tenant_id
-    sub = (
-        select(PrecioEnvio.producto, func.max(PrecioEnvio.enviado_en).label("m"))
-        .where(PrecioEnvio.tenant_id == tenant).group_by(PrecioEnvio.producto).subquery()
-    )
+    e = _sub_ultimo_envio(settings.default_tenant_id)
     try:
-        filas = db.execute(
-            select(PrecioEnvio.producto, PrecioEnvio.precio, PrecioEnvio.costo)
-            .join(sub, (PrecioEnvio.producto == sub.c.producto) & (PrecioEnvio.enviado_en == sub.c.m))
-            .where(PrecioEnvio.tenant_id == tenant)
-        ).all()
+        filas = db.execute(select(e.c.producto, e.c.precio, e.c.costo)).all()
     except Exception:  # noqa: BLE001
         db.rollback()
         return {}
     return {p: (pr, co) for p, pr, co in filas}
 
 
+def _sub_ultimo_envio(tenant: str):
+    """Subconsulta {producto -> precio, costo} del envio mas reciente de cada uno."""
+    maxs = (
+        select(PrecioEnvio.producto.label("producto"),
+               func.max(PrecioEnvio.enviado_en).label("m"))
+        .where(PrecioEnvio.tenant_id == tenant)
+        .group_by(PrecioEnvio.producto)
+        .subquery()
+    )
+    return (
+        select(PrecioEnvio.producto, PrecioEnvio.precio, PrecioEnvio.costo)
+        .join(maxs, (PrecioEnvio.producto == maxs.c.producto)
+              & (PrecioEnvio.enviado_en == maxs.c.m))
+        .where(PrecioEnvio.tenant_id == tenant)
+        .subquery()
+    )
+
+
+def contar_diferencias(db: Session) -> int:
+    """Cuantos productos saldrian en un envio de solo diferencias.
+
+    Se cuenta en SQL a proposito: `_diferencias` materializa las ~40 mil filas y
+    esto lo llama `resumen`, que corre cada vez que alguien abre la pantalla.
+    Con la lista completa eso tardaba lo suficiente como para que Render cortara
+    la request y la pantalla mostrara un 500."""
+    tenant = settings.default_tenant_id
+    e = _sub_ultimo_envio(tenant)
+    try:
+        return db.scalar(
+            select(func.count())
+            .select_from(PrecioProducto)
+            .outerjoin(e, e.c.producto == PrecioProducto.producto)
+            .where(
+                PrecioProducto.tenant_id == tenant,
+                PrecioProducto.precio_final.isnot(None),
+                or_(
+                    e.c.producto.is_(None),
+                    e.c.precio.is_distinct_from(PrecioProducto.precio_final),
+                    e.c.costo.is_distinct_from(func.round(func.coalesce(PrecioProducto.costo, 0))),
+                ),
+            )
+        ) or 0
+    except Exception:  # noqa: BLE001 - tabla ausente en un despliegue viejo
+        db.rollback()
+        return 0
+
+
 def _diferencias(db: Session) -> list[PrecioProducto]:
-    """Productos cuyo precio o costo actual difiere del ultimo enviado (o nunca enviados)."""
+    """Productos cuyo precio o costo actual difiere del ultimo enviado (o nunca enviados).
+
+    Materializa las filas porque el export las necesita. Para contarlas esta
+    `contar_diferencias`, que lo hace en SQL."""
     tenant = settings.default_tenant_id
     ultimo = _ultimo_envio(db)
     filas = db.scalars(select(PrecioProducto).where(PrecioProducto.tenant_id == tenant)).all()
