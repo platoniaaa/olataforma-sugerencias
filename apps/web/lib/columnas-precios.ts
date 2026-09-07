@@ -1,5 +1,6 @@
 // Definicion central de las columnas de la lista de precios.
-import type { PrecioRow } from "./types";
+import { formatoCLP, formatoNumero } from "./formato";
+import type { PrecioDetalle, PrecioRow } from "./types";
 
 export type TipoColPrecio = "texto" | "numero" | "decimal" | "clp" | "pct" | "fecha" | "estado" | "bool";
 
@@ -76,4 +77,26 @@ export function claseEstado(estado: string | null | undefined): string {
     default:
       return "bg-ink-100 text-ink-500";
   }
+}
+
+
+/**
+ * La cuenta que dio el precio, en una línea.
+ *
+ * Antes había que armarla mentalmente saltando entre "Costo", "Factor" y
+ * "Precio calculado", tres filas separadas de una lista de once. Y cuando el
+ * precio NO salía de esa cuenta —fijo, congelado, sin stock— nada lo decía: el
+ * factor y el costo seguían ahí, invitando a multiplicarlos y a no cuadrar.
+ */
+export function explicacionPrecio(d: PrecioDetalle): string {
+  if (d.precio_fijo !== null && d.precio_fijo !== undefined) return "Precio fijo puesto a mano";
+  if (d.congelar) return "Congelado: no sigue al costo";
+  if (d.no_producto) return "No es un producto: sin precio";
+  if ((d.stock ?? 0) <= 0 && (d.stock_transito ?? 0) <= 0) return "Sin stock ni tránsito → 0";
+  if ((d.tipo ?? "").toLowerCase() === "sugerido") return "Precio de lista del proveedor";
+  if (d.costo && d.factor) {
+    return `${formatoCLP(d.costo)} × ${formatoNumero(d.factor, 2)} = ${formatoCLP(d.precio_calculado)}`;
+  }
+  if (!d.factor) return "Sin factor para este tipo y procedencia";
+  return "Sin costo cargado";
 }

@@ -18,7 +18,7 @@ import { TablaPrecios } from "@/components/tabla-precios";
 import { ConfigurarColumnasPrecios } from "@/components/configurar-columnas-precios";
 import { api } from "@/lib/api-client";
 import { getPuedePrecios } from "@/lib/auth";
-import { KEYS_PRECIOS_DEFAULT, claseEstado } from "@/lib/columnas-precios";
+import { KEYS_PRECIOS_DEFAULT, claseEstado, explicacionPrecio } from "@/lib/columnas-precios";
 import { formatoCLP, formatoFecha, formatoFechaHora, formatoNumero } from "@/lib/formato";
 import type {
   PrecioDetalle, PrecioFiltros, PrecioOpciones, PrecioResumen, PrecioRow,
@@ -72,11 +72,22 @@ export default function PreciosPage() {
     void cargarAuxiliares();
   }, [cargarAuxiliares]);
 
+  // La lista trae 2.000 filas por vez. El buscador consulta al servidor -encuentra
+  // en los 39 mil-, pero sin paginación no había forma de RECORRER el resto.
+  const [pagina, setPagina] = useState(1);
+  const totalPaginas = Math.max(1, Math.ceil(total / LIMITE));
+
+  // Cualquier cambio de filtro vuelve a la primera página: quedarse en la 7 de un
+  // filtro que ahora tiene 2 páginas muestra una tabla vacía sin explicación.
+  useEffect(() => {
+    setPagina(1);
+  }, [filtros]);
+
   const cargar = useCallback(async () => {
     setCargando(true);
     setError(null);
     try {
-      const r = await api.precios(filtros, { limit: LIMITE, sort: "producto" });
+      const r = await api.precios(filtros, { limit: LIMITE, page: pagina, sort: "producto" });
       setRows(r.items);
       setTotal(r.total);
     } catch (e) {
@@ -84,7 +95,7 @@ export default function PreciosPage() {
     } finally {
       setCargando(false);
     }
-  }, [filtros]);
+  }, [filtros, pagina]);
 
   useEffect(() => {
     const t = setTimeout(cargar, 300);
@@ -125,7 +136,10 @@ export default function PreciosPage() {
             {cargando ? "Cargando…" : (
               <>
                 <b>{formatoNumero(total)}</b> productos
-                {total > rows.length && ` (mostrando ${formatoNumero(rows.length)}; afina el filtro para ver el resto)`}
+                {/* Antes decia "afina el filtro para ver el resto", que sonaba a
+                    que el resto era inalcanzable. El buscador SI mira los 39 mil
+                    -es del servidor-; lo que faltaba era poder pasar de pagina. */}
+                {total > LIMITE && ` · página ${pagina} de ${formatoNumero(totalPaginas)}`}
               </>
             )}
           </p>
@@ -163,17 +177,15 @@ export default function PreciosPage() {
         </div>
       </div>
 
+      {/* Tres KPI, no cinco. "Pendientes de envío" repetía el número que ya está
+          en el botón "Solo diferencias", y "Sin revisión" es un estado más de la
+          tabla, alcanzable desde el filtro de Estado. */}
       {resumen && (
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
           <Kpi etiqueta="Productos" valor={formatoNumero(resumen.productos)} />
           <Kpi etiqueta="Con cambios sin revisar" valor={formatoNumero(resumen.con_cambios)}
                destacar={resumen.con_cambios > 0}
                onClick={() => set({ con_cambios: !filtros.con_cambios })} activo={Boolean(filtros.con_cambios)} />
-          <Kpi etiqueta="Pendientes de envío" valor={formatoNumero(resumen.pendientes_envio)} />
-          <Kpi etiqueta="Sin revisión" valor={formatoNumero(resumen.por_estado["SIN REVISION"] ?? 0)}
-               destacar={(resumen.por_estado["SIN REVISION"] ?? 0) > 0}
-               onClick={() => set({ estado: filtros.estado?.includes("SIN REVISION") ? [] : ["SIN REVISION"] })}
-               activo={Boolean(filtros.estado?.includes("SIN REVISION"))} />
           <Kpi etiqueta="Último recálculo" valor={resumen.ultimo_recalculo ? formatoFechaHora(resumen.ultimo_recalculo) : "—"}
                nota={resumen.ultimo_envio ? `Último envío ${formatoFechaHora(resumen.ultimo_envio)}` : "Sin envíos aún"} />
         </div>
@@ -247,6 +259,26 @@ export default function PreciosPage() {
       )}
 
       <TablaPrecios rows={rows} columnasVisibles={colsVisibles} onFila={setSeleccion} />
+
+      {totalPaginas > 1 && (
+        <div className="flex items-center justify-between gap-3 text-[13px] text-ink-600">
+          <span>
+            Viendo {formatoNumero((pagina - 1) * LIMITE + 1)}–
+            {formatoNumero(Math.min(pagina * LIMITE, total))} de {formatoNumero(total)}
+          </span>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" disabled={pagina <= 1 || cargando}
+                    onClick={() => setPagina((p) => Math.max(1, p - 1))}>
+              Anterior
+            </Button>
+            <span className="tabular-nums">{pagina} / {formatoNumero(totalPaginas)}</span>
+            <Button variant="outline" size="sm" disabled={pagina >= totalPaginas || cargando}
+                    onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}>
+              Siguiente
+            </Button>
+          </div>
+        </div>
+      )}
 
       <ConfigurarColumnasPrecios open={modalCols} onClose={() => setModalCols(false)}
                                  visibles={colsVisibles} onChange={setColsVisibles} />
@@ -397,128 +429,216 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
       {!d ? (
         <p className="flex items-center gap-2 text-sm text-ink-500"><Loader2 className="h-4 w-4 animate-spin" /> Cargando…</p>
       ) : (
-        <div className="grid gap-5 md:grid-cols-2">
-          <section className="space-y-2 text-sm">
-            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">Cómo se llega al precio</h3>
-            <Fila k="Rubro" v={d.rubro ?? "—"} />
-            <Fila k="Tipo" v={`${d.tipo ?? "—"}${d.tipo_origen ? ` (${d.tipo_origen})` : ""}`} />
-            <Fila k="Procedencia" v={`${d.procedencia_final ?? "—"}${d.procedencia_origen ? ` (${d.procedencia_origen})` : ""}`} />
-            {(d.ult_recep_importado || d.ult_pe_nacional) && (
-              <Fila k="Últimas compras" v={`imp. ${formatoFecha(d.ult_recep_importado)} · nac. ${formatoFecha(d.ult_pe_nacional)}`} />
-            )}
-            <Fila k="Factor" v={d.factor ? formatoNumero(d.factor, 2) : "—"} />
-            <Fila k="Costo" v={formatoCLP(d.costo)} />
-            <Fila k="Stock / en tránsito" v={`${formatoNumero(d.stock ?? 0)} / ${formatoNumero(d.stock_transito ?? 0)}`} />
-            {d.precio_sugerido !== null && <Fila k="Precio proveedor" v={formatoCLP(d.precio_sugerido)} />}
-            <Fila k="Precio calculado" v={formatoCLP(d.precio_calculado)} />
-            <Fila k="Precio ERP hoy" v={formatoCLP(d.precio_erp)} />
-            <div className="flex items-center justify-between border-t border-ink-100 pt-2">
-              <span className="font-semibold text-ink-800">Precio final</span>
-              <span className="flex items-center gap-2">
-                <span className={`rounded-sm px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${claseEstado(d.estado)}`}>{d.estado}</span>
-                <b className="tabular-nums">{formatoCLP(d.precio_final)}</b>
-              </span>
-            </div>
-            <Fila k="Última venta" v={d.ultima_venta ? formatoFecha(d.ultima_venta) : "sin venta registrada"} />
-
-            {(d.cambios ?? []).length > 0 && (
-              <div className="pt-2">
-                <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-400">Cambios detectados</h3>
-                <ul className="max-h-40 space-y-1 overflow-auto text-[12px]">
-                  {(d.cambios ?? []).map((c, i) => (
-                    <li key={i} className={c.visto ? "text-ink-400" : "text-ink-700"}>
-                      {formatoFecha(c.detectado_en)} · <b>{c.campo}</b>: {c.antes ?? "—"} → {c.despues ?? "—"}
-                      {!c.visto && <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] text-amber-800">nuevo</span>}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {(d.envios ?? []).length > 0 && (
-              <p className="text-[12px] text-ink-500">
-                Último envío al ERP: {formatoCLP((d.envios ?? [])[0].precio)} el {formatoFecha((d.envios ?? [])[0].enviado_en)}
-                {(d.envios ?? [])[0].enviado_por ? ` por ${(d.envios ?? [])[0].enviado_por}` : ""}
+        <div className="space-y-4">
+          {/* El resultado primero. Antes el precio final era una fila más entre
+              once, del mismo tamaño que "Rubro", y la diferencia contra el ERP
+              -que es lo que hace que alguien abra esta ficha- había que
+              calcularla mentalmente restando dos filas separadas. */}
+          <div className="flex flex-wrap items-end justify-between gap-4 rounded-lg border border-ink-100 bg-ink-50/60 px-4 py-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">Precio final</p>
+              <p className="flex items-baseline gap-2">
+                <span className="font-mono text-3xl font-semibold tabular-nums tracking-tight text-ink-900">
+                  {formatoCLP(d.precio_final)}
+                </span>
+                <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${claseEstado(d.estado)}`}>
+                  {d.estado}
+                </span>
               </p>
-            )}
-          </section>
-
-          <section className="space-y-3">
-            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">Decisión sobre este precio</h3>
-            {!puedeEditar && (
-              <p className="text-[12px] text-ink-500">Tu usuario puede ver la lista pero no editarla.</p>
-            )}
-            <label className="block text-sm">
-              <span className="text-ink-600">Precio fijo</span>
-              <input className={campo} type="number" min="0" step="1" disabled={!puedeEditar}
-                     value={precioFijo} onChange={(e) => setPrecioFijo(e.target.value)} placeholder="vacío = sigue la regla" />
-              <span className="text-[11px] text-ink-400">Gana a todo, incluso sin stock.</span>
-            </label>
-            <label className="flex items-center gap-2 text-sm text-ink-700">
-              <input type="checkbox" className="accent-brand" disabled={!puedeEditar}
-                     checked={congelar} onChange={(e) => setCongelar(e.target.checked)} />
-              Congelar el precio actual
-              {d.congelar && d.congelado_precio !== null && (
-                <span className="text-[11px] text-ink-400">(congelado en {formatoCLP(d.congelado_precio)}{d.editado_en ? `, ${formatoFecha(d.editado_en)}` : ""})</span>
-              )}
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <label className="block text-sm">
-                <span className="text-ink-600">Tipo a mano</span>
-                <select className={campo} disabled={!puedeEditar} value={tipoManual} onChange={(e) => setTipoManual(e.target.value)}>
-                  <option value="">(según regla)</option>
-                  {tipos.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </label>
-              <label className="block text-sm">
-                <span className="text-ink-600">Procedencia a mano</span>
-                <select className={campo} disabled={!puedeEditar} value={procManual} onChange={(e) => setProcManual(e.target.value)}>
-                  <option value="">(según regla)</option>
-                  {PROCEDENCIAS.map((p) => <option key={p} value={p}>{p}</option>)}
-                </select>
-              </label>
+              <p className="mt-0.5 font-mono text-[12px] text-ink-500">{explicacionPrecio(d)}</p>
             </div>
-            <label className="flex items-center gap-2 text-sm text-ink-700">
-              <input type="checkbox" className="accent-brand" disabled={!puedeEditar}
-                     checked={noProducto} onChange={(e) => setNoProducto(e.target.checked)} />
-              No es un producto (servicio, cargo, mano de obra): sin precio
-            </label>
-            <label className="block text-sm">
-              <span className="text-ink-600">Observación</span>
-              <textarea className={`${campo} h-16 py-1`} disabled={!puedeEditar} maxLength={500}
-                        value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Por qué este precio no sigue la regla" />
-            </label>
-            {d.editado_por && (
-              <p className="text-[11px] text-ink-400">Última edición: {d.editado_por}{d.editado_en ? ` · ${formatoFechaHora(d.editado_en)}` : ""}</p>
-            )}
-            {error && <p className="text-sm text-rose-700">{error}</p>}
-            {puedeEditar && (
-              <div className="flex items-center justify-between gap-2 border-t border-ink-100 pt-3">
-                <div className="flex gap-2">
-                  {tieneOverride && (
-                    <Button variant="ghost" size="sm" disabled={guardando} onClick={() => void volverALaRegla()}>Volver a la regla</Button>
-                  )}
-                  {/* Sacar de la lista es distinto de "volver a la regla": el
-                      producto deja de existir aca y de salir en el envio al ERP.
-                      Por eso pide confirmacion y dice que NO lo da de baja en el
-                      ERP, que es lo primero que alguien va a suponer. */}
-                  <Button variant="ghost" size="sm" disabled={guardando}
-                          className="text-rose-700 hover:bg-rose-50"
-                          onClick={() => void sacarDeLaLista()}>
-                    <Trash2 size={14} /> Sacar de la lista
-                  </Button>
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={onCerrar}>Cerrar</Button>
-                  <Button size="sm" disabled={guardando} onClick={() => void guardar()}>
-                    {guardando && <Loader2 size={14} className="animate-spin" />} Guardar
-                  </Button>
-                </div>
+            <div className="text-right">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">Precio en el ERP hoy</p>
+              <p className="font-mono text-xl tabular-nums text-ink-700">{formatoCLP(d.precio_erp)}</p>
+              {d.desviacion_pct !== null && d.desviacion_pct !== undefined && (
+                <p className={`text-[12px] font-semibold ${Math.abs(d.desviacion_pct) >= 20 ? "text-accent-700" : "text-ink-500"}`}>
+                  {d.desviacion_pct > 0 ? "+" : ""}{formatoNumero(d.desviacion_pct, 1)}% vs. el nuevo
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="grid gap-5 md:grid-cols-2">
+            <section className="space-y-2 text-sm">
+              <h3 className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">De dónde sale</h3>
+              {/* El origen va como etiqueta y no entre paréntesis: dice de un
+                  vistazo qué está decidido a mano y qué lo pone la regla. */}
+              <FilaOrigen k="Tipo" v={d.tipo ?? "—"} origen={d.tipo_origen} />
+              <FilaOrigen k="Procedencia" v={d.procedencia_final ?? "—"} origen={d.procedencia_origen} />
+              <Fila k="Rubro" v={d.rubro ?? "—"} />
+              <Fila k="Factor" v={d.factor ? formatoNumero(d.factor, 2) : "—"} />
+              <Fila k="Costo" v={formatoCLP(d.costo)} />
+              {d.precio_sugerido !== null && <Fila k="Precio proveedor" v={formatoCLP(d.precio_sugerido)} />}
+
+              <div className="!mt-4 space-y-2 border-t border-ink-100 pt-3">
+                <Fila k="Stock / en tránsito" v={`${formatoNumero(d.stock ?? 0)} / ${formatoNumero(d.stock_transito ?? 0)}`} />
+                {(d.ult_recep_importado || d.ult_pe_nacional) && (
+                  <Fila k="Última compra"
+                        v={`imp. ${formatoFecha(d.ult_recep_importado)} · nac. ${formatoFecha(d.ult_pe_nacional)}`} />
+                )}
+                <Fila k="Última venta" v={d.ultima_venta ? formatoFecha(d.ultima_venta) : "sin venta registrada"} />
               </div>
-            )}
-          </section>
+
+              {(d.envios ?? []).length > 0 && (
+                <p className="!mt-3 text-[12px] text-ink-500">
+                  Último envío al ERP: {formatoCLP((d.envios ?? [])[0].precio)} el {formatoFecha((d.envios ?? [])[0].enviado_en)}
+                  {(d.envios ?? [])[0].enviado_por ? ` por ${(d.envios ?? [])[0].enviado_por}` : ""}
+                </p>
+              )}
+            </section>
+
+            <section className="space-y-4">
+              <h3 className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">Decisión sobre este precio</h3>
+              {!puedeEditar && (
+                <p className="rounded-md bg-ink-50 px-3 py-2 text-[12px] text-ink-500">
+                  Tu usuario puede ver la lista pero no editarla.
+                </p>
+              )}
+
+              {/* Tres grupos, no seis controles sueltos: fijar el precio,
+                  corregir la clasificación, sacarlo del cálculo. */}
+              <div className="space-y-2">
+                <p className="text-[12px] font-semibold text-ink-700">Fijar el precio</p>
+                <label className="block text-sm">
+                  <input className={campo} type="number" min="0" step="1" disabled={!puedeEditar}
+                         value={precioFijo} onChange={(e) => setPrecioFijo(e.target.value)}
+                         placeholder="Precio fijo — vacío sigue la regla" />
+                  <span className="text-[11px] text-ink-400">Gana a todo, incluso sin stock.</span>
+                </label>
+                <label className="flex items-start gap-2 text-sm text-ink-700">
+                  <input type="checkbox" className="mt-0.5 accent-brand" disabled={!puedeEditar}
+                         checked={congelar} onChange={(e) => setCongelar(e.target.checked)} />
+                  <span>
+                    Congelar el precio actual
+                    {d.congelar && d.congelado_precio !== null && (
+                      <span className="block text-[11px] text-ink-400">
+                        Congelado en {formatoCLP(d.congelado_precio)}{d.editado_en ? `, ${formatoFecha(d.editado_en)}` : ""}
+                      </span>
+                    )}
+                  </span>
+                </label>
+              </div>
+
+              <div className="space-y-2 border-t border-ink-100 pt-3">
+                <p className="text-[12px] font-semibold text-ink-700">Corregir la clasificación</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block text-sm">
+                    <span className="text-[12px] text-ink-500">Tipo</span>
+                    <select className={campo} disabled={!puedeEditar} value={tipoManual} onChange={(e) => setTipoManual(e.target.value)}>
+                      <option value="">(según regla)</option>
+                      {tipos.map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </label>
+                  <label className="block text-sm">
+                    <span className="text-[12px] text-ink-500">Procedencia</span>
+                    <select className={campo} disabled={!puedeEditar} value={procManual} onChange={(e) => setProcManual(e.target.value)}>
+                      <option value="">(según regla)</option>
+                      {PROCEDENCIAS.map((p) => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                  </label>
+                </div>
+                <p className="text-[11px] text-ink-400">
+                  Con «(según regla)» la procedencia sigue a la última compra sola.
+                </p>
+              </div>
+
+              <div className="space-y-2 border-t border-ink-100 pt-3">
+                <label className="flex items-start gap-2 text-sm text-ink-700">
+                  <input type="checkbox" className="mt-0.5 accent-brand" disabled={!puedeEditar}
+                         checked={noProducto} onChange={(e) => setNoProducto(e.target.checked)} />
+                  <span>
+                    No es un producto
+                    <span className="block text-[11px] text-ink-400">Servicio, cargo o mano de obra: queda sin precio.</span>
+                  </span>
+                </label>
+                <label className="block text-sm">
+                  <span className="text-[12px] text-ink-500">Observación</span>
+                  <textarea className={`${campo} h-14 py-1`} disabled={!puedeEditar} maxLength={500}
+                            value={obs} onChange={(e) => setObs(e.target.value)}
+                            placeholder="Por qué este precio no sigue la regla" />
+                </label>
+              </div>
+
+              {d.editado_por && (
+                <p className="text-[11px] text-ink-400">
+                  Última edición: {d.editado_por}{d.editado_en ? ` · ${formatoFechaHora(d.editado_en)}` : ""}
+                </p>
+              )}
+              {error && <p className="text-sm text-rose-700">{error}</p>}
+            </section>
+          </div>
+
+          {/* El historial es consulta, no la razón por la que se abre la ficha:
+              va plegado y con el número afuera, para que no compita con el
+              precio. */}
+          {(d.cambios ?? []).length > 0 && (
+            <details className="rounded-lg border border-ink-100 px-3 py-2">
+              <summary className="cursor-pointer text-[12px] font-semibold text-ink-600">
+                Cambios detectados ({(d.cambios ?? []).length})
+                {(d.cambios ?? []).some((c) => !c.visto) && (
+                  <span className="ml-2 rounded bg-amber-100 px-1.5 text-[10px] font-semibold text-amber-800">sin revisar</span>
+                )}
+              </summary>
+              <ul className="mt-2 max-h-40 space-y-1 overflow-auto text-[12px]">
+                {(d.cambios ?? []).map((c, i) => (
+                  <li key={i} className={c.visto ? "text-ink-400" : "text-ink-700"}>
+                    {formatoFecha(c.detectado_en)} · <b>{c.campo}</b>: {c.antes ?? "—"} → {c.despues ?? "—"}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+
+          {puedeEditar && (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-ink-100 pt-3">
+              <div className="flex gap-2">
+                {tieneOverride && (
+                  <Button variant="ghost" size="sm" disabled={guardando} onClick={() => void volverALaRegla()}>
+                    Volver a la regla
+                  </Button>
+                )}
+                {/* Sacar de la lista es distinto de "volver a la regla": el
+                    producto deja de existir acá y de salir en el envío al ERP.
+                    Por eso pide confirmación y dice que NO lo da de baja en el
+                    ERP, que es lo primero que alguien va a suponer. */}
+                <Button variant="ghost" size="sm" disabled={guardando}
+                        className="text-rose-700 hover:bg-rose-50"
+                        onClick={() => void sacarDeLaLista()}>
+                  <Trash2 size={14} /> Sacar de la lista
+                </Button>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={onCerrar}>Cerrar</Button>
+                <Button size="sm" disabled={guardando} onClick={() => void guardar()}>
+                  {guardando && <Loader2 size={14} className="animate-spin" />} Guardar
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </Dialog>
+  );
+}
+
+/** Una fila con el valor y, al lado, de dónde salió. */
+function FilaOrigen({ k, v, origen }: { k: string; v: string; origen?: string | null }) {
+  // "manual" es lo único que conviene que salte a la vista: significa que alguien
+  // decidió y que la regla no lo va a tocar.
+  const esManual = origen === "manual";
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="text-ink-500">{k}</span>
+      <span className="flex items-baseline gap-1.5 text-right">
+        <span className="text-ink-800">{v}</span>
+        {origen && (
+          <span className={`rounded px-1 py-px text-[10px] font-medium ${
+            esManual ? "bg-brand-50 text-brand" : "bg-ink-100 text-ink-500"}`}>
+            {origen}
+          </span>
+        )}
+      </span>
+    </div>
   );
 }
 
