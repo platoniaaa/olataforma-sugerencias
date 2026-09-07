@@ -181,7 +181,7 @@ export default function PreciosPage() {
           en el botón "Solo diferencias", y "Sin revisión" es un estado más de la
           tabla, alcanzable desde el filtro de Estado. */}
       {resumen && (
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+        <div className="flex flex-wrap gap-2">
           <Kpi etiqueta="Productos" valor={formatoNumero(resumen.productos)} />
           <Kpi etiqueta="Con cambios sin revisar" valor={formatoNumero(resumen.con_cambios)}
                destacar={resumen.con_cambios > 0}
@@ -312,19 +312,27 @@ export default function PreciosPage() {
 function Kpi({ etiqueta, valor, nota, destacar, onClick, activo }: {
   etiqueta: string; valor: string; nota?: string; destacar?: boolean; onClick?: () => void; activo?: boolean;
 }) {
-  const base = "rounded-lg border px-3 py-2 text-left";
+  // Las tarjetas se dimensionan por su contenido y no estiradas a un tercio de
+  // la pantalla: con cinco KPI quedaban justas, con tres quedaban de 600px con
+  // un numero chico arriba a la izquierda y todo el resto vacio.
+  const base = "rounded-lg border px-4 py-2.5 text-left min-w-[10rem]";
   const cls = activo
-    ? `${base} border-brand bg-brand/5`
+    // Un aro en vez de un borde grueso: marca el filtro activo sin que la
+    // tarjeta salte de tamaño ni se lea como un error.
+    ? `${base} border-brand/40 bg-brand-50 ring-1 ring-brand/30`
     : destacar ? `${base} border-amber-200 bg-amber-50` : `${base} border-slate-200 bg-white`;
   const inner = (
     <>
       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{etiqueta}</p>
-      <p className="text-lg font-semibold tabular-nums text-slate-900">{valor}</p>
+      <p className="font-mono text-2xl font-semibold tabular-nums tracking-tight text-slate-900">{valor}</p>
       {nota && <p className="text-[11px] text-slate-400">{nota}</p>}
+      {onClick && (
+        <p className="text-[11px] text-brand">{activo ? "Filtrando · clic para quitar" : "Clic para filtrar"}</p>
+      )}
     </>
   );
   return onClick
-    ? <button className={`${cls} w-full hover:border-brand`} onClick={onClick}>{inner}</button>
+    ? <button className={`${cls} transition-colors hover:border-brand`} onClick={onClick}>{inner}</button>
     : <div className={cls}>{inner}</div>;
 }
 
