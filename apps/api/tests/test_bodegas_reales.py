@@ -66,7 +66,7 @@ def test_el_stock_de_una_bodega_virtual_no_cuenta(db_session):
     _tipo(db_session, "BODEGA SCRAP", "VIRT")
     db_session.commit()
 
-    stock, _ = precios_service._stock(db_session, ["17 A"])
+    stock, _, _ = precios_service._stock(db_session, ["17 A"])
 
     assert stock["17 A"] == 5
 
@@ -77,7 +77,7 @@ def test_un_producto_que_solo_esta_en_bodega_virtual_queda_sin_stock(db_session)
     _tipo(db_session, "BODEGA DAÑADOS", "VIRT")
     db_session.commit()
 
-    stock, _ = precios_service._stock(db_session, ["17 SOLO-SCRAP"])
+    stock, _, _ = precios_service._stock(db_session, ["17 SOLO-SCRAP"])
 
     assert stock.get("17 SOLO-SCRAP", 0) == 0
 
@@ -176,3 +176,76 @@ def test_la_pantalla_puede_ver_la_clasificacion(client, db_session):
     # Saber cual esta clasificada pero ya no aparece con stock evita revisar
     # bodegas que no existen mas.
     assert por_bodega["BODEGA SCRAP"]["con_stock"] is False
+
+
+# --- El stock que se quedaba pegado ---------------------------------------------
+#
+# El motor publica `stock_unificado` SIN filas en cero, asi que un producto que se
+# agota DESAPARECE de la tabla. `recalcular` solo pisaba el stock "si el producto
+# aparece", o sea que el agotado conservaba el stock del dia que lo tuvo: la regla
+# "stock 0 -> precio 0" no se disparaba nunca y salia al ERP con precio.
+#
+# Eran 758 productos. Y ademas dejaba sin efecto el filtro de bodegas reales: los
+# 436 que solo tenian stock en danados o scrap desaparecian de la consulta
+# filtrada y por lo tanto conservaban su stock viejo.
+
+
+def test_lo_que_desaparece_del_stock_pasa_a_cero(db_session):
+    """El caso del producto que se agoto: ya no esta en la tabla de stock."""
+    db_session.add(PrecioProducto(tenant_id="curifor", producto="17 AGOTADO",
+                                  glosa="X", rubro="17", costo=1000.0, stock=12.0))
+    _stock(db_session, "17 OTRO", "LINDEROS", 4)   # la tabla tiene datos
+    db_session.commit()
+
+    precios_service.recalcular(db_session)
+
+    p = db_session.query(PrecioProducto).filter_by(producto="17 AGOTADO").one()
+    assert p.stock == 0
+    assert p.estado == "SIN STOCK"
+    assert p.precio_final == 0
+
+
+def test_con_la_tabla_de_stock_vacia_no_se_pisa_nada(db_session):
+    """Es el caso de la primera carga del Excel, antes de que el motor publique.
+    Ahi vaciar el stock dejaria la lista entera en precio 0."""
+    db_session.add(PrecioProducto(tenant_id="curifor", producto="17 DEL-EXCEL",
+                                  glosa="X", rubro="17", costo=1000.0, stock=9.0))
+    db_session.commit()
+
+    precios_service.recalcular(db_session)
+
+    assert db_session.query(PrecioProducto).filter_by(producto="17 DEL-EXCEL").one().stock == 9
+
+
+def test_el_filtro_de_bodegas_llega_hasta_el_precio(db_session):
+    """Los dos arreglos juntos: es lo que se pidio de punta a punta."""
+    db_session.add(PrecioProducto(tenant_id="curifor", producto="61 FAC208",
+                                  glosa="X", rubro="61", costo=1000.0, stock=81.0))
+    _stock(db_session, "61 FAC208", "BODEGA DAÑADOS", 81)
+    _stock(db_session, "17 OTRO", "LINDEROS", 4)
+    _tipo(db_session, "BODEGA DAÑADOS", "VIRT")
+    _tipo(db_session, "LINDEROS", "REAL")
+    db_session.commit()
+
+    precios_service.recalcular(db_session)
+
+    p = db_session.query(PrecioProducto).filter_by(producto="61 FAC208").one()
+    assert p.stock == 0, "las 81 unidades estan en una bodega que no vende"
+    assert p.estado == "SIN STOCK"
+
+
+def test_el_transito_salva_al_que_no_tiene_stock(db_session):
+    """Sin stock pero con algo en camino NO es precio 0."""
+    from src.models import StockTransito
+
+    db_session.add(PrecioProducto(tenant_id="curifor", producto="17 EN-CAMINO",
+                                  glosa="X", rubro="17", costo=1000.0, stock=0.0))
+    db_session.add(StockTransito(tenant_id="curifor", producto="17 EN-CAMINO", cantidad=5))
+    _stock(db_session, "17 OTRO", "LINDEROS", 4)
+    db_session.commit()
+
+    precios_service.recalcular(db_session)
+
+    p = db_session.query(PrecioProducto).filter_by(producto="17 EN-CAMINO").one()
+    assert p.stock_transito == 5
+    assert p.estado != "SIN STOCK"

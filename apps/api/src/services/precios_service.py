@@ -246,7 +246,7 @@ def bodegas_excluidas(db: Session) -> set[str]:
     return {b for (b,) in nombres if b is not None and clave_bodega(b) in no_reales}
 
 
-def _stock(db: Session, codigos: list[str]) -> tuple[dict[str, float], dict[str, float]]:
+def _stock(db: Session, codigos: list[str]) -> tuple[dict[str, float], dict[str, float], bool]:
     """Stock y transito por producto, contando SOLO las bodegas reales.
 
     El ERP mezcla bodegas fisicas con bodegas de proceso -danados, devolucion,
@@ -258,6 +258,16 @@ def _stock(db: Session, codigos: list[str]) -> tuple[dict[str, float], dict[str,
     de quedarse sin stock de golpe.
     """
     excluidas = bodegas_excluidas(db)
+    # Si la tabla de stock esta poblada, la AUSENCIA de un producto significa cero.
+    # Si esta vacia -por ejemplo justo despues de la primera carga del Excel, antes
+    # de que el motor publique- no se toca nada.
+    try:
+        hay_stock = bool(db.scalar(
+            select(StockUnificado.id).where(
+                StockUnificado.tenant_id == settings.default_tenant_id).limit(1)))
+    except Exception:  # noqa: BLE001 - tabla ausente en un despliegue viejo
+        db.rollback()
+        hay_stock = False
     stock: dict[str, float] = {}
     transito: dict[str, float] = {}
     for lote in _en_lotes(codigos):
@@ -278,7 +288,7 @@ def _stock(db: Session, codigos: list[str]) -> tuple[dict[str, float], dict[str,
                 transito[p] = float(t or 0)
         except Exception:  # noqa: BLE001 - tabla ausente
             db.rollback()
-    return stock, transito
+    return stock, transito, hay_stock
 
 
 def _costos(db: Session, codigos: list[str]) -> dict[str, float]:
@@ -390,12 +400,13 @@ def recalcular(db: Session, usuario: str | None = None, refrescar_insumos: bool 
     rub = politica.rubros(db)
     ovs = _overrides(db)
     if refrescar_insumos:
-        stock, transito = _stock(db, codigos)
+        stock, transito, hay_stock = _stock(db, codigos)
         costos = _costos(db, codigos)
         sugeridos = _sugeridos(db, codigos)
         ventas = _ultima_venta(db, codigos)
     else:
         stock = transito = costos = sugeridos = ventas = {}
+        hay_stock = False
 
     corrida = str(uuid.uuid4())
     ahora = _now()
@@ -412,9 +423,16 @@ def recalcular(db: Session, usuario: str | None = None, refrescar_insumos: bool 
             "precio": f.precio_final, "tipo": f.tipo,
         }
         if refrescar_insumos:
-            # Los insumos solo se pisan cuando la plataforma tiene el dato; si no,
-            # se conserva la ultima foto (la del Excel en la primera carga).
-            if f.producto in stock or f.producto in transito:
+            # El stock se pisa SIEMPRE que la plataforma tenga la foto, aunque el
+            # producto no aparezca en ella: el motor publica `stock_unificado` sin
+            # filas en cero, asi que el que se agota DESAPARECE de la tabla. Con la
+            # condicion anterior -"solo si aparece"- ese producto conservaba el
+            # stock del dia que lo tuvo, la regla "stock 0 -> precio 0" no se
+            # disparaba nunca, y salia al ERP con precio. Eran 758 productos.
+            #
+            # Si la tabla esta vacia no se toca nada: es el caso de la primera
+            # carga del Excel, antes de que el motor publique por primera vez.
+            if hay_stock:
                 f.stock = stock.get(f.producto, 0.0)
                 f.stock_transito = transito.get(f.producto, 0.0)
             if f.producto in costos:

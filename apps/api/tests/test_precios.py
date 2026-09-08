@@ -180,8 +180,17 @@ def test_recalculo_aplica_reglas_y_es_idempotente(lista_cargada):
 
 def test_recalculo_detecta_cambio_de_stock_y_lo_anota(lista_cargada):
     db = lista_cargada
-    svc.recalcular(db)
-    db.add(StockUnificado(tenant_id="curifor", producto="71 AAA1", bodega="B1", sucursal_id="LINDEROS", stock=0))
+    # La foto de stock arranca igual que el Excel para que la primera corrida no
+    # anote nada y el test mida solo lo que viene despues. Desde que la tabla
+    # tiene datos, no estar en ella significa no tener: por eso "13 BBB2" -que en
+    # el Excel viene en 0- se deja fuera, igual que en produccion, donde el motor
+    # publica `stock_unificado` sin filas en cero.
+    for cod, u in (("71 AAA1", 5), ("71 CCC3", 2)):
+        db.add(StockUnificado(tenant_id="curifor", producto=cod, bodega="B1",
+                              sucursal_id="LINDEROS", stock=u))
+    db.commit()
+    assert svc.recalcular(db)["cambios"] == 0
+    db.query(StockUnificado).filter_by(producto="71 AAA1").one().stock = 0
     db.commit()
     r = svc.recalcular(db)
     assert r["por_campo"]["stock"] == 1 and r["por_campo"]["precio"] == 1
