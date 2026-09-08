@@ -78,6 +78,12 @@ def resumen(db: Session = Depends(get_db)) -> dict:
     return precios_service.resumen(db)
 
 
+@router.get("/bodegas")
+def bodegas(db: Session = Depends(get_db)) -> list[dict]:
+    """Que bodegas cuentan para el stock de la lista y cuales no."""
+    return precios_service.bodegas_tipo(db)
+
+
 @router.get("/politica/factores")
 def factores(db: Session = Depends(get_db)) -> list[dict]:
     return politica.listar_factores(db)

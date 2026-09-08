@@ -25,6 +25,7 @@ from __future__ import annotations
 import io
 import math
 import re
+import unicodedata
 import uuid
 from datetime import date, datetime, timezone
 
@@ -36,6 +37,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..models import (
+    BodegaTipo,
     DimProducto,
     PoliticaPrecio,
     PrecioCambio,
@@ -197,15 +199,77 @@ def _en_lotes(codigos: list[str]):
         yield codigos[i:i + _IN]
 
 
+def clave_bodega(nombre: str | None) -> str:
+    """El nombre de la bodega sin espacios ni signos, para poder cruzarlo.
+
+    El mismo deposito aparece escrito de varias formas entre el ERP y el Excel de
+    Abastecimiento: "CHILLAN 2" y "CHILLAN2", "TALCA (2)" y "TALCA(2)". Comparando
+    el texto crudo quedaban 1,4 millones de unidades sin clasificar -y por lo
+    tanto fuera del filtro-, que es justo lo contrario de lo que se busca.
+    """
+    txt = str(nombre if nombre is not None else "").upper()
+    txt = "".join(c for c in unicodedata.normalize("NFKD", txt) if not unicodedata.combining(c))
+    return re.sub(r"[^A-Z0-9]", "", txt)
+
+
+def bodegas_excluidas(db: Session) -> set[str]:
+    """Nombres de bodega, TAL COMO estan en el stock, que no son reales.
+
+    Se devuelven las EXCLUIDAS y no las reales a proposito: una bodega nueva que
+    todavia nadie clasifico sigue contando. Al reves, la bodega que aparezca
+    manana desapareceria del stock sin que nadie se entere, que es la forma mas
+    cara de equivocarse aca.
+
+    El cruce se resuelve en Python y no en SQL porque la clave normalizada
+    -sin tildes ni signos- no se puede calcular igual en SQLite y en Postgres, y
+    los tests corren en una y produccion en la otra. Sale barato: son unas 40
+    bodegas distintas contra 30 mil filas de stock.
+    """
+    tenant = settings.default_tenant_id
+    try:
+        no_reales = {
+            c for (c,) in db.execute(
+                select(BodegaTipo.clave).where(
+                    BodegaTipo.tenant_id == tenant, BodegaTipo.tipo != "REAL")
+            ).all()
+        }
+        if not no_reales:
+            return set()
+        nombres = db.execute(
+            select(StockUnificado.bodega)
+            .where(StockUnificado.tenant_id == tenant)
+            .distinct()
+        ).all()
+    except Exception:  # noqa: BLE001 - tabla ausente en un despliegue viejo
+        db.rollback()
+        return set()
+    return {b for (b,) in nombres if b is not None and clave_bodega(b) in no_reales}
+
+
 def _stock(db: Session, codigos: list[str]) -> tuple[dict[str, float], dict[str, float]]:
+    """Stock y transito por producto, contando SOLO las bodegas reales.
+
+    El ERP mezcla bodegas fisicas con bodegas de proceso -danados, devolucion,
+    scrap, PE por regularizar-. Para decidir un precio solo cuenta lo que se puede
+    vender: 436 productos tenian stock unicamente en esas bodegas y salian con
+    precio como si estuvieran disponibles.
+
+    Si `bodega_tipo` esta vacia no se filtra nada: la lista sigue como antes en vez
+    de quedarse sin stock de golpe.
+    """
+    excluidas = bodegas_excluidas(db)
     stock: dict[str, float] = {}
     transito: dict[str, float] = {}
     for lote in _en_lotes(codigos):
         try:
-            for p, t in db.execute(
+            q = (
                 select(StockUnificado.producto, func.coalesce(func.sum(StockUnificado.stock), 0))
-                .where(StockUnificado.producto.in_(lote)).group_by(StockUnificado.producto)
-            ).all():
+                .where(StockUnificado.producto.in_(lote))
+                .group_by(StockUnificado.producto)
+            )
+            if excluidas:
+                q = q.where(func.coalesce(StockUnificado.bodega, "").notin_(excluidas))
+            for p, t in db.execute(q).all():
                 stock[p] = float(t or 0)
             for p, t in db.execute(
                 select(StockTransito.producto, func.coalesce(func.sum(StockTransito.cantidad), 0))
@@ -1125,6 +1189,71 @@ def eliminar(db: Session, productos: list[str], usuario: str | None) -> dict:
     return {"eliminados": n, "no_estaban": len(codigos) - n,
             "overrides_eliminados": n_ov, "overrides_conservados": len(conservados),
             "conservados": conservados[:50]}
+
+
+def cargar_bodegas_tipo(db: Session, filas: list[dict], usuario: str | None) -> dict:
+    """Reemplaza la clasificacion de bodegas. `filas`: {bodega, tipo}.
+
+    Es una dimension que mantiene una persona: se reemplaza entera, como la
+    politica. No la toca ningun job.
+
+    Un tipo que no sea REAL/VIRT/ELIM se rechaza en vez de guardarse: guardarlo
+    lo dejaria como "no real" -la exclusion es `tipo != REAL`- y una bodega
+    fisica desapareceria del stock por un error de tipeo.
+    """
+    tenant = settings.default_tenant_id
+    validos = {"REAL", "VIRT", "ELIM"}
+    limpias: dict[str, dict] = {}
+    malas: list[str] = []
+    for f in filas:
+        bodega = str(f.get("bodega") or "").strip()
+        tipo = str(f.get("tipo") or "").strip().upper()
+        if tipo not in validos:
+            malas.append(f"{bodega or '(sin nombre)'}: {tipo or '(vacio)'}")
+            continue
+        # La clave manda: "CHILLAN 2" y "CHILLAN2" son la misma bodega y no pueden
+        # quedar como dos filas con tipos distintos.
+        limpias[clave_bodega(bodega)] = {"bodega": bodega, "tipo": tipo}
+    if malas:
+        raise ValueError("Tipos de bodega no validos (se espera REAL, VIRT o ELIM): "
+                         + ", ".join(malas[:10]))
+    if not limpias:
+        raise ValueError("No vino ninguna bodega")
+
+    db.execute(delete(BodegaTipo).where(BodegaTipo.tenant_id == tenant))
+    ahora = _now()
+    db.execute(insert(BodegaTipo), [
+        {"tenant_id": tenant, "bodega": v["bodega"], "clave": k, "tipo": v["tipo"],
+         "actualizado_por": usuario, "actualizado_en": ahora}
+        for k, v in limpias.items()
+    ])
+    auditoria_service.registrar(
+        db, accion="bodegas_tipo_cargadas", entidad="precios", usuario_email=usuario,
+        detalle=f"{len(limpias)} bodegas",
+    )
+    db.commit()
+    por_tipo: dict[str, int] = {}
+    for v in limpias.values():
+        por_tipo[v["tipo"]] = por_tipo.get(v["tipo"], 0) + 1
+    return {"bodegas": len(limpias), "por_tipo": por_tipo}
+
+
+def bodegas_tipo(db: Session) -> list[dict]:
+    """La clasificacion actual, y si esa bodega aparece con stock hoy."""
+    tenant = settings.default_tenant_id
+    con_stock = {
+        clave_bodega(b) for (b,) in db.execute(
+            select(StockUnificado.bodega).where(StockUnificado.tenant_id == tenant).distinct()
+        ).all() if b is not None
+    }
+    filas = db.scalars(
+        select(BodegaTipo).where(BodegaTipo.tenant_id == tenant).order_by(BodegaTipo.bodega)
+    ).all()
+    return [
+        {"bodega": f.bodega, "tipo": f.tipo, "con_stock": f.clave in con_stock,
+         "actualizado_por": f.actualizado_por}
+        for f in filas
+    ]
 
 
 def cargar_costos(db: Session, filas: list[dict]) -> dict:

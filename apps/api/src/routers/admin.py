@@ -402,6 +402,23 @@ def publicar_compras_precios(payload: dict, db: Session = Depends(get_db)) -> di
     return r
 
 
+@router.post("/precios/bodegas-tipo")
+def cargar_bodegas_tipo(payload: dict, db: Session = Depends(get_db)) -> dict:
+    """Clasifica las bodegas en REAL / VIRT / ELIM. Admin.
+
+    payload: {"filas": [{"bodega": "BODEGA SCRAP", "tipo": "VIRT"}, ...]}
+
+    La lista de precios solo cuenta el stock de las REAL: el ERP mezcla bodegas
+    fisicas con bodegas de proceso -danados, devolucion, scrap, PE por
+    regularizar- y ese stock no se puede vender. Se reemplaza entera.
+    """
+    filas = payload.get("filas") or []
+    try:
+        return precios_service.cargar_bodegas_tipo(db, filas, usuario=None)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+
 @router.post("/precios/eliminar")
 def eliminar_precios(payload: dict, db: Session = Depends(get_db)) -> dict:
     """Saca productos de la lista de precios. Admin.
