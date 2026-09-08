@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { MultiSelect } from "@/components/ui/multiselect";
 import { TablaPrecios } from "@/components/tabla-precios";
 import { ConfigurarColumnasPrecios } from "@/components/configurar-columnas-precios";
+import { TutorialPrecios } from "@/components/tutorial-precios";
 import { api } from "@/lib/api-client";
 import { getPuedePrecios } from "@/lib/auth";
 import { KEYS_PRECIOS_DEFAULT, claseEstado, explicacionPrecio } from "@/lib/columnas-precios";
@@ -145,6 +146,7 @@ export default function PreciosPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <TutorialPrecios />
           <Link href="/precios/politicas">
             <Button variant="outline" size="sm"><Sigma size={15} /> Política</Button>
           </Link>
