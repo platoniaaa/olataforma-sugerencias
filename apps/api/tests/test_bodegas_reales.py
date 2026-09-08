@@ -249,3 +249,17 @@ def test_el_transito_salva_al_que_no_tiene_stock(db_session):
     p = db_session.query(PrecioProducto).filter_by(producto="17 EN-CAMINO").one()
     assert p.stock_transito == 5
     assert p.estado != "SIN STOCK"
+
+
+def test_el_stock_sin_bodega_tampoco_cuenta(db_session):
+    """El Excel de Abastecimiento trae una fila con el nombre en blanco marcada
+    VIRT: el stock que el ERP dejo sin bodega no se puede vender porque nadie
+    sabe donde esta. Eran 53 filas, 345 unidades en 29 productos."""
+    db_session.add(StockUnificado(tenant_id="curifor", producto="17 SIN-BODEGA",
+                                  bodega=None, sucursal_id="DESCONOCIDO", stock=6))
+    _stock(db_session, "17 SIN-BODEGA", "LINDEROS", 4)
+    _tipo(db_session, "", "VIRT")
+    _tipo(db_session, "LINDEROS", "REAL")
+    db_session.commit()
+
+    assert precios_service._stock(db_session, ["17 SIN-BODEGA"])[0]["17 SIN-BODEGA"] == 4

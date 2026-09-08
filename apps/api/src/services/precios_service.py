@@ -243,7 +243,10 @@ def bodegas_excluidas(db: Session) -> set[str]:
     except Exception:  # noqa: BLE001 - tabla ausente en un despliegue viejo
         db.rollback()
         return set()
-    return {b for (b,) in nombres if b is not None and clave_bodega(b) in no_reales}
+    # La bodega vacia entra al cruce como una mas: el Excel de Abastecimiento trae
+    # una fila con el nombre en blanco marcada VIRT, y son 53 filas de stock que el
+    # ERP dejo sin bodega. Saltarlas dejaba 345 unidades contando en 29 productos.
+    return {b or "" for (b,) in nombres if clave_bodega(b) in no_reales}
 
 
 def _stock(db: Session, codigos: list[str]) -> tuple[dict[str, float], dict[str, float], bool]:
