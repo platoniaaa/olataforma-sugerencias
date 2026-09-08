@@ -269,15 +269,24 @@ def _apply_filters(stmt, f: SugeridoFiltros):
 
 
 def _apply_sort(stmt, sort: str | None):
-    """sort = 'campo' o '-campo' (descendente)."""
+    """sort = 'campo' o '-campo' (descendente).
+
+    SIEMPRE termina desempatando por `id`. Sin un criterio unico al final, dos
+    paginas seguidas pueden traer la misma fila y saltarse otra: la base no
+    promete un orden estable entre filas empatadas, y `offset`/`limit` se apoya
+    en ese orden. Con `solo_pedir=false` casi todo empata en
+    `total_sugerido_suc`, y bajar el sugerido pagina por pagina devolvia 4.186
+    filas repetidas -y otras tantas perdidas- de 17.129 (08-09-2026).
+    """
     if not sort:
-        return stmt.order_by(Sugerido.total_sugerido_suc.desc().nullslast())
+        return stmt.order_by(Sugerido.total_sugerido_suc.desc().nullslast(), Sugerido.id)
     desc = sort.startswith("-")
     col_name = sort[1:] if desc else sort
     if col_name in SORTABLE:
         col = getattr(Sugerido, col_name)
-        return stmt.order_by(col.desc().nullslast() if desc else col.asc().nullslast())
-    return stmt.order_by(Sugerido.total_sugerido_suc.desc().nullslast())
+        return stmt.order_by(
+            col.desc().nullslast() if desc else col.asc().nullslast(), Sugerido.id)
+    return stmt.order_by(Sugerido.total_sugerido_suc.desc().nullslast(), Sugerido.id)
 
 
 def _row_desde_catalogo(c: ProductoCatalogo) -> dict:
