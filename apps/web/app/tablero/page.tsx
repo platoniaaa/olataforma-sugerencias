@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { AlertCircle, AlertTriangle, Check, Loader2 } from "lucide-react";
+import { AlertCircle, AlertTriangle, Check, ChevronRight, Layers, Loader2 } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { formatoCLPCorto, formatoNumero } from "@/lib/formato";
 import type { Tablero } from "@/lib/types";
@@ -119,6 +119,26 @@ export default function TableroPage() {
           </span>
         </p>
       )}
+
+      {/* Submodulos: la foto de hoy, al lado del cierre del mes. Van arriba
+          porque la pregunta "de lo que tengo, que se mueve" es la primera que se
+          hace alguien que abre el tablero. */}
+      <Link
+        href="/tablero/abc"
+        className="flex items-center justify-between gap-3 rounded-md border border-ink-200 bg-white px-4 py-3 transition hover:border-ink-300 hover:bg-ink-50/40"
+      >
+        <span>
+          <span className="flex items-center gap-2 text-sm font-semibold text-ink-900">
+            <Layers className="h-4 w-4 text-ink-400" />
+            ABC por sucursal de lo que hay en stock
+          </span>
+          <span className="mt-0.5 block text-[13px] text-ink-500">
+            De lo que está guardado, qué se mueve y qué no. Con el detalle producto por
+            producto.
+          </span>
+        </span>
+        <ChevronRight className="h-4 w-4 shrink-0 text-ink-400" />
+      </Link>
 
       <Bloque titulo="Servicio" />
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

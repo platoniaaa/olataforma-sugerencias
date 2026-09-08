@@ -1,6 +1,8 @@
 // Cliente del API. Centraliza las llamadas al backend FastAPI.
 import { clearSession, getToken, setSession } from "./auth";
 import type {
+  AbcStockFila,
+  AbcStockResumen,
   AgrupadoRow,
   AuditoriaPage,
   CargaPegadaResultado,
@@ -515,6 +517,28 @@ export const api = {
 
   async tablero(periodo?: string): Promise<Tablero> {
     return getJSON(`/api/tablero${periodo ? `?periodo=${periodo}` : ""}`);
+  },
+
+  async abcStock(): Promise<AbcStockResumen> {
+    return getJSON("/api/tablero/abc-stock");
+  },
+
+  async abcStockDetalle(f: {
+    sucursal?: string[];
+    clase?: string[];
+    base_clase?: string | null;
+    q?: string | null;
+    page?: number;
+    limit?: number;
+  }): Promise<{ items: AbcStockFila[]; total: number; page: number; limit: number }> {
+    const p = new URLSearchParams();
+    (f.sucursal ?? []).forEach((s) => p.append("sucursal", s));
+    (f.clase ?? []).forEach((c) => p.append("clase", c));
+    if (f.base_clase) p.set("base_clase", f.base_clase);
+    if (f.q) p.set("q", f.q);
+    p.set("page", String(f.page ?? 1));
+    p.set("limit", String(f.limit ?? 200));
+    return getJSON(`/api/tablero/abc-stock/detalle?${p.toString()}`);
   },
 
   async instockLista(soloManuales = false): Promise<RepuestoInstock[]> {

@@ -1358,3 +1358,42 @@ export interface PoliticaRubro {
   actualizado_por?: string | null;
   actualizado_en?: string | null;
 }
+
+/** Submódulo del tablero: ABC por sucursal de lo que hay en stock. */
+export interface AbcStockSucursal {
+  sucursal: string;
+  /** false = bodega de proceso (dañados, tránsito, PE por regularizar): el
+   *  modelo no calcula clase ahí. */
+  evaluada: boolean;
+  a: number;
+  b: number;
+  c: number;
+  d: number;
+  skus: number;
+  unidades: number;
+}
+
+export interface AbcStockResumen {
+  sucursales: AbcStockSucursal[];
+  total: { a: number; b: number; c: number; d: number; skus: number; unidades: number; productos: number };
+  /** Cuántas líneas traen clase calculada por el modelo y cuántas son D por no
+   *  haber vendido nada en 12 meses. */
+  cobertura: { del_modelo: number; sin_venta_12m: number };
+  /** Códigos con cantidades que no se pueden sumar (granel en mililitros). */
+  atipicos: { codigos: number; unidades: number };
+  sin_descripcion: number;
+}
+
+export interface AbcStockFila {
+  sucursal: string;
+  bodegas: string;
+  producto: string;
+  descripcion: string;
+  clase: "A" | "B" | "C" | "D";
+  base_clase: "Modelo" | "Sin venta 12m";
+  meses_con_venta_6m: number;
+  meses_con_venta_12m: number;
+  unidades: number;
+  empresa: string;
+  aviso: string;
+}
