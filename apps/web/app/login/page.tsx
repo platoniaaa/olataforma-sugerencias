@@ -64,12 +64,13 @@ export default function LoginPage() {
 
           <p className="max-w-md text-[15px] leading-relaxed text-ink-600">
             Plataforma operacional para alinear la reposicion de inventario entre
-            sucursales. Sugerencias del BI + ajustes del equipo en un solo lugar.
+            sucursales, y la lista de precios que se sube al ERP. El motor calcula,
+            el equipo ajusta, todo en un solo lugar.
           </p>
 
           <div className="flex gap-6 border-t border-ink-200 pt-6 text-[12px]">
             <Stat label="Productos" value="409K" />
-            <Stat label="Sucursales" value="29" />
+            <Stat label="Sucursales" value="13" />
             <Stat label="Snapshot" value="diario" />
           </div>
         </div>
