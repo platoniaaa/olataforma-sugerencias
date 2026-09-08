@@ -83,6 +83,7 @@ export default function TableroPage() {
   const s = d.servicio;
   const inv = d.inventario.resumen;
   const maxClase = Math.max(...s.dias_quiebre_por_clase.map((c) => c.dias), 1);
+  const quiebreA = d.inventario.por_clase.find((c) => c.clase === "A")?.quiebre_n ?? 0;
   const maxSuc = Math.max(...d.inventario.por_sucursal.map((x) => x.valor_clp), 1);
 
   return (
@@ -155,9 +156,10 @@ export default function TableroPage() {
           pie={`${s.repuestos_instock} repuestos de pauta, en las 4 sucursales con taller.`}
         />
         <Kpi
-          rot="Quiebre con demanda viva · hoy"
-          cifra={formatoNumero(s.quiebre_con_demanda_hoy)}
-          pie="Filas sin stock que el modelo sí ve vendiendo."
+          rot="Quiebre con demanda viva · clase A"
+          cifra={formatoNumero(quiebreA)}
+          estado={quiebreA > 0 ? "crit" : "good"}
+          pie={`Sin stock hoy y vendiendo. En total, todas las clases: ${formatoNumero(s.quiebre_con_demanda_hoy)} — el 99% son clase D.`}
         />
         <Kpi
           rot="Bajo el punto de pedido"
@@ -169,9 +171,10 @@ export default function TableroPage() {
       <Bloque titulo="Inversión en inventario" />
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Kpi rot="Valor del inventario" cifra={formatoCLPCorto(inv.valor_inventario_clp)}
-          pie={`${formatoNumero(inv.unidades)} unidades en toda la red.`} />
-        <Kpi rot="Cobertura mediana" cifra={`${formatoNumero(inv.cobertura_dias_mediana ?? 0, 1)} días`}
-          pie="Mediana y no promedio: un dato extremo no la mueve." />
+          pie={`${formatoNumero(inv.unidades)} unidades, pero el ${formatoNumero(inv.unidades_top10_pct, 0)}% está en 10 códigos: son aceites a granel cargados en mililitros. El valor en pesos sí es comparable.`} />
+        <Kpi rot="Cobertura mediana"
+          cifra={inv.cobertura_dias_mediana === null ? "—" : `${formatoNumero(inv.cobertura_dias_mediana, 0)} días`}
+          pie={`Cuánto dura lo que hay, sobre las ${formatoNumero(inv.cobertura_filas)} filas que tienen stock. Mediana y no promedio: un dato extremo no la mueve.`} />
         <Kpi rot="Inmovilizado" cifra={formatoCLPCorto(inv.inmovilizado_clp)}
           estado={inv.inmovilizado_pct > 15 ? "crit" : "warn"}
           etiqueta={`${formatoNumero(inv.inmovilizado_pct, 1)}% del inventario`}
@@ -203,6 +206,45 @@ export default function TableroPage() {
           <p className="mt-2 text-[11.5px] text-ink-500">
             Que quiebren los de clase D es esperable: casi no se venden. El que
             importa es <b>A</b>, marcado aparte.
+          </p>
+        </Panel>
+
+        <Panel titulo="Dónde duele, por clase" nota="foto de hoy">
+          {/* Los totales del inventario los domina la clase D. Puestos uno al lado
+              del otro se ve lo que el número grande esconde: los quiebres son casi
+              todos D, y el sobre-stock en pesos también. */}
+          <table className="w-full text-[13px]">
+            <thead>
+              <tr className="text-[11px] uppercase tracking-wide text-ink-400">
+                <th className="pb-1 text-left font-medium">Clase</th>
+                <th className="pb-1 text-right font-medium">Quiebre</th>
+                <th className="pb-1 text-right font-medium">Sobre-stock</th>
+                <th className="pb-1 text-right font-medium">Inmovilizado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.inventario.por_clase.map((c) => (
+                <tr key={c.clase} className="border-t border-ink-100">
+                  <td className="py-1.5">
+                    <span className={`inline-block w-6 rounded text-center text-xs font-semibold ${
+                      c.clase === "A" ? "bg-rose-100 text-rose-700" : "bg-ink-100 text-ink-600"}`}>
+                      {c.clase === "(sin clase)" ? "—" : c.clase}
+                    </span>
+                  </td>
+                  <td className="py-1.5 text-right tabular-nums">{formatoNumero(c.quiebre_n)}</td>
+                  <td className="py-1.5 text-right tabular-nums text-ink-600">
+                    {formatoCLPCorto(c.sobre_stock_clp)}
+                  </td>
+                  <td className="py-1.5 text-right tabular-nums text-ink-600">
+                    {formatoCLPCorto(c.inmovilizado_clp)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-2 text-[11.5px] text-ink-500">
+            Un quiebre de <b>clase A</b> se atiende hoy; uno de D probablemente no se
+            atienda nunca. Por eso el total no sirve para decidir.
           </p>
         </Panel>
 

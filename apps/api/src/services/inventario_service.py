@@ -73,9 +73,18 @@ def salud(
         "quiebre_con_demanda_n": 0, "bajo_punto_pedido_n": 0,
         "sin_costo_n": 0,
     }
+    # Los totales los domina la clase D -98,7% de los quiebres son D-, asi que el
+    # numero grande no sirve para decidir: un quiebre de clase A se atiende hoy y
+    # uno de clase D probablemente no se atienda nunca. Se corta por clase.
+    por_clase: dict[str, dict] = {
+        c: {"clase": c, "quiebre_n": 0, "sobre_stock_n": 0, "sobre_stock_clp": 0.0,
+            "inmovilizado_n": 0, "inmovilizado_clp": 0.0, "n_filas": 0, "valor_clp": 0.0}
+        for c in ("A", "B", "C", "D", "(sin clase)")
+    }
     por_sucursal: dict[str, dict] = {}
     por_marca: dict[str, dict] = {}
     coberturas: list[float] = []
+    unidades_por_producto: dict[str, float] = {}
     inmovilizados: list[dict] = []
 
     for r in filas:
@@ -84,9 +93,13 @@ def salud(
         valor = _valor(stock, r.costo_unitario)
         cobertura = _cobertura_dias(stock, r.demanda_diaria)
 
+        clase = por_clase.get(r.clasificacion_abc or "(sin clase)", por_clase["(sin clase)"])
+
         resumen["n_filas"] += 1
         resumen["unidades"] += stock
         resumen["valor_inventario_clp"] += valor
+        clase["n_filas"] += 1
+        clase["valor_clp"] += valor
         if stock > 0 and not r.costo_unitario:
             resumen["sin_costo_n"] += 1
 
@@ -112,6 +125,8 @@ def salud(
         if stock > 0 and demanda_mes <= 0:
             resumen["inmovilizado_clp"] += valor
             resumen["inmovilizado_n"] += 1
+            clase["inmovilizado_n"] += 1
+            clase["inmovilizado_clp"] += valor
             suc["inmovilizado_clp"] += valor
             marca["inmovilizado_clp"] += valor
             inmovilizados.append({
@@ -124,11 +139,14 @@ def salud(
         elif cobertura is not None and cobertura > dias_sobre_stock:
             resumen["sobre_stock_clp"] += valor
             resumen["sobre_stock_n"] += 1
+            clase["sobre_stock_n"] += 1
+            clase["sobre_stock_clp"] += valor
             suc["sobre_stock_clp"] += valor
 
         # Quiebre: sin stock y con demanda viva.
         if stock <= 0 and demanda_mes > 0:
             resumen["quiebre_con_demanda_n"] += 1
+            clase["quiebre_n"] += 1
             suc["quiebre_con_demanda_n"] += 1
 
         # Bajo punto de pedido (contando lo que viene en camino).
@@ -137,10 +155,26 @@ def salud(
             resumen["bajo_punto_pedido_n"] += 1
             suc["bajo_punto_pedido_n"] += 1
 
-        if cobertura is not None:
+        # La cobertura mide cuanto DURA lo que hay. Una fila en cero tiene cobertura
+        # 0 y es cierto, pero metiendola en la mediana el indicador deja de medir
+        # duracion y pasa a medir cuantas filas estan en cero: 11.678 de 16.891
+        # (69%) lo estan, asi que la mediana daba 0,0 dias siempre. Contando solo
+        # las que tienen stock da 168 dias, que es el numero que se puede leer.
+        if cobertura is not None and stock > 0:
             coberturas.append(cobertura)
+        if stock > 0:
+            unidades_por_producto[r.producto] = (
+                unidades_por_producto.get(r.producto, 0.0) + stock)
 
     resumen["cobertura_dias_mediana"] = round(median(coberturas), 1) if coberturas else None
+    resumen["cobertura_filas"] = len(coberturas)
+    # Cuanto del total de unidades esta en un punado de codigos. Los aceites a
+    # granel vienen cargados en mililitros: 12 codigos son el 98% de las unidades,
+    # asi que el total NO es una cantidad de repuestos y la pantalla tiene que
+    # poder decirlo.
+    top = sorted(unidades_por_producto.values(), reverse=True)[:10]
+    resumen["unidades_top10_pct"] = (
+        round(sum(top) / resumen["unidades"] * 100, 1) if resumen["unidades"] else 0.0)
     total = resumen["valor_inventario_clp"] or 1
     resumen["inmovilizado_pct"] = round(resumen["inmovilizado_clp"] / total * 100, 1)
     resumen["sobre_stock_pct"] = round(resumen["sobre_stock_clp"] / total * 100, 1)
@@ -156,8 +190,16 @@ def salud(
         return filas_
 
     inmovilizados.sort(key=lambda x: x["valor_clp"], reverse=True)
+    for c in por_clase.values():
+        for k, v in c.items():
+            if isinstance(v, float):
+                c[k] = round(v)
     return {
         "resumen": resumen,
+        # En el orden en que se leen. Las clases sin ninguna fila no se muestran:
+        # "(sin clase)" en cero solo distrae.
+        "por_clase": [por_clase[c] for c in ("A", "B", "C", "D", "(sin clase)")
+                      if por_clase[c]["n_filas"]],
         "por_sucursal": _ordenar(por_sucursal, "valor_clp"),
         "por_marca": _ordenar(por_marca, "valor_clp")[:15],
         "top_inmovilizado": inmovilizados[:25],

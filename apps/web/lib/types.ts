@@ -1192,8 +1192,29 @@ export interface Tablero {
       quiebre_con_demanda_n: number;
       bajo_punto_pedido_n: number;
       sin_costo_n: number;
+      /** Mediana de días que dura lo que hay, contando SOLO las filas con stock.
+       *  Con las filas en cero adentro daba 0,0 siempre (69% están en cero) y el
+       *  indicador medía cuántas están en quiebre, no cuánto dura el inventario. */
       cobertura_dias_mediana: number | null;
+      /** Sobre cuántas filas se calculó la mediana. */
+      cobertura_filas: number;
+      /** Qué porcentaje de las unidades está en los 10 códigos más grandes. Los
+       *  aceites a granel vienen en mililitros y se llevan el 98%: el total NO es
+       *  una cantidad de repuestos. */
+      unidades_top10_pct: number;
     };
+    /** El mismo inventario, cortado por clase ABC. Los totales los domina la D
+     *  —98,7% de los quiebres— así que el número grande no sirve para decidir. */
+    por_clase: {
+      clase: string;
+      quiebre_n: number;
+      sobre_stock_n: number;
+      sobre_stock_clp: number;
+      inmovilizado_n: number;
+      inmovilizado_clp: number;
+      n_filas: number;
+      valor_clp: number;
+    }[];
     por_sucursal: {
       sucursal_id: string;
       nombre_sucursal: string;
