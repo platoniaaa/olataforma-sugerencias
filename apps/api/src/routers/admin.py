@@ -19,6 +19,7 @@ from ..services import (
     precios_service,
     proveedor_producto_service,
     reemplazo_service,
+    snapshot_service,
     stock_service,
     transito_service,
     ventas_historicas_service,
@@ -454,3 +455,24 @@ def publicar_costos_precios(payload: dict, db: Session = Depends(get_db)) -> dic
     )
     db.commit()
     return r
+
+
+@router.post("/snapshot")
+def tomar_snapshot(
+    db: Session = Depends(get_db),
+    _email: str = Depends(requiere_admin),
+) -> dict:
+    """Vuelve a tomar la foto diaria del sugerido, hoy. Admin.
+
+    Normalmente la toma la carga del sugerido. Esto es para cuando cambio lo que
+    la foto guarda -como el 14-09-2026, que empezo a cubrir siempre los repuestos
+    InStock- y no vale la pena esperar a la corrida de manana para tener el dia
+    completo. Es idempotente: reescribe la foto del mismo dia.
+    """
+    filas = snapshot_service.guardar_snapshot(db)
+    auditoria_service.registrar(
+        db, accion="snapshot_retomado", entidad="sugerido_snapshot",
+        usuario_email=_email, detalle=f"{filas} filas",
+    )
+    db.commit()
+    return {"filas": filas}

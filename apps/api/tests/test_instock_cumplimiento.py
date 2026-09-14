@@ -215,3 +215,31 @@ def test_de_la_foto_al_porcentaje(client, db_session):
     assert i["sin_dato"] == 0
     assert len(i["tendencia"]) == 6
     assert i["tendencia"][-1]["pct"] == 50.0
+
+
+# --- Volver a tomar la foto de hoy ------------------------------------------------
+
+
+def test_el_admin_puede_retomar_la_foto_de_hoy(client, db_session):
+    _instock(db_session, "17 PAUTA", minimo=2)
+    _sug(db_session, "17 PAUTA", "LINDEROS", stock=0)
+    db_session.commit()
+
+    r = client.post("/api/admin/snapshot")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["filas"] >= 4
+    assert db_session.query(SugeridoSnapshot).filter_by(
+        producto="17 PAUTA", sucursal_id="CHILLAN").one().instock_minimo == 2
+
+
+def test_retomar_dos_veces_no_duplica(client, db_session):
+    _instock(db_session, "17 PAUTA", minimo=2)
+    _sug(db_session, "17 PAUTA", "LINDEROS", stock=3)
+    db_session.commit()
+
+    client.post("/api/admin/snapshot")
+    client.post("/api/admin/snapshot")
+
+    assert db_session.query(SugeridoSnapshot).filter_by(
+        producto="17 PAUTA", sucursal_id="LINDEROS").count() == 1
