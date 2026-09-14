@@ -9,6 +9,13 @@ lo que efectivamente se vendio).
 Se guarda SOLO lo que tiene actividad (sugerido o stock o punto de pedido): las
 filas en cero son la mayoria y no aportan historia. Con retencion configurable
 para que la base no crezca sin control.
+
+**Excepcion: los repuestos InStock en las sucursales con taller se guardan
+siempre**, con su minimo en `instock_minimo`. El compromiso InStock es "nunca
+menos de N unidades", y el dia que un repuesto de pauta esta en cero y sin
+sugerido es justo el dia que el filtro de actividad lo dejaba fuera de la foto:
+el KPI de cumplimiento no lo veia. Una fila con `instock_minimo` no nulo es una
+posicion InStock; el resto son filas normales.
 """
 from datetime import date
 
@@ -36,6 +43,9 @@ class SugeridoSnapshot(Base):
     demanda_diaria: Mapped[float | None] = mapped_column(Float, nullable=True)
     costo_unitario: Mapped[float | None] = mapped_column(Float, nullable=True)
     pedir: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Minimo InStock vigente ese dia, solo en las posiciones de pauta (producto
+    # InStock x sucursal con taller). Nulo en todas las demas filas.
+    instock_minimo: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     __table_args__ = (
         Index("ix_snapshot_prod_suc_fecha", "producto", "sucursal_id", "fecha"),

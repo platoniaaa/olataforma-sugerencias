@@ -1178,6 +1178,23 @@ export interface Tablero {
     repuestos_instock: number;
     quiebre_con_demanda_hoy: number;
   };
+  /** % de cumplimiento InStock: posiciones-día (repuesto de pauta × sucursal con
+   *  taller × día con foto) con stock >= mínimo. Se mide contra el mínimo, no
+   *  contra cero: 1 unidad con mínimo 2 es incumplir. */
+  instock: {
+    disponible: boolean;
+    pct: number | null;
+    posiciones: number;
+    cumplen: number;
+    incumplen: number;
+    /** Posiciones-día sin fila en la foto. Fuera del %, se muestran aparte. */
+    sin_dato: number;
+    dias: number;
+    repuestos: number;
+    sucursales: string[];
+    peores: { producto: string; sucursal_id: string; dias_bajo_minimo: number; minimo: number; marca: string | null }[];
+    tendencia: { periodo: string; pct: number | null; dias: number; incumplen: number }[];
+  };
   inventario: {
     resumen: {
       valor_inventario_clp: number;

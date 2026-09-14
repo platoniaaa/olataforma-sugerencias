@@ -84,6 +84,7 @@ export default function TableroPage() {
   const inv = d.inventario.resumen;
   const maxClase = Math.max(...s.dias_quiebre_por_clase.map((c) => c.dias), 1);
   const quiebreA = d.inventario.por_clase.find((c) => c.clase === "A")?.quiebre_n ?? 0;
+  const ins = d.instock;
   const maxSuc = Math.max(...d.inventario.por_sucursal.map((x) => x.valor_clp), 1);
 
   return (
@@ -149,11 +150,11 @@ export default function TableroPage() {
           pie={`Sobre ${s.dias_medidos} días medidos. Total de todas las clases: ${formatoNumero(s.dias_quiebre_total)}.`}
         />
         <Kpi
-          rot="Días de quiebre en repuestos InStock"
-          cifra={formatoNumero(s.dias_quiebre_instock)}
-          estado={s.dias_quiebre_instock > 0 ? "crit" : "good"}
-          etiqueta={s.dias_quiebre_instock > 0 ? "Compromiso incumplido" : "Sin quiebres"}
-          pie={`${s.repuestos_instock} repuestos de pauta, en las 4 sucursales con taller.`}
+          rot="Cumplimiento InStock"
+          cifra={ins.pct === null ? "—" : `${formatoNumero(ins.pct, 1)}%`}
+          estado={ins.pct === null ? undefined : ins.pct >= 99 ? "good" : ins.pct >= 95 ? "warn" : "crit"}
+          etiqueta={ins.incumplen > 0 ? `${formatoNumero(ins.incumplen)} posiciones-día bajo el mínimo` : "Sin incumplimientos"}
+          pie={`${ins.repuestos} repuestos de pauta × ${ins.sucursales.length} sucursales con taller × ${ins.dias} días. Cumple si el stock llega al mínimo, no si es distinto de cero.`}
         />
         <Kpi
           rot="Quiebre con demanda viva · clase A"
@@ -207,6 +208,65 @@ export default function TableroPage() {
             Que quiebren los de clase D es esperable: casi no se venden. El que
             importa es <b>A</b>, marcado aparte.
           </p>
+        </Panel>
+
+        <Panel titulo="InStock: dónde se incumplió" nota={`${ins.dias} días medidos`}>
+          {/* Los que más días pasaron bajo el mínimo: es la lista para ir a
+              comprar hoy, no un ranking. */}
+          {ins.peores.length === 0 ? (
+            <p className="py-6 text-center text-[13px] text-ink-500">
+              {ins.disponible ? "Ningún repuesto de pauta bajó del mínimo este mes." : "Todavía no hay fotos de este mes."}
+            </p>
+          ) : (
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="text-[11px] uppercase tracking-wide text-ink-400">
+                  <th className="pb-1 text-left font-medium">Repuesto</th>
+                  <th className="pb-1 text-left font-medium">Sucursal</th>
+                  <th className="pb-1 text-right font-medium">Mín.</th>
+                  <th className="pb-1 text-right font-medium">Días bajo el mínimo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ins.peores.map((p) => (
+                  <tr key={`${p.producto}|${p.sucursal_id}`} className="border-t border-ink-100">
+                    <td className="py-1.5 font-medium text-ink-800">{p.producto}</td>
+                    <td className="py-1.5 text-ink-600">{p.sucursal_id}</td>
+                    <td className="py-1.5 text-right tabular-nums text-ink-600">{p.minimo}</td>
+                    <td className="py-1.5 text-right tabular-nums font-semibold text-rose-700">
+                      {p.dias_bajo_minimo} / {ins.dias}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {ins.sin_dato > 0 && (
+            <p className="mt-2 text-[11.5px] text-ink-500">
+              {formatoNumero(ins.sin_dato)} posiciones-día sin foto guardada quedan fuera del
+              porcentaje: antes de septiembre la foto no cubría siempre los repuestos de pauta.
+            </p>
+          )}
+          <div className="mt-3 border-t border-ink-100 pt-2">
+            <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-400">
+              Últimos 6 meses
+            </p>
+            <div className="flex h-16 items-end gap-2">
+              {ins.tendencia.map((m) => (
+                <div key={m.periodo} className="flex h-full flex-1 flex-col items-center justify-end gap-1"
+                  title={m.pct === null ? "sin fotos" : `${m.pct}% · ${m.dias} días medidos`}>
+                  <span className="text-[10px] tabular-nums text-ink-600">
+                    {m.pct === null ? "—" : `${formatoNumero(m.pct, 0)}%`}
+                  </span>
+                  <div
+                    className={`w-full rounded-t ${m.pct === null ? "bg-ink-100" : m.pct >= 99 ? "bg-emerald-500" : m.pct >= 95 ? "bg-amber-400" : "bg-rose-500"}`}
+                    style={{ height: `${m.pct === null ? 4 : Math.max(m.pct, 4)}%` }}
+                  />
+                  <span className="text-[10px] text-ink-500">{m.periodo.slice(5)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </Panel>
 
         <Panel titulo="Dónde duele, por clase" nota="foto de hoy">

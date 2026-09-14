@@ -8,6 +8,11 @@ De donde sale cada bloque:
 
 - **Servicio**: de `sugerido_snapshot`, la foto diaria. Es la unica fuente que
   sabe cuantos DIAS estuvo algo en cero; la tabla `sugerido` solo tiene el hoy.
+- **Cumplimiento InStock**: tambien de la foto diaria. El compromiso es "nunca
+  menos de N unidades" en las 4 sucursales con taller, asi que se mide contra
+  el minimo, no contra cero: un repuesto con 1 unidad y minimo 2 esta
+  incumpliendo. Es un porcentaje sobre posiciones-dia (repuesto x sucursal x
+  dia), que es lo que un gerente puede comparar mes a mes.
 - **Inventario**: de `inventario_service.salud()`, que ya calcula valor,
   inmovilizado, sobre-stock y cobertura. No se recalcula nada aca.
 - **Obsolescencia**: cruza `reemplazo_ford` con el stock.
@@ -142,6 +147,92 @@ def _servicio(db: Session, desde: date, hasta: date) -> dict:
         "repuestos_instock": len(productos_instock),
         "quiebre_con_demanda_hoy": quiebre_hoy,
     }
+
+
+def _instock(db: Session, desde: date, hasta: date, peores: int = 5) -> dict:
+    """% de cumplimiento InStock entre dos fechas.
+
+    Universo: cada repuesto de pauta activo, en cada sucursal con taller, cada dia
+    con foto. Cumple si el stock de la foto es >= el minimo. El minimo es el que
+    guardo la foto ese dia; las fotos anteriores a septiembre 2026 no lo traen y
+    se usa el vigente.
+
+    `sin_dato` son posiciones-dia sin fila en la foto: antes de que la foto
+    cubriera siempre las posiciones InStock, un repuesto en cero y sin sugerido
+    no se guardaba -justo el caso que hay que ver-. Van fuera del porcentaje y
+    se muestran, porque contarlos como cumplidos inflaria el numero y como
+    incumplidos lo hundiria; desde que la foto los cubre, bajan a cero solos.
+    """
+    tenant = settings.default_tenant_id
+    cat = instock_service.catalogo(db)
+    sucursales = list(instock_service.SUCURSALES_INSTOCK)
+    base = (
+        SugeridoSnapshot.tenant_id == tenant,
+        SugeridoSnapshot.fecha >= desde,
+        SugeridoSnapshot.fecha <= hasta,
+    )
+    dias = db.scalar(select(func.count(distinct(SugeridoSnapshot.fecha))).where(*base)) or 0
+    vacio = {
+        "disponible": False, "pct": None, "posiciones": 0, "cumplen": 0,
+        "incumplen": 0, "sin_dato": 0, "dias": dias, "repuestos": len(cat),
+        "sucursales": sucursales, "peores": [],
+    }
+    if not cat or not dias:
+        return vacio
+
+    filas = db.execute(
+        select(
+            SugeridoSnapshot.producto, SugeridoSnapshot.sucursal_id,
+            SugeridoSnapshot.stock_activo_suc, SugeridoSnapshot.instock_minimo,
+        ).where(
+            *base,
+            SugeridoSnapshot.producto.in_(set(cat)),
+            SugeridoSnapshot.sucursal_id.in_(sucursales),
+        )
+    ).all()
+
+    cumplen = incumplen = 0
+    dias_mal: dict[tuple[str, str], int] = {}
+    for p, suc, stock, minimo in filas:
+        minimo = minimo if minimo is not None else cat[p]["minimo"]
+        if (stock or 0.0) >= minimo:
+            cumplen += 1
+        else:
+            incumplen += 1
+            dias_mal[(p, suc)] = dias_mal.get((p, suc), 0) + 1
+
+    posiciones = len(cat) * len(sucursales) * dias
+    con_dato = cumplen + incumplen
+    return {
+        "disponible": True,
+        "pct": round(cumplen / con_dato * 100, 1) if con_dato else None,
+        "posiciones": posiciones,
+        "cumplen": cumplen,
+        "incumplen": incumplen,
+        "sin_dato": max(posiciones - con_dato, 0),
+        "dias": dias,
+        "repuestos": len(cat),
+        "sucursales": sucursales,
+        # Los que mas dias pasaron bajo el minimo: es la lista para ir a comprar.
+        "peores": [
+            {"producto": p, "sucursal_id": suc, "dias_bajo_minimo": n,
+             "minimo": cat[p]["minimo"], "marca": cat[p].get("marca")}
+            for (p, suc), n in sorted(dias_mal.items(), key=lambda x: (-x[1], x[0]))[:peores]
+        ],
+    }
+
+
+def _instock_tendencia(db: Session, periodo: str, meses: int = 6) -> list[dict]:
+    """El % de los ultimos `meses`, el pedido incluido, para ver si mejora."""
+    anio, mes = int(periodo[:4]), int(periodo[5:7])
+    out = []
+    for i in range(meses - 1, -1, -1):
+        t = anio * 12 + (mes - 1) - i
+        per = f"{t // 12:04d}-{t % 12 + 1:02d}"
+        r = _instock(db, *_rango(per), peores=0)
+        out.append({"periodo": per, "pct": r["pct"], "dias": r["dias"],
+                    "incumplen": r["incumplen"]})
+    return out
 
 
 def _obsolescencia(db: Session) -> dict:
@@ -279,9 +370,13 @@ def mensual(db: Session, periodo: str | None = None) -> dict:
     # inmovilizado esta justamente en lo que el sistema NO pide.
     inventario = inventario_service.salud(db, SugeridoFiltros())
 
+    instock = _instock(db, desde, hasta)
+    instock["tendencia"] = _instock_tendencia(db, periodo)
+
     return {
         "periodo": periodo,
         "servicio": servicio,
+        "instock": instock,
         "inventario": inventario,
         "obsolescencia": _obsolescencia(db),
         "salud_del_dato": _salud_del_dato(db, servicio),

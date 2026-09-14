@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..models import Sugerido, SugeridoSnapshot
-from . import auditoria_service
+from . import auditoria_service, instock_service
 
 settings = get_settings()
 
@@ -58,6 +58,7 @@ def guardar_snapshot(db: Session, fecha: date | None = None) -> int:
     registros = [
         {"tenant_id": tenant, "fecha": hoy, **dict(zip(_COLUMNAS, f))} for f in filas
     ]
+    registros = _con_posiciones_instock(db, registros)
     db.execute(
         delete(SugeridoSnapshot).where(
             SugeridoSnapshot.tenant_id == tenant, SugeridoSnapshot.fecha == hoy
@@ -67,6 +68,76 @@ def guardar_snapshot(db: Session, fecha: date | None = None) -> int:
         db.execute(insert(SugeridoSnapshot).values(registros[i : i + 500]))
     db.commit()
     return len(registros)
+
+
+def _con_posiciones_instock(db: Session, registros: list[dict]) -> list[dict]:
+    """Garantiza una fila por posicion InStock (producto de pauta x sucursal con
+    taller) y le pone el minimo.
+
+    Tres casos, del mas comun al mas raro:
+
+    1. La posicion ya paso el filtro de actividad: solo se le anota el minimo.
+    2. Esta en `sugerido` pero en cero y sin sugerido, o sea no paso el filtro: se
+       agrega igual. Es EL caso que el KPI tiene que ver.
+    3. No esta en `sugerido` -repuesto de pauta sin venta en 12 meses en esa
+       sucursal-: se fabrica la fila con el stock real de `stock_unificado`, que
+       es lo que hace la pantalla del sugerido para mostrarla.
+    """
+    # Un INSERT de varias filas exige que todas traigan las mismas columnas: las
+    # que no son de pauta llevan el minimo en nulo y las fabricadas llevan en
+    # nulo lo que no tienen.
+    columnas = (*_COLUMNAS, "instock_minimo")
+    for r in registros:
+        for c in columnas:
+            r.setdefault(c, None)
+
+    cat = instock_service.catalogo(db)
+    if not cat:
+        return registros
+    sucursales = list(instock_service.SUCURSALES_INSTOCK)
+    tenant = settings.default_tenant_id
+    fecha = registros[0]["fecha"] if registros else date.today()
+
+    presentes = {(r["producto"], r["sucursal_id"]): r for r in registros}
+    for (p, s), r in presentes.items():
+        if p in cat and s in sucursales:
+            r["instock_minimo"] = cat[p]["minimo"]
+
+    faltan = {(p, s) for p in cat for s in sucursales if (p, s) not in presentes}
+    if not faltan:
+        return registros
+
+    # Caso 2: estan en el sugerido pero no pasaron el filtro de actividad.
+    en_sugerido = db.execute(
+        select(*[getattr(Sugerido, c) for c in _COLUMNAS]).where(
+            Sugerido.tenant_id == tenant,
+            Sugerido.producto.in_({p for p, _ in faltan}),
+            Sugerido.sucursal_id.in_(sucursales),
+        )
+    ).all()
+    for f in en_sugerido:
+        fila = dict(zip(_COLUMNAS, f))
+        par = (fila["producto"], fila["sucursal_id"])
+        if par in faltan:
+            fila.update(tenant_id=tenant, fecha=fecha, instock_minimo=cat[par[0]]["minimo"])
+            registros.append(fila)
+            faltan.discard(par)
+
+    # Caso 3: no estan en el sugerido. El stock real sale de la tabla de stock;
+    # lo demas queda vacio porque no existe (no hay demanda calculada ahi).
+    if faltan:
+        from .sugerido_service import _stock_de_pares
+
+        stock = _stock_de_pares(db, faltan)
+        for p, s in sorted(faltan):
+            fila = {c: None for c in columnas}
+            fila.update(
+                tenant_id=tenant, fecha=fecha, producto=p, sucursal_id=s,
+                stock_activo_suc=float(stock.get((p, s), 0.0)),
+                instock_minimo=cat[p]["minimo"],
+            )
+            registros.append(fila)
+    return registros
 
 
 def purgar_antiguos(db: Session, dias: int | None = None) -> int:
