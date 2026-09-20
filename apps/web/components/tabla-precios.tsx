@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AgGridReact } from "ag-grid-react";
-import type { ColDef, GridReadyEvent, RowClickedEvent } from "ag-grid-community";
+import type { CellContextMenuEvent, ColDef, GridReadyEvent, RowClickedEvent } from "ag-grid-community";
+import { ExternalLink, Trash2 } from "lucide-react";
 import { COLUMNAS_PRECIOS, claseEstado, type DefColPrecio } from "@/lib/columnas-precios";
 import { formatoCLP, formatoFecha, formatoNumero } from "@/lib/formato";
 import type { PrecioRow } from "@/lib/types";
@@ -12,6 +13,15 @@ interface Props {
   rows: PrecioRow[];
   columnasVisibles: string[];
   onFila: (fila: PrecioRow) => void;
+  /** Con clic derecho sobre una fila. Si no viene, el usuario no puede editar y
+   *  el menu solo ofrece abrir la ficha. */
+  onEliminar?: (fila: PrecioRow) => void;
+}
+
+interface MenuContextual {
+  x: number;
+  y: number;
+  fila: PrecioRow;
 }
 
 function formateador(def: DefColPrecio) {
@@ -84,8 +94,37 @@ function CambiosCell(p: { value: number | null }) {
   );
 }
 
-export function TablaPrecios({ rows, columnasVisibles, onFila }: Props) {
+export function TablaPrecios({ rows, columnasVisibles, onFila, onEliminar }: Props) {
   const gridRef = useRef<AgGridReact<PrecioRow>>(null);
+  // AG Grid Community no trae menu contextual (es de la version paga), asi que
+  // se dibuja uno propio sobre el clic derecho de la fila.
+  const [menu, setMenu] = useState<MenuContextual | null>(null);
+
+  useEffect(() => {
+    if (!menu) return;
+    const cerrar = () => setMenu(null);
+    const tecla = (e: KeyboardEvent) => { if (e.key === "Escape") cerrar(); };
+    // Cualquier clic afuera, scroll o Escape lo cierra: un menu que queda
+    // colgado sobre otra fila es la forma mas facil de borrar el producto equivocado.
+    window.addEventListener("click", cerrar);
+    window.addEventListener("scroll", cerrar, true);
+    window.addEventListener("keydown", tecla);
+    return () => {
+      window.removeEventListener("click", cerrar);
+      window.removeEventListener("scroll", cerrar, true);
+      window.removeEventListener("keydown", tecla);
+    };
+  }, [menu]);
+
+  const onCellContextMenu = (e: CellContextMenuEvent<PrecioRow>) => {
+    const ev = e.event as MouseEvent | null;
+    if (!ev || !e.data) return;
+    ev.preventDefault();
+    // Pegado al borde, el menu se abre hacia adentro para no salirse de la pantalla.
+    const x = Math.min(ev.clientX, window.innerWidth - 240);
+    const y = Math.min(ev.clientY, window.innerHeight - 120);
+    setMenu({ x, y, fila: e.data });
+  };
 
   const columnDefs = useMemo<ColDef[]>(
     () => COLUMNAS_PRECIOS.filter((c) => columnasVisibles.includes(c.key as string)).map(colDef),
@@ -124,6 +163,8 @@ export function TablaPrecios({ rows, columnasVisibles, onFila }: Props) {
         onRowClicked={(e: RowClickedEvent<PrecioRow>) => {
           if (e.data) onFila(e.data);
         }}
+        onCellContextMenu={onCellContextMenu}
+        preventDefaultOnContextMenu
         rowClass="cursor-pointer"
         pagination
         paginationPageSize={100}
@@ -137,6 +178,38 @@ export function TablaPrecios({ rows, columnasVisibles, onFila }: Props) {
           noRowsToShow: "Sin datos",
         }}
       />
+
+      {menu && (
+        <div
+          role="menu"
+          aria-label={`Acciones para ${menu.fila.producto}`}
+          className="fixed z-50 min-w-[220px] rounded-md border border-slate-200 bg-white py-1 text-[13px] shadow-lg"
+          style={{ left: menu.x, top: menu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="truncate px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            {menu.fila.producto}
+          </div>
+          <button
+            type="button"
+            role="menuitem"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-slate-700 hover:bg-slate-50"
+            onClick={() => { const f = menu.fila; setMenu(null); onFila(f); }}
+          >
+            <ExternalLink size={14} className="text-slate-400" /> Abrir ficha
+          </button>
+          {onEliminar && (
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-rose-700 hover:bg-rose-50"
+              onClick={() => { const f = menu.fila; setMenu(null); onEliminar(f); }}
+            >
+              <Trash2 size={14} /> Sacar de la lista…
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

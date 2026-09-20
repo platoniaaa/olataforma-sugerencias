@@ -119,6 +119,22 @@ export default function PreciosPage() {
     }
   }
 
+  /** Clic derecho sobre la fila -> "Sacar de la lista". Mismo texto que el boton
+   *  de la ficha: dos redacciones distintas harian pensar que hacen cosas distintas. */
+  function sacarDeLaLista(fila: PrecioRow) {
+    if (!confirm(
+      `¿Sacar ${fila.producto} de la lista de precios?
+
+Deja de tener precio calculado y no va a salir en el envío al ERP. NO lo da de baja en el ERP.
+
+Si tiene precio fijo o congelado, esa decisión se conserva por si el producto vuelve.`
+    )) return;
+    void accion("eliminar", async () => {
+      await api.eliminarPrecioProducto(fila.producto);
+      return `${fila.producto} salió de la lista.`;
+    });
+  }
+
   const hayFiltros = useMemo(
     () => Boolean(filtros.q || filtros.rubro?.length || filtros.tipo?.length || filtros.procedencia?.length
       || filtros.estado?.length || filtros.con_cambios || filtros.con_stock),
@@ -260,7 +276,12 @@ export default function PreciosPage() {
         <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{aviso}</p>
       )}
 
-      <TablaPrecios rows={rows} columnasVisibles={colsVisibles} onFila={setSeleccion} />
+      <TablaPrecios
+        rows={rows}
+        columnasVisibles={colsVisibles}
+        onFila={setSeleccion}
+        onEliminar={puedeEditar ? sacarDeLaLista : undefined}
+      />
 
       {totalPaginas > 1 && (
         <div className="flex items-center justify-between gap-3 text-[13px] text-ink-600">
