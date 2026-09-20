@@ -37,6 +37,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..models import (
+    PrecioBaja,
     BodegaTipo,
     DimProducto,
     PoliticaPrecio,
@@ -1153,9 +1154,15 @@ def cargar_precios_sugeridos(db: Session, filas: list[dict]) -> dict:
     return {"actualizados": n}
 
 
-def eliminar(db: Session, productos: list[str], usuario: str | None) -> dict:
+def eliminar(db: Session, productos: list[str], usuario: str | None,
+             *, proteger: bool = False, motivo: str | None = None) -> dict:
     """Saca productos de la lista de precios (no del ERP: solo dejan de tener
     precio calculado aca).
+
+    Con `proteger`, ademas deja al producto en `precio_baja` y el feed semanal
+    del ERP no lo vuelve a crear. Lo usa la pantalla (una persona decidio sobre
+    ese producto). La depuracion masiva NO protege: un producto sin stock ni
+    venta que vuelve a tener stock tiene que volver a la lista.
 
     Se usa cuando la depuracion del maestro decide que un codigo ya no va. Es
     quirurgico a proposito: recargar la lista entera con `reemplazar` borra
@@ -1201,10 +1208,16 @@ def eliminar(db: Session, productos: list[str], usuario: str | None) -> dict:
         n += db.execute(delete(PrecioProducto).where(
             PrecioProducto.tenant_id == tenant, PrecioProducto.producto.in_(sorted(existen)),
         )).rowcount or 0
+        if proteger:
+            ya = {p for (p,) in db.execute(select(PrecioBaja.producto).where(
+                PrecioBaja.tenant_id == tenant, PrecioBaja.producto.in_(sorted(existen)))).all()}
+            for prod in sorted(existen - ya):
+                db.add(PrecioBaja(tenant_id=tenant, producto=prod, motivo=motivo, sacado_por=usuario))
         db.commit()
     auditoria_service.registrar(
         db, accion="precios_eliminados", entidad="precios", usuario_email=usuario,
-        detalle=f"{n} productos fuera de la lista de precios",
+        detalle=f"{n} productos fuera de la lista de precios"
+                + (" (no vuelven con el feed del ERP)" if proteger else ""),
     )
     db.commit()
     return {"eliminados": n, "no_estaban": len(codigos) - n,
@@ -1301,3 +1314,113 @@ def cargar_costos(db: Session, filas: list[dict]) -> dict:
         n += r.rowcount
     db.commit()
     return {"actualizados": n, "ignorados": ignorados}
+
+
+# ------------------------------------------------------------ feed del ERP
+#
+# La lista nacio de un Excel y desde ahi nadie la alimentaba: un repuesto creado
+# en el ERP no existia para la plataforma hasta que alguien lo agregara a mano, y
+# la columna "Precio ERP" quedo congelada en la carga del 04-09-2026. El motor
+# publica el export del ERP cada vez que el archivo cambia (Abastecimiento lo
+# exporta a mano, semanal) y esto lo aplica.
+#
+# Que ENTRA a la lista lo decide una regla, no el ERP: el export trae 410 mil
+# codigos y la lista tiene 39 mil a proposito (medido el 20-09-2026: 371.355
+# fuera, de los cuales 114 tenian stock y 111 pasaban la regla).
+
+TIPO_ERP_REPUESTO = "REPUESTOS"
+
+
+def _motivo_no_entra(fila: dict, rubros_politica: set[str], bajas: set[str]) -> str | None:
+    """Por que un producto del ERP que no esta en la lista NO se crea. None = entra."""
+    producto = fila["producto"]
+    if producto in bajas:
+        return "sacado a mano"
+    if (fila.get("tipo_erp") or "").strip().upper() != TIPO_ERP_REPUESTO:
+        return "no es repuesto"
+    if (_num(fila.get("stock")) or 0) <= 0:
+        return "sin stock"
+    rubro = rubro_de(producto)
+    if not rubro:
+        return "sin rubro"
+    # El rubro tiene que estar en la politica: es lo que dice que rubros se
+    # precian. Los que se sacaron de la lista en agosto (servicios, cajas, ropa)
+    # no estan ahi, asi que no vuelven solos.
+    if rubro not in rubros_politica:
+        return "rubro fuera de la politica"
+    return None
+
+
+def sincronizar_erp(db: Session, filas: list[dict], usuario: str | None = None) -> dict:
+    """Aplica un lote del export del ERP a la lista.
+
+    Cada fila: producto, glosa, stock, costo, precio_erp, tipo_erp, procedencia.
+
+    - Producto que YA esta: se le actualiza `precio_erp` (y la glosa si estaba
+      vacia). Nada mas: el costo y el stock los trae el motor cada manana desde
+      fuentes mejores, y lo manual no se toca nunca.
+    - Producto que NO esta: entra solo si pasa `_motivo_no_entra`. Nace con
+      origen "erp" y sin precio; el recalculo que sigue a la carga se lo pone.
+    """
+    tenant = settings.default_tenant_id
+    limpias = []
+    for f in filas:
+        prod = str(f.get("producto") or "").strip()
+        if prod:
+            limpias.append({**f, "producto": prod})
+    if not limpias:
+        return {"recibidos": 0, "actualizados": 0, "creados": 0, "no_entran": {},
+                "creados_codigos": []}
+
+    rubros_politica = set(politica.rubros(db))
+    codigos = [f["producto"] for f in limpias]
+    existentes: dict[str, PrecioProducto] = {}
+    bajas: set[str] = set()
+    for lote in _en_lotes(codigos):
+        for p in db.scalars(select(PrecioProducto).where(
+                PrecioProducto.tenant_id == tenant, PrecioProducto.producto.in_(lote))).all():
+            existentes[p.producto] = p
+        bajas |= {p for (p,) in db.execute(select(PrecioBaja.producto).where(
+            PrecioBaja.tenant_id == tenant, PrecioBaja.producto.in_(lote))).all()}
+
+    actualizados = creados = 0
+    no_entran: dict[str, int] = {}
+    creados_codigos: list[str] = []
+    for f in limpias:
+        prod = f["producto"]
+        precio_erp = _num(f.get("precio_erp"))
+        if prod in existentes:
+            p = existentes[prod]
+            cambio = False
+            if precio_erp is not None and (p.precio_erp or 0) != precio_erp:
+                p.precio_erp = precio_erp
+                cambio = True
+            glosa = (f.get("glosa") or "").strip()
+            if glosa and not p.glosa:
+                p.glosa = glosa
+                cambio = True
+            actualizados += int(cambio)
+            continue
+        motivo = _motivo_no_entra(f, rubros_politica, bajas)
+        if motivo:
+            no_entran[motivo] = no_entran.get(motivo, 0) + 1
+            continue
+        db.add(PrecioProducto(
+            tenant_id=tenant, producto=prod, glosa=(f.get("glosa") or "").strip() or None,
+            rubro=rubro_de(prod), procedencia_maestro=_norm_proc(f.get("procedencia")),
+            costo=_num(f.get("costo")), precio_erp=precio_erp,
+            stock=_num(f.get("stock")) or 0.0, stock_transito=0.0,
+            origen="erp", creado_por=usuario,
+        ))
+        creados += 1
+        creados_codigos.append(prod)
+    db.commit()
+    if creados:
+        auditoria_service.registrar(
+            db, accion="precios_creados_desde_erp", entidad="precios", usuario_email=usuario,
+            detalle=f"{creados} productos nuevos del ERP con stock: "
+                    + ", ".join(creados_codigos[:20]) + (" ..." if creados > 20 else ""),
+        )
+        db.commit()
+    return {"recibidos": len(limpias), "actualizados": actualizados, "creados": creados,
+            "no_entran": no_entran, "creados_codigos": creados_codigos[:50]}

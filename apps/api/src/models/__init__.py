@@ -26,6 +26,7 @@ from .repuesto_instock import RepuestoInstock
 from .requerimiento import Requerimiento, RequerimientoLinea
 from .solicitud_actualizacion import SolicitudActualizacion
 from .politica_precio import PoliticaPrecio, PoliticaRubro
+from .precio_baja import PrecioBaja
 from .precio_producto import PrecioProducto
 from .precio_override import PrecioOverride
 from .precio_cambio import PrecioCambio, PrecioEnvio
@@ -60,6 +61,7 @@ __all__ = [
     "SolicitudActualizacion",
     "PoliticaPrecio",
     "PoliticaRubro",
+    "PrecioBaja",
     "PrecioProducto",
     "PrecioOverride",
     "PrecioCambio",

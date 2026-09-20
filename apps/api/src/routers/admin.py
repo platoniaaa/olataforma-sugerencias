@@ -476,3 +476,26 @@ def tomar_snapshot(
     )
     db.commit()
     return {"filas": filas}
+
+
+@router.post("/precios/erp")
+def sincronizar_precios_erp(
+    payload: dict,
+    db: Session = Depends(get_db),
+    _email: str = Depends(requiere_admin),
+) -> dict:
+    """Un lote del export del ERP para la lista de precios. Lo manda el motor
+    cuando el archivo `lista_erp.xlsx` cambia. Admin.
+
+    payload: {"filas": [{"producto", "glosa", "stock", "costo", "precio_erp",
+                          "tipo_erp", "procedencia"}, ...]}
+
+    A los productos que ya estan les actualiza el precio ERP; crea los que no
+    estan y pasan la regla de entrada (repuesto, con stock, rubro en la
+    politica, no sacado a mano). No recalcula: el motor manda el recalculo al
+    final de la corrida, cuando ya publico stock y costos.
+    """
+    filas = payload.get("filas")
+    if not isinstance(filas, list):
+        raise HTTPException(status_code=400, detail="Falta la lista 'filas'")
+    return precios_service.sincronizar_erp(db, filas, usuario="motor")

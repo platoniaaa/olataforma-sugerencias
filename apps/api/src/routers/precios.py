@@ -198,7 +198,10 @@ def eliminar(
     orden y `{producto:path}` es codicioso, asi que declarado antes se comeria
     esa ruta.
     """
-    r = precios_service.eliminar(db, [producto], email)
+    # Desde la pantalla es una decision de persona sobre ese producto: queda
+    # protegido y el feed semanal del ERP no lo vuelve a crear.
+    r = precios_service.eliminar(db, [producto], email, proteger=True,
+                                 motivo="sacado desde la pantalla")
     if not r["eliminados"]:
         raise HTTPException(status_code=404, detail=f"{producto} no esta en la lista de precios")
     return r
