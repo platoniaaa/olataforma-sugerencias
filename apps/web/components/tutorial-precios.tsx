@@ -56,9 +56,10 @@ const PASOS: Paso[] = [
           decides sobre los precios.
         </p>
         <p>
-          Para que la lista tome los datos del día se aprieta <b>Recalcular</b>, a la derecha de
-          los filtros. Vuelve a pasar la regla por toda la lista y deja anotado, producto por
-          producto, todo lo que cambió.
+          La lista se recalcula <b>sola, todos los días</b>, cuando el motor termina de publicar
+          el stock y los costos. Vuelve a pasar la regla por los 39 mil productos y deja anotado,
+          producto por producto, todo lo que cambió. No hay que apretar nada para tener los
+          datos del día.
         </p>
       </>
     ),
@@ -124,20 +125,19 @@ const PASOS: Paso[] = [
             nadie ha mirado todavía. Hazle clic y la lista se filtra a esos.
           </li>
           <li>
-            <b>Pendientes de envío</b>: lo que cambió desde la última vez que se mandó al ERP.
-          </li>
-          <li>
-            <b>Sin revisión</b>: los que no tienen precio calculable. También se puede hacer
-            clic para verlos.
-          </li>
-          <li>
             <b>Último recálculo</b>: cuándo se recalculó por última vez y, abajo, cuándo fue el
-            último envío.
+            último envío al ERP.
+          </li>
+          <li>
+            El número sobre <b>Solo diferencias</b>, arriba a la derecha, es lo que cambió desde
+            ese último envío: lo que está esperando que alguien lo suba.
           </li>
         </ul>
         <p>
-          Si los números se ven viejos, aprieta <b>Recalcular</b>: vuelve a leer el stock y el
-          costo del día y deja los contadores al día.
+          <b>Recalcular</b>, a la derecha de los filtros, hace a mano lo mismo que el motor hace
+          cada mañana: relee stock, tránsito, costo y compras, y vuelve a aplicar la regla. Casi
+          nunca hace falta; sirve cuando alguien cambió la política de factores o los rubros y
+          quiere ver el efecto ahora. Demora unos minutos y no manda nada al ERP.
         </p>
       </>
     ),
