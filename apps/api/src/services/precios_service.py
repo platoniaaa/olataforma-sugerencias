@@ -1416,10 +1416,18 @@ def sincronizar_erp(db: Session, filas: list[dict], usuario: str | None = None) 
         creados_codigos.append(prod)
     db.commit()
     if creados:
+        detalle = (f"{creados} productos nuevos del ERP con stock: "
+                   + ", ".join(creados_codigos[:20]) + (" ..." if creados > 20 else ""))
         auditoria_service.registrar(
             db, accion="precios_creados_desde_erp", entidad="precios", usuario_email=usuario,
-            detalle=f"{creados} productos nuevos del ERP con stock: "
-                    + ", ".join(creados_codigos[:20]) + (" ..." if creados > 20 else ""),
+            detalle=detalle,
+        )
+        # A la campanita: es lo que el manual le dice a Abastecimiento que mire
+        # despues de cada carga, para sacar lo que no deba tener precio.
+        auditoria_service.notificar(
+            db, tipo="precios",
+            titulo=f"Lista de precios: {creados} productos nuevos entraron desde el ERP",
+            mensaje=detalle, creado_por_email=usuario,
         )
         db.commit()
     return {"recibidos": len(limpias), "actualizados": actualizados, "creados": creados,
