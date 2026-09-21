@@ -144,7 +144,8 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+        {/* Los data-tour son las paradas del recorrido guiado (tutorial-precios.tsx). */}
+        <div data-tour="titulo">
           <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight text-slate-900">
             <Tag size={20} className="text-brand" /> Lista de precios
           </h1>
@@ -162,13 +163,26 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <TutorialPrecios />
+          <TutorialPrecios
+            acciones={{
+              // Para los pasos de la ficha: un producto que siga la regla y tenga
+              // precio, que es el caso que mejor muestra el calculo completo.
+              abrirFicha: () => {
+                const ejemplo = rows.find((r) => r.estado === "OK") ?? rows[0];
+                if (!ejemplo) return false;
+                setSeleccion(ejemplo);
+                return true;
+              },
+              cerrarFicha: () => setSeleccion(null),
+            }}
+          />
           <Link href="/precios/politicas">
-            <Button variant="outline" size="sm"><Sigma size={15} /> Política</Button>
+            <Button variant="outline" size="sm" data-tour="politica"><Sigma size={15} /> Política</Button>
           </Link>
-          <Button variant="outline" size="sm" onClick={() => setModalCols(true)}>
+          <Button variant="outline" size="sm" onClick={() => setModalCols(true)} data-tour="columnas">
             <Columns3 size={15} /> Columnas
           </Button>
+          <span className="flex items-center gap-2" data-tour="exportar">
           <Button
             variant="outline" size="sm" disabled={ocupado !== null}
             onClick={() => void accion("exportar", async () => {
@@ -192,14 +206,16 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
               <span className="ml-1 rounded-full bg-white/20 px-1.5 text-[11px]">{formatoNumero(resumen.pendientes_envio)}</span>
             )}
           </Button>
+          </span>
         </div>
       </div>
 
       {/* Tres KPI, no cinco. "Pendientes de envío" repetía el número que ya está
           en el botón "Solo diferencias", y "Sin revisión" es un estado más de la
           tabla, alcanzable desde el filtro de Estado. */}
+      {/* w-fit: que el recuadro del recorrido abrace las tarjetas y no toda la fila. */}
       {resumen && (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex w-fit flex-wrap gap-2" data-tour="kpis">
           <Kpi etiqueta="Productos" valor={formatoNumero(resumen.productos)} />
           <Kpi etiqueta="Con cambios sin revisar" valor={formatoNumero(resumen.con_cambios)}
                destacar={resumen.con_cambios > 0}
@@ -209,7 +225,7 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
         </div>
       )}
 
-      <Card>
+      <Card data-tour="filtros">
         <div className="flex flex-wrap items-center gap-2 p-3">
           <div className="relative min-w-[240px] flex-1">
             <Search size={15} className="absolute left-2.5 top-2.5 text-slate-400" />
@@ -244,7 +260,7 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
           <div className="ml-auto flex items-center gap-2">
             {puedeEditar && (
               <>
-                <Button variant="outline" size="sm" disabled={ocupado !== null}
+                <Button variant="outline" size="sm" disabled={ocupado !== null} data-tour="recalcular"
                   onClick={() => void accion("recalcular", async () => {
                     const r = await api.recalcularPrecios();
                     return `Recalculados ${formatoNumero(r.productos)} productos: ${formatoNumero(r.cambios)} cambios en ${formatoNumero(r.productos_con_cambios)}.`;
@@ -252,7 +268,7 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
                   {ocupado === "recalcular" ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />} Recalcular
                 </Button>
                 {resumen && resumen.con_cambios > 0 && (
-                  <Button variant="outline" size="sm" disabled={ocupado !== null}
+                  <Button variant="outline" size="sm" disabled={ocupado !== null} data-tour="revisados"
                     onClick={() => void accion("vistos", async () => {
                       const r = await api.marcarPreciosVistos(filtros.con_cambios || hayFiltros ? rows.map((x) => x.producto) : null);
                       return `${formatoNumero(r.vistos)} cambios marcados como revisados.`;
@@ -260,7 +276,7 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
                     <Bell size={15} /> Marcar revisados{hayFiltros ? " (los filtrados)" : ""}
                   </Button>
                 )}
-                <Button size="sm" onClick={() => setModalNuevo(true)}><Plus size={15} /> Nuevo producto</Button>
+                <Button size="sm" onClick={() => setModalNuevo(true)} data-tour="nuevo"><Plus size={15} /> Nuevo producto</Button>
               </>
             )}
           </div>
@@ -276,12 +292,14 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
         <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{aviso}</p>
       )}
 
-      <TablaPrecios
-        rows={rows}
-        columnasVisibles={colsVisibles}
-        onFila={setSeleccion}
-        onEliminar={puedeEditar ? sacarDeLaLista : undefined}
-      />
+      <div data-tour="tabla">
+        <TablaPrecios
+          rows={rows}
+          columnasVisibles={colsVisibles}
+          onFila={setSeleccion}
+          onEliminar={puedeEditar ? sacarDeLaLista : undefined}
+        />
+      </div>
 
       {totalPaginas > 1 && (
         <div className="flex items-center justify-between gap-3 text-[13px] text-ink-600">
@@ -465,7 +483,8 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
               once, del mismo tamaño que "Rubro", y la diferencia contra el ERP
               -que es lo que hace que alguien abra esta ficha- había que
               calcularla mentalmente restando dos filas separadas. */}
-          <div className="flex flex-wrap items-end justify-between gap-4 rounded-lg border border-ink-100 bg-ink-50/60 px-4 py-3">
+          <div className="flex flex-wrap items-end justify-between gap-4 rounded-lg border border-ink-100 bg-ink-50/60 px-4 py-3"
+               data-tour="ficha-precio">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">Precio final</p>
               <p className="flex items-baseline gap-2">
@@ -490,7 +509,7 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
           </div>
 
           <div className="grid gap-5 md:grid-cols-2">
-            <section className="space-y-2 text-sm">
+            <section className="space-y-2 text-sm" data-tour="ficha-origen">
               <h3 className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">De dónde sale</h3>
               {/* El origen va como etiqueta y no entre paréntesis: dice de un
                   vistazo qué está decidido a mano y qué lo pone la regla. */}
@@ -518,7 +537,7 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
               )}
             </section>
 
-            <section className="space-y-4">
+            <section className="space-y-4" data-tour="ficha-decision">
               <h3 className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">Decisión sobre este precio</h3>
               {!puedeEditar && (
                 <p className="rounded-md bg-ink-50 px-3 py-2 text-[12px] text-ink-500">
