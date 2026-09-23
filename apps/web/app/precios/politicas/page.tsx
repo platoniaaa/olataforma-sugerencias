@@ -75,8 +75,22 @@ export default function PoliticasPreciosPage() {
     }
   };
 
+  // Guardar recalcula los ~39 mil productos DENTRO de la peticion: medido en
+  // produccion, 4 min 39 s. Sin avisarlo, la persona cree que se colgo y aprieta
+  // de nuevo o recarga; dos recalculos encima del otro terminan en un 500
+  // (comprobado el 23-09-2026). Por eso se confirma antes y se bloquea mientras.
+  function confirmarRecalculo(que: string): boolean {
+    return confirm(
+      `Guardar ${que} recalcula el precio de los 39 mil productos.\n\n` +
+      "Demora unos 5 minutos y la pantalla queda esperando. No cierres la pestaña " +
+      "ni vuelvas a apretar Guardar: si se lanzan dos recálculos a la vez, fallan los dos.\n\n" +
+      "El cambio queda registrado en Auditoría con tu nombre."
+    );
+  }
+
   async function guardarFactores() {
     if (!factores) return;
+    if (!confirmarRecalculo("los factores")) return;
     setGuardando("factores");
     setError(null);
     setAviso(null);
@@ -101,6 +115,7 @@ export default function PoliticasPreciosPage() {
 
   async function guardarRubros() {
     if (!rubros) return;
+    if (!confirmarRecalculo("los rubros")) return;
     setGuardando("rubros");
     setError(null);
     setAviso(null);
@@ -139,6 +154,13 @@ export default function PoliticasPreciosPage() {
             : " Tu usuario puede verla pero no editarla."}
         </p>
       </header>
+
+      {guardando && (
+        <p className="flex items-center gap-2 rounded-md border border-brand/30 bg-brand-50 px-3 py-2 text-sm text-ink-700">
+          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-brand" />
+          Recalculando los 39 mil precios. Demora unos 5 minutos; deja esta pestaña abierta.
+        </p>
+      )}
 
       {error && (
         <p className="flex items-center gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
