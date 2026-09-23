@@ -6,6 +6,7 @@ solo en sus sucursales. Los permisos salen de `ic_rol` (ver services/inventario_
 from __future__ import annotations
 
 import io
+import json
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -16,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import IcEvidencia, IcItem
+from ..models import IcEvidencia, IcItem, IcRol, Usuario
 from ..services import auditoria_service
 from ..services import inventario_ciclico_service as svc
 from ..services.auth import requiere_auth
@@ -89,6 +90,19 @@ class CargaOut(BaseModel):
     conservados: int
     eliminados: int
     avisos: list[str]
+
+
+class RolOut(BaseModel):
+    email: str
+    rol: str
+    sucursales: list[str] | None
+    nombre: str | None
+    tiene_usuario: bool
+
+
+class RolIn(BaseModel):
+    rol: str = Field(pattern="^(admin|bodega)$")
+    sucursales: list[str] | None = None
 
 
 # --------------------------- dependencias --------------------------- #
@@ -318,3 +332,62 @@ async def cargar(
     )
     db.commit()
     return res
+
+
+# --------------------------- permisos del modulo --------------------------- #
+@router.get("/sucursales", response_model=list[str])
+def sucursales(acc: svc.Acceso = Depends(_admin)):
+    return list(svc.SUCURSALES_INVENTARIO)
+
+
+@router.get("/roles", response_model=list[RolOut])
+def listar_roles(acc: svc.Acceso = Depends(_admin), db: Session = Depends(get_db)):
+    filas = db.scalars(select(IcRol).order_by(IcRol.rol, IcRol.email)).all()
+    out = []
+    for f in filas:
+        u = db.get(Usuario, f.email)
+        out.append(RolOut(
+            email=f.email, rol=f.rol, sucursales=svc._lista_json(f.sucursales),
+            nombre=u.nombre if u else None, tiene_usuario=u is not None,
+        ))
+    return out
+
+
+@router.put("/roles/{email}", response_model=RolOut)
+def guardar_rol(
+    email: str, payload: RolIn, acc: svc.Acceso = Depends(_admin), db: Session = Depends(get_db)
+):
+    email = email.strip().lower()
+    if "@" not in email:
+        raise HTTPException(status_code=400, detail="Email no valido")
+    validas = set(svc.SUCURSALES_INVENTARIO)
+    sucs = sorted({s for s in (payload.sucursales or []) if s})
+    if any(s not in validas for s in sucs):
+        raise HTTPException(status_code=400, detail="Sucursal no valida")
+    fila = db.get(IcRol, email) or IcRol(email=email)
+    fila.rol = payload.rol
+    fila.sucursales = json.dumps(sucs) if sucs and payload.rol == "bodega" else None
+    db.add(fila)
+    auditoria_service.registrar(
+        db, accion="inventario_rol", entidad="ic_rol", entidad_id=email, usuario_email=acc.email,
+        detalle=f"{payload.rol} {', '.join(sucs) or 'todas'}",
+    )
+    db.commit()
+    u = db.get(Usuario, email)
+    return RolOut(
+        email=email, rol=fila.rol, sucursales=svc._lista_json(fila.sucursales),
+        nombre=u.nombre if u else None, tiene_usuario=u is not None,
+    )
+
+
+@router.delete("/roles/{email}", status_code=204)
+def quitar_rol(email: str, acc: svc.Acceso = Depends(_admin), db: Session = Depends(get_db)):
+    fila = db.get(IcRol, email.strip().lower())
+    if fila is not None:
+        db.delete(fila)
+        auditoria_service.registrar(
+            db, accion="inventario_rol", entidad="ic_rol", entidad_id=fila.email,
+            usuario_email=acc.email, detalle="quitado",
+        )
+        db.commit()
+    return Response(status_code=204)

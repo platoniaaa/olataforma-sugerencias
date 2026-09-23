@@ -60,6 +60,14 @@ export interface ResultadoCarga {
   avisos: string[];
 }
 
+export interface RolFila {
+  email: string;
+  rol: "admin" | "bodega";
+  sucursales: string[] | null;
+  nombre: string | null;
+  tiene_usuario: boolean;
+}
+
 /** Error de carga con la lista de filas malas que devuelve el backend. */
 export class ErrorCarga extends Error {
   constructor(public errores: string[]) {
@@ -154,6 +162,22 @@ export const inventarioApi = {
     a.download = "plantilla_inventario_ciclico.xlsx";
     a.click();
     URL.revokeObjectURL(url);
+  },
+
+  roles: () => json<RolFila[]>(`${RUTA}/roles`),
+
+  sucursales: () => json<string[]>(`${RUTA}/sucursales`),
+
+  guardarRol: (email: string, rol: "admin" | "bodega", sucursales: string[]) =>
+    json<RolFila>(
+      `${RUTA}/roles/${encodeURIComponent(email)}`,
+      { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rol, sucursales }) },
+      "No se pudo guardar"
+    ),
+
+  async quitarRol(email: string): Promise<void> {
+    const res = await req(`${RUTA}/roles/${encodeURIComponent(email)}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo quitar"));
   },
 
   async cargar(semana: string, archivo: File): Promise<ResultadoCarga> {

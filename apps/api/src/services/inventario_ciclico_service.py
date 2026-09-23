@@ -37,6 +37,10 @@ SUCURSALES_CONOCIDAS = (
     "LINDEROS", "CURICO", "TALCA", "TALCA (2)", "RANCAGUA", "CHILLAN",
     "CHILLAN VIEJO", "BRASIL 18", "PLACILLA", "DIEZ DE JULIO (2)", CD,
 )
+# Las que se pueden asignar a bodega: sin el CD ni Diez de Julio (cerrada).
+SUCURSALES_INVENTARIO = tuple(
+    s for s in SUCURSALES_CONOCIDAS if s not in (CD, "DIEZ DE JULIO (2)")
+)
 
 # Tope por archivo de evidencia. El backend corre serverless (limite ~4.5 MB por request).
 MAX_EVIDENCIA_BYTES = 4 * 1024 * 1024

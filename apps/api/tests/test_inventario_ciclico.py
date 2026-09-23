@@ -239,3 +239,27 @@ def test_resumen_por_sucursal(client, db_session):
     assert fila["productos_con_stock"] == 10
     assert fila["contados_en_el_ano"] == 3
     assert client.get("/api/inventario-ciclico/semanas").json() == ["2026-09-21"]
+
+
+# --------------------------- permisos del modulo --------------------------- #
+def test_admin_asigna_bodega_y_bodega_no_ve_permisos(client, como, db_session):
+    db_session.add(Usuario(email="nueva@curifor.com", password_hash=hash_password("x")))
+    db_session.commit()
+    r = client.put("/api/inventario-ciclico/roles/Nueva@curifor.com", json={"rol": "bodega", "sucursales": ["CURICO"]})
+    assert r.status_code == 200, r.text
+    assert r.json() == {
+        "email": "nueva@curifor.com", "rol": "bodega", "sucursales": ["CURICO"],
+        "nombre": None, "tiene_usuario": True,
+    }
+    assert client.put("/api/inventario-ciclico/roles/x@y.cl", json={"rol": "bodega", "sucursales": ["CD REPUESTOS"]}).status_code == 400
+    assert client.put("/api/inventario-ciclico/roles/x@y.cl", json={"rol": "jefe"}).status_code == 422
+    assert "CD REPUESTOS" not in client.get("/api/inventario-ciclico/sucursales").json()
+
+    como("nueva@curifor.com")
+    assert client.get("/api/inventario-ciclico/yo").json() == {"rol": "bodega", "sucursales": ["CURICO"]}
+    assert client.get("/api/inventario-ciclico/roles").status_code == 403
+
+    como("test@curifor.com")
+    assert client.delete("/api/inventario-ciclico/roles/nueva@curifor.com").status_code == 204
+    como("nueva@curifor.com")
+    assert client.get("/api/inventario-ciclico/yo").json()["rol"] is None

@@ -7,6 +7,7 @@ import { ClipboardCheck, RefreshCw } from "lucide-react";
 import { Carga } from "@/components/inventario-ciclico/carga";
 import { Conteo } from "@/components/inventario-ciclico/conteo";
 import { Detalle } from "@/components/inventario-ciclico/detalle";
+import { Permisos } from "@/components/inventario-ciclico/permisos";
 import { Resumen } from "@/components/inventario-ciclico/resumen";
 import {
   etiquetaSemana,
@@ -16,7 +17,7 @@ import {
   type RolInventario,
 } from "@/lib/inventario-ciclico";
 
-type Pestana = "resumen" | "carga";
+type Pestana = "resumen" | "carga" | "permisos";
 
 export default function InventarioCiclicoPage() {
   const [rol, setRol] = useState<RolInventario | undefined>(undefined);
@@ -150,6 +151,9 @@ export default function InventarioCiclicoPage() {
           <button type="button" className={pestanaClase("carga")} onClick={() => setPestana("carga")}>
             Carga semanal
           </button>
+          <button type="button" className={pestanaClase("permisos")} onClick={() => setPestana("permisos")}>
+            Permisos
+          </button>
         </div>
       )}
 
@@ -164,6 +168,8 @@ export default function InventarioCiclicoPage() {
           }}
         />
       )}
+
+      {esAdmin && pestana === "permisos" && <Permisos />}
 
       {esAdmin && pestana === "resumen" && (
         <div className="space-y-4">
