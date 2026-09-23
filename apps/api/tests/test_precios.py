@@ -328,6 +328,46 @@ def test_pendientes_de_envio_se_cuentan_en_sql_y_coinciden(client, lista_cargada
     assert svc.contar_diferencias(db) == len(svc._diferencias(db)) == 1
 
 
+def test_la_politica_la_edita_el_equipo_de_precios_y_queda_en_auditoria(client, lista_cargada, db_session):
+    """Editar el factor dejo de ser cosa de admin (23-09-2026).
+
+    Quien decide un precio fijo es quien sabe cuando hay que mover el factor. Lo
+    que reemplaza al permiso es la trazabilidad: sin la fila de auditoria, un
+    cambio que mueve 39 mil precios no tendria autor.
+    """
+    from src.models import AuditoriaLog, Usuario
+    from src.services import auth
+
+    # No esta en la tabla de usuarios, asi que no hay forma de que pase por admin:
+    # el permiso le viene de EMAILS_PRECIOS.
+    assert db_session.get(Usuario, "mramos@curifor.com") is None
+    assert auth.puede_precios("mramos@curifor.com", db_session)
+
+    svc.recalcular(lista_cargada)
+    app.dependency_overrides[requiere_auth] = lambda: "mramos@curifor.com"  # editora, NO admin
+    try:
+        with TestClient(app) as c:
+            r = c.put("/api/precios/politica/factores",
+                      json={"filas": [{"tipo": "Liviano", "procedencia": "Nacional", "factor": 2.0}]})
+            assert r.status_code == 200, r.text
+            assert c.get("/api/precios/71 AAA1").json()["precio_final"] == 20000
+
+            r = c.put("/api/precios/politica/rubros",
+                      json={"filas": [{"rubro": "71", "tipo": "Pesado", "procedencia_forzada": None}]})
+            assert r.status_code == 200, r.text
+    finally:
+        app.dependency_overrides[requiere_auth] = lambda: "test@curifor.com"
+
+    logs = {log.accion: log for log in db_session.query(AuditoriaLog).all()}
+    factor = logs["politica_precio_editada"]
+    assert factor.usuario_email == "mramos@curifor.com"
+    # El detalle tiene que decir de que a que: si no, la fila no sirve para revisar.
+    assert "1.78" in factor.detalle and "2.0" in factor.detalle
+    rubro = logs["politica_rubro_editada"]
+    assert rubro.usuario_email == "mramos@curifor.com"
+    assert "71" in rubro.detalle and "Pesado" in rubro.detalle
+
+
 def test_politica_solo_admin_y_recalcula(client, lista_cargada, db_session):
     svc.recalcular(lista_cargada)
     r = client.put("/api/precios/politica/factores",

@@ -8,8 +8,11 @@ Abastecimiento, asi que el vendedor de sucursal no entra a nada de esto):
   marcar cambios vistos, recalcular): admin o email en `EMAILS_PRECIOS`. Es el
   mismo esquema de Calibracion: quien mantiene la lista no tiene por que
   administrar la plataforma.
-- **La politica** (factores y rubros): solo admin. Un factor mueve miles de
-  precios de una; un precio fijo mueve uno.
+- **La politica** (factores y rubros): el mismo permiso que editar un precio.
+  Un factor mueve miles de precios de una, mucho mas que un precio fijo, pero
+  quien mantiene la lista es quien sabe cuando hay que moverlo. El freno es la
+  trazabilidad, no el permiso: cada cambio queda en la auditoria con el usuario
+  y el valor anterior.
 
 No va bajo /api/admin por la misma razon tecnica que Calibracion: las
 dependencias del include se ejecutan siempre y no se pueden excluir por endpoint.
@@ -32,7 +35,7 @@ from ..schemas.precios import (
 )
 from ..services import politica_precio_service as politica
 from ..services import precios_service
-from ..services.auth import requiere_admin, requiere_precios
+from ..services.auth import requiere_precios
 
 router = APIRouter(prefix="/api/precios", tags=["precios"])
 
@@ -209,7 +212,7 @@ def eliminar(
 
 @router.put("/politica/factores")
 def guardar_factores(
-    payload: FactoresIn, db: Session = Depends(get_db), email: str = Depends(requiere_admin),
+    payload: FactoresIn, db: Session = Depends(get_db), email: str = Depends(requiere_precios),
 ) -> dict:
     try:
         r = politica.guardar_factores(db, [f.model_dump() for f in payload.filas], email)
@@ -222,7 +225,7 @@ def guardar_factores(
 
 @router.put("/politica/rubros")
 def guardar_rubros(
-    payload: RubrosIn, db: Session = Depends(get_db), email: str = Depends(requiere_admin),
+    payload: RubrosIn, db: Session = Depends(get_db), email: str = Depends(requiere_precios),
 ) -> dict:
     try:
         r = politica.guardar_rubros(db, [f.model_dump() for f in payload.filas], email)

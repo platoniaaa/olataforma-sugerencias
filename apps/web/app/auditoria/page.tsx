@@ -7,6 +7,8 @@ import {
   PlusCircle,
   RefreshCw,
   Repeat,
+  Sigma,
+  Tag,
   Trash2,
   Users,
 } from "lucide-react";
@@ -30,6 +32,11 @@ const ACCIONES: Record<
   documento_editado: { label: "Documento ~", color: "text-amber-700 bg-amber-50", icon: Pencil },
   documento_eliminado: { label: "Documento -", color: "text-red-700 bg-red-50", icon: Trash2 },
   documento_abierto: { label: "Abrio documento", color: "text-slate-600 bg-slate-100", icon: LogIn },
+  // La politica de precios la edita todo el equipo de precios, no solo el admin:
+  // estas dos filas son la contrapartida de ese permiso, asi que se muestran con
+  // nombre propio y no con el codigo crudo de la accion.
+  politica_precio_editada: { label: "Factor de precio", color: "text-amber-700 bg-amber-50", icon: Sigma },
+  politica_rubro_editada: { label: "Rubro de precio", color: "text-amber-700 bg-amber-50", icon: Tag },
 };
 
 type Tab = "actividad" | "accesos";

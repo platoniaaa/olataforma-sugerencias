@@ -47,7 +47,10 @@ REVISION` (queda sin precio hasta que alguien decida).
 - Ver y exportar: cualquiera de Abastecimiento.
 - Editar un precio, crear un producto, recalcular, marcar cambios vistos:
   admin o email en `EMAILS_PRECIOS` (variable de entorno, separada por comas).
-- La politica: solo admin.
+- La politica (factores y rubros): el mismo permiso que editar un precio.
+  Cada cambio queda en `auditoria_log` (`politica_precio_editada` /
+  `politica_rubro_editada`) con el usuario y el valor anterior, y se ve en
+  la pantalla de Auditoria.
 
 ## Cargas
 

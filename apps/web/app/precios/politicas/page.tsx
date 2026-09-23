@@ -1,13 +1,18 @@
 "use client";
 
 // La politica de precios: los factores por (tipo, procedencia) y el tipo de
-// cada rubro. Cambiar un factor recalcula la lista entera al guardar, asi que
-// solo edita el admin; el resto la ve para entender de donde sale cada precio.
+// cada rubro. Cambiar un factor recalcula la lista entera al guardar.
+//
+// La edita quien mantiene la lista de precios, no solo el admin (23-09-2026, a
+// pedido del usuario): quien decide un precio fijo es quien sabe cuando hay que
+// mover el factor. Lo que contiene el riesgo es la trazabilidad -cada cambio
+// queda en la auditoria con el usuario y el valor anterior-, no el permiso.
+// Quien no edita precios la ve igual, para entender de donde sale cada precio.
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AlertCircle, ArrowLeft, Loader2, Save, Sigma } from "lucide-react";
 import { api } from "@/lib/api-client";
-import { getEsAdmin } from "@/lib/auth";
+import { getPuedePrecios } from "@/lib/auth";
 import { formatoNumero } from "@/lib/formato";
 import type { PoliticaFactor, PoliticaRubro } from "@/lib/types";
 
@@ -25,10 +30,10 @@ export default function PoliticasPreciosPage() {
   const [error, setError] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [guardando, setGuardando] = useState<"factores" | "rubros" | null>(null);
-  const [esAdmin, setEsAdmin] = useState(false);
+  const [puedeEditar, setPuedeEditar] = useState(false);
 
   useEffect(() => {
-    setEsAdmin(getEsAdmin());
+    setPuedeEditar(getPuedePrecios());
   }, []);
 
   const cargar = useCallback(async () => {
@@ -129,7 +134,9 @@ export default function PoliticasPreciosPage() {
           El precio es <b>costo × factor</b>. El factor sale del par (tipo, procedencia); el tipo
           de cada producto sale de su rubro, salvo que alguien lo haya escrito a mano. Guardar
           recalcula toda la lista.
-          {!esAdmin && " Solo el administrador puede editarla."}
+          {puedeEditar
+            ? " Cada cambio queda registrado en Auditoría con tu nombre y el valor anterior."
+            : " Tu usuario puede verla pero no editarla."}
         </p>
       </header>
 
@@ -151,7 +158,7 @@ export default function PoliticasPreciosPage() {
           <section className="space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="text-base font-semibold text-ink-900">Factores</h2>
-              {esAdmin && (
+              {puedeEditar && (
                 <button
                   onClick={() => void guardarFactores()}
                   disabled={guardando !== null}
@@ -193,7 +200,7 @@ export default function PoliticasPreciosPage() {
                               <input
                                 type="number" step="0.01" min="1.01" max="10"
                                 className={campoCls}
-                                disabled={!esAdmin}
+                                disabled={!puedeEditar}
                                 value={f?.factor ?? ""}
                                 onChange={(e) => setFactor(tipo, p, "factor", e.target.value)}
                               />
@@ -217,7 +224,7 @@ export default function PoliticasPreciosPage() {
           <section className="space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="text-base font-semibold text-ink-900">Rubros</h2>
-              {esAdmin && (
+              {puedeEditar && (
                 <button
                   onClick={() => void guardarRubros()}
                   disabled={guardando !== null}
@@ -245,7 +252,7 @@ export default function PoliticasPreciosPage() {
                       <td className="px-3 py-1.5">
                         <select
                           className="h-8 rounded-md border border-ink-200 px-2 text-sm outline-none focus:border-brand disabled:bg-ink-50 disabled:text-ink-500"
-                          disabled={!esAdmin}
+                          disabled={!puedeEditar}
                           value={r.tipo ?? ""}
                           onChange={(e) => setRubro(r.rubro, "tipo", e.target.value)}
                         >
@@ -258,7 +265,7 @@ export default function PoliticasPreciosPage() {
                       <td className="px-3 py-1.5">
                         <select
                           className="h-8 rounded-md border border-ink-200 px-2 text-sm outline-none focus:border-brand disabled:bg-ink-50 disabled:text-ink-500"
-                          disabled={!esAdmin}
+                          disabled={!puedeEditar}
                           value={r.procedencia_forzada ?? ""}
                           onChange={(e) => setRubro(r.rubro, "procedencia_forzada", e.target.value)}
                         >

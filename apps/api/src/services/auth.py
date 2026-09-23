@@ -242,9 +242,11 @@ def requiere_actualizar(email: str = Depends(requiere_auth), db=Depends(get_db))
 def puede_precios(email: str, db) -> bool:
     """True si el email puede editar la lista de precios: admin o en EMAILS_PRECIOS.
 
-    Editar un precio (fijarlo, congelarlo, crear un producto) es trabajo de
-    quien mantiene la lista, no del admin de la plataforma. Mismo esquema que
-    Calibracion; la politica de factores sigue siendo de admin."""
+    Editar un precio (fijarlo, congelarlo, crear un producto) y la politica de
+    factores y rubros son trabajo de quien mantiene la lista, no del admin de la
+    plataforma. Mismo esquema que Calibracion. La politica se abrio el 23-09-2026
+    a pedido del usuario: la contencion es que cada cambio queda en la auditoria,
+    no que haya una sola persona que pueda tocarla."""
     from ..models import Usuario  # import local para evitar ciclo
 
     user = db.get(Usuario, email)

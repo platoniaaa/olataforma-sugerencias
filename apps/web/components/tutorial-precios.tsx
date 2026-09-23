@@ -373,9 +373,14 @@ const PASOS: Paso[] = [
           ve de dónde salió el factor que estás viendo en un producto.
         </p>
         <p>
-          Cambiar un factor o un rubro <b>recalcula la lista entera</b> al guardar, por eso
-          solo lo puede tocar un administrador. Mirarla, cuando quieras.
+          La puede editar cualquiera del equipo de precios, igual que un precio fijo. Ojo con
+          una diferencia: cambiar un factor o un rubro <b>recalcula la lista entera</b> al
+          guardar, así que mueve miles de precios de una.
         </p>
+        <Nota>
+          Por eso cada cambio queda en <b>Auditoría</b> con tu nombre, la fecha y el valor
+          anterior. Si un día los precios amanecen distintos, ahí está la respuesta.
+        </Nota>
       </>
     ),
   },
