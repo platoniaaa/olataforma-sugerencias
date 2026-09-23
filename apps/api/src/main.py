@@ -24,6 +24,7 @@ from .routers import (
     incidencias,
     instock,
     inventario,
+    inventario_ciclico,
     precios,
     tablero,
     productos,
@@ -108,6 +109,9 @@ app.include_router(auditoria.router, dependencies=_protegido)
 app.include_router(ventas_historicas.router, dependencies=_abastecimiento)
 app.include_router(inventario.router, dependencies=_abastecimiento)
 app.include_router(tablero.router, dependencies=_abastecimiento)
+# Inventario ciclico: _protegido y no _abastecimiento, porque bodega no es comprador.
+# El rol (admin/bodega) se valida en cada endpoint (tabla ic_rol).
+app.include_router(inventario_ciclico.router, dependencies=_protegido)
 # Incidencias: todos reportan y ven lo suyo; gestionar exige admin en el endpoint.
 app.include_router(incidencias.router, dependencies=_protegido)
 # Admin: requiere flag es_admin (no solo estar logueado).
