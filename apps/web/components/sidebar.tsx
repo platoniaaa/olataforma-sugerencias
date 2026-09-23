@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -9,6 +9,7 @@ import {
   Bell,
   BookOpen,
   Boxes,
+  ClipboardCheck,
   Gauge,
   ClipboardList,
   ClipboardPaste,
@@ -35,6 +36,7 @@ import {
   getSoloLectura,
   logout,
 } from "@/lib/auth";
+import { inventarioApi, rolGuardado } from "@/lib/inventario-ciclico";
 
 type NavItem = {
   href: string;
@@ -46,6 +48,10 @@ type NavItem = {
   soloCalibracion?: boolean;
   ocultarSoloLectura?: boolean;
 };
+
+// Inventario ciclico: lo ve quien tenga rol en ic_rol (admin o bodega), tenga el
+// menu que tenga. Bodega que no es admin ve SOLO esto: su trabajo es contar.
+const NAV_INVENTARIO: NavItem = { href: "/inventario-ciclico", label: "Inventario cíclico", icon: ClipboardCheck };
 
 // Menu del vendedor de sucursal. No es el menu completo con cosas escondidas: es
 // OTRO menu, con las dos unicas cosas que tiene que hacer. Un vendedor que ve
@@ -88,14 +94,23 @@ export function Sidebar({ open, onClose }: Props) {
   const soloLectura = getSoloLectura();
   const puedeCalibrar = getPuedeCalibrar();
   const esVendedor = getEsVendedor();
-  const items = esVendedor
+  const [rolInventario, setRolInventario] = useState(rolGuardado);
+  const base = esVendedor
     ? NAV_VENDEDOR
-    : NAV.filter(
-        (n) =>
-          (!n.soloAdmin || esAdmin) &&
-          (!n.soloCalibracion || puedeCalibrar) &&
-          (!n.ocultarSoloLectura || !soloLectura)
-      );
+    : rolInventario === "bodega" && !esAdmin
+      ? []
+      : NAV.filter(
+          (n) =>
+            (!n.soloAdmin || esAdmin) &&
+            (!n.soloCalibracion || puedeCalibrar) &&
+            (!n.ocultarSoloLectura || !soloLectura)
+        );
+  const items = rolInventario ? [...base, NAV_INVENTARIO] : base;
+
+  // El rol de inventario no viaja en el login: se consulta una vez al montar.
+  useEffect(() => {
+    inventarioApi.yo().then((r) => setRolInventario(r.rol)).catch(() => undefined);
+  }, []);
 
   // Cerrar con ESC.
   useEffect(() => {

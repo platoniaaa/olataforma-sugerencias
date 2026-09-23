@@ -46,7 +46,7 @@ function authHeaders(): Record<string, string> {
 }
 
 /** fetch con token, sin cache, y manejo de sesion expirada (401 -> login). */
-async function req(path: string, init: RequestInit = {}): Promise<Response> {
+export async function req(path: string, init: RequestInit = {}): Promise<Response> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     cache: "no-store",
@@ -95,7 +95,7 @@ function filtrosToParams(f: SugeridoFiltros): URLSearchParams {
 }
 
 /** Mensaje legible del error del backend (FastAPI manda `detail` string o array). */
-async function mensajeError(res: Response, fallback: string): Promise<string> {
+export async function mensajeError(res: Response, fallback: string): Promise<string> {
   const err = await res.json().catch(() => ({}));
   const d = (err as { detail?: unknown })?.detail;
   if (typeof d === "string") return d;

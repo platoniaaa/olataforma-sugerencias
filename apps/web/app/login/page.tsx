@@ -5,10 +5,16 @@ import { useRouter } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api-client";
-import { estaAutenticado, getEsVendedor } from "@/lib/auth";
+import { estaAutenticado, getEsAdmin, getEsVendedor } from "@/lib/auth";
+import { inventarioApi, rolGuardado } from "@/lib/inventario-ciclico";
 
-/** El vendedor de sucursal no entra al sugerido: entra a lo suyo. */
-const INICIO = () => (getEsVendedor() ? "/mis-requerimientos" : "/");
+/** El vendedor de sucursal no entra al sugerido: entra a lo suyo. Bodega, a contar. */
+const INICIO = () =>
+  getEsVendedor()
+    ? "/mis-requerimientos"
+    : rolGuardado() === "bodega" && !getEsAdmin()
+      ? "/inventario-ciclico"
+      : "/";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -27,6 +33,8 @@ export default function LoginPage() {
     setEntrando(true);
     try {
       await api.login(email.trim().toLowerCase(), password);
+      // El rol de inventario no viaja en el login; yo() lo deja guardado para INICIO.
+      await inventarioApi.yo().catch(() => null);
       router.replace(INICIO());
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo iniciar sesión");
