@@ -95,7 +95,7 @@ class CargaOut(BaseModel):
 def _acceso(email: str = Depends(requiere_auth), db: Session = Depends(get_db)) -> svc.Acceso:
     acc = svc.acceso(db, email)
     if acc.rol is None:
-        raise HTTPException(status_code=403, detail="No tienes acceso al inventario ciclico")
+        raise HTTPException(status_code=403, detail="No tienes acceso al inventario cíclico")
     return acc
 
 
@@ -199,7 +199,7 @@ def actualizar_item(
     cambios = payload.model_dump(exclude_unset=True)
     if "requiere_evidencia" in cambios:
         if not acc.es_admin:
-            raise HTTPException(status_code=403, detail="Solo el administrador marca la evidencia")
+            raise HTTPException(status_code=403, detail="Solo el administrador marca qué requiere evidencia")
         item.requiere_evidencia = bool(cambios["requiere_evidencia"])
     if "cantidad_contada" in cambios:
         anterior = item.cantidad_contada
@@ -234,9 +234,9 @@ async def subir_evidencia(
         raise HTTPException(status_code=400, detail="Solo se aceptan fotos (JPG, PNG, WEBP, HEIC) o PDF")
     contenido = await archivo.read()
     if not contenido:
-        raise HTTPException(status_code=400, detail="El archivo esta vacio")
+        raise HTTPException(status_code=400, detail="El archivo está vacío")
     if len(contenido) > svc.MAX_EVIDENCIA_BYTES:
-        raise HTTPException(status_code=400, detail="El archivo pesa mas de 4 MB")
+        raise HTTPException(status_code=400, detail="El archivo pesa más de 4 MB")
     db.add(IcEvidencia(
         item_id=item.id, nombre=archivo.filename or "evidencia", content_type=tipo,
         tamano=len(contenido), contenido=contenido, subido_por=acc.email,
@@ -273,7 +273,7 @@ def borrar_evidencia(
         raise HTTPException(status_code=404, detail="Evidencia no encontrada")
     _item_visible(db, ev.item_id, acc)
     if not acc.es_admin and ev.subido_por != acc.email:
-        raise HTTPException(status_code=403, detail="Solo puedes borrar evidencias que subiste tu")
+        raise HTTPException(status_code=403, detail="Solo puedes borrar evidencias que subiste tú")
     db.delete(ev)
     db.commit()
     return Response(status_code=204)

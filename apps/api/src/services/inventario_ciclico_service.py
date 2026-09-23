@@ -227,16 +227,16 @@ def leer_archivo(db: Session, nombre: str, contenido: bytes) -> ResultadoLectura
         elif sucursal_id is None:
             errores.append(f"sucursal \"{suc_txt}\" no existe")
         elif sucursal_id == CD:
-            errores.append("el CD no entra en el inventario ciclico")
+            errores.append("el CD no entra en el inventario cíclico")
         clase = _texto(celda(fila, "clase")).upper()
         if clase not in CLASES:
-            errores.append(f"clase \"{clase or 'vacia'}\" no es A, B, C o D")
+            errores.append(f"clase \"{clase or 'vacía'}\" no es A, B, C o D")
         cantidad = _numero(celda(fila, "cantidad"))
         if cantidad is None:
-            errores.append("cantidad no es un numero")
+            errores.append("cantidad no es un número")
         costo = _numero(celda(fila, "costo"))
         if costo is None:
-            errores.append("costo no es un numero")
+            errores.append("costo no es un número")
         if producto and sucursal_id:
             if (sucursal_id, producto) in vistos:
                 errores.append("producto repetido para la misma sucursal")
@@ -310,7 +310,7 @@ def avisos_de_reglas(db: Session, semana: date, sucursales: list[str]) -> list[s
         cuota = cuota_semanal(con_stock.get(suc, 0), previos.get(suc, 0), semana)
         if len(items) < cuota:
             avisos.append(
-                f"{suc}: {len(items)} productos asignados; para contar toda la bodega en el ano "
+                f"{suc}: {len(items)} productos asignados; para contar toda la bodega en el año "
                 f"se sugieren al menos {cuota} por semana."
             )
     return avisos
