@@ -22,6 +22,7 @@ nacional, es Nacional; si esta en los dos, manda la mas reciente.
 """
 from __future__ import annotations
 
+import csv
 import io
 import math
 import re
@@ -893,12 +894,92 @@ def _diferencias(db: Session) -> list[PrecioProducto]:
     return out
 
 
+# Columnas de la exportacion completa, en orden. Se declaran aca arriba porque
+# las usan la consulta (para traer solo esto y no el objeto entero) y el CSV.
+COLUMNAS_COMPLETA = [
+    ("producto", "Producto"), ("glosa", "Glosa"), ("rubro", "Rubro"), ("tipo", "Tipo"),
+    ("procedencia_final", "Procedencia"), ("factor", "Factor"), ("costo", "Costo"),
+    ("precio_erp", "Precio ERP"), ("precio_calculado", "Precio calculado"),
+    ("precio_final", "Precio final"), ("estado", "Estado"), ("stock", "Stock"),
+    ("stock_transito", "En transito"), ("ultima_venta", "Ultima venta"),
+]
+
+
+def _a_csv(encabezados: list[str], filas) -> bytes:
+    """Las filas como CSV que Excel abre bien: `;` de separador y BOM.
+
+    Con coma, Excel en español mete toda la linea en una sola columna; sin BOM,
+    abre los acentos rotos. Son dos detalles que parecen cosmeticos y deciden si
+    el archivo sirve o no.
+    """
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=";", lineterminator="\r\n")
+    w.writerow(encabezados)
+    for fila in filas:
+        w.writerow(fila)
+    return buf.getvalue().encode("utf-8-sig")
+
+
+def _csv_completa(db: Session) -> tuple[bytes, int]:
+    """La lista entera en CSV. Es para revisar en Excel, no para el ERP.
+
+    Era un .xlsx y el boton fallaba: con 39 mil productos por 14 columnas,
+    armarlo tardaba 83 s en produccion y el navegador cortaba la conexion antes
+    de recibir el primer byte ("Failed to fetch"). openpyxl crea un objeto por
+    cada una de las 848 mil celdas y eso no se arregla cambiandole el modo: se
+    probo `write_only` y quedo en 1,2x, que no alcanza. El CSV no crea ninguno y
+    el mismo archivo sale en 0,3 s.
+
+    Detalles que parecen cosmeticos y no lo son: el separador es `;` porque es
+    lo que Excel en español espera -con coma, todo cae en una sola columna- y el
+    BOM va porque sin el Excel abre los acentos rotos.
+    """
+    campos = [getattr(PrecioProducto, k) for k, _ in COLUMNAS_COMPLETA]
+    filas = db.execute(
+        select(*campos)
+        .where(PrecioProducto.tenant_id == settings.default_tenant_id,
+               PrecioProducto.precio_final.is_not(None))
+        .order_by(PrecioProducto.producto)
+    ).all()
+    enteras = {"costo", "precio_erp", "precio_calculado", "precio_final", "stock", "stock_transito"}
+    datos = (
+        [_celda_csv(k, v, k in enteras) for (k, _), v in zip(COLUMNAS_COMPLETA, fila)]
+        for fila in filas
+    )
+    return _a_csv([t for _, t in COLUMNAS_COMPLETA], datos), len(filas)
+
+
+def _celda_csv(campo: str, valor, entera: bool) -> str:
+    """Un valor como lo espera Excel en español.
+
+    Dos cosas que parecen detalle y hacen la diferencia entre una columna de
+    numeros y una de texto: el decimal va con COMA (con punto, Excel lo lee como
+    separador de miles y 1.78 se convierte en 178) y la plata va sin decimales,
+    que es lo que mostraba el .xlsx con su formato #,##0.
+    """
+    if valor is None:
+        return ""
+    if isinstance(valor, date):
+        return valor.isoformat()
+    if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+        return str(valor)
+    if entera:
+        return str(int(round(valor)))
+    # Factor y cualquier otro decimal: hasta 2, sin ceros de relleno, con coma.
+    return f"{valor:.2f}".rstrip("0").rstrip(".").replace(".", ",") or "0"
+
+
 def exportar(db: Session, *, solo_diferencias: bool, registrar: bool, usuario: str | None,
              formato: str = "erp") -> tuple[bytes, str, int]:
-    """Excel para el ERP. `formato="erp"`: SKU | Precio_Optimo | Costo, igual que el
-    .exe. `formato="completa"`: la lista con todas las columnas, para revisar.
+    """El archivo para bajar. `formato="erp"`: Excel SKU | Precio_Optimo | Costo,
+    igual que el .exe, que es lo que el ERP acepta. `formato="completa"`: la lista
+    con todas las columnas en CSV, para revisar.
     Con `registrar`, deja en `precio_envio` lo que salio, para que el proximo
     "solo diferencias" parta de aca."""
+    if formato == "completa":
+        contenido, n = _csv_completa(db)
+        return contenido, f"lista_precios_completa_{date.today():%Y-%m-%d}.csv", n
+
     tenant = settings.default_tenant_id
     if solo_diferencias:
         filas = _diferencias(db)
@@ -907,47 +988,15 @@ def exportar(db: Session, *, solo_diferencias: bool, registrar: bool, usuario: s
                  if p.precio_final is not None]
     filas.sort(key=lambda p: p.producto)
 
-    wb = Workbook()
-    ws = wb.active
-    fill = PatternFill("solid", fgColor="1F4E5F")
-    font = Font(bold=True, color="FFFFFF")
-    if formato == "erp":
-        ws.title = "Precios"
-        cab = ["SKU", "Precio_Optimo", "Costo"]
-        for j, t in enumerate(cab, 1):
-            c = ws.cell(row=1, column=j, value=t); c.fill = fill; c.font = font
-        for i, p in enumerate(filas, 2):
-            ws.cell(row=i, column=1, value=p.producto)
-            ws.cell(row=i, column=2, value=redondear(p.precio_final)).number_format = "#,##0"
-            ws.cell(row=i, column=3, value=redondear(p.costo or 0)).number_format = "#,##0"
-        for col, w in zip("ABC", (24, 16, 16)):
-            ws.column_dimensions[col].width = w
-    else:
-        ws.title = "Lista de precios"
-        cols = [
-            ("producto", "Producto"), ("glosa", "Glosa"), ("rubro", "Rubro"), ("tipo", "Tipo"),
-            ("procedencia_final", "Procedencia"), ("factor", "Factor"), ("costo", "Costo"),
-            ("precio_erp", "Precio ERP"), ("precio_calculado", "Precio calculado"),
-            ("precio_final", "Precio final"), ("estado", "Estado"), ("stock", "Stock"),
-            ("stock_transito", "En transito"), ("ultima_venta", "Ultima venta"),
-        ]
-        for j, (_, t) in enumerate(cols, 1):
-            c = ws.cell(row=1, column=j, value=t); c.fill = fill; c.font = font
-        for i, p in enumerate(filas, 2):
-            for j, (k, _) in enumerate(cols, 1):
-                v = getattr(p, k)
-                c = ws.cell(row=i, column=j, value=v)
-                if k in ("costo", "precio_erp", "precio_calculado", "precio_final") and isinstance(v, (int, float)):
-                    c.number_format = "#,##0"
-                elif isinstance(v, date):
-                    c.number_format = "DD-MM-YYYY"
-        for j, (k, t) in enumerate(cols, 1):
-            ws.column_dimensions[get_column_letter(j)].width = 40 if k == "glosa" else max(12, len(t) + 4)
-    ws.freeze_panes = "A2"
-    for c in ws[1]:
-        c.alignment = Alignment(vertical="center")
-    buf = io.BytesIO()
-    wb.save(buf)
+    # Las mismas tres columnas de siempre, ahora en CSV: armar el .xlsx de 39 mil
+    # filas tardaba 35 s en Render y el navegador cortaba la descarga antes de
+    # recibir nada. No es openpyxl el culpable -se midio `write_only` y da igual-
+    # sino la CPU del plan gratis; lo que cambia el orden de magnitud es no
+    # construir un archivo comprimido con un objeto por celda.
+    contenido = _a_csv(
+        ["SKU", "Precio_Optimo", "Costo"],
+        ([p.producto, int(redondear(p.precio_final)), int(redondear(p.costo or 0))] for p in filas),
+    )
 
     if registrar and filas:
         lote = str(uuid.uuid4())
@@ -964,8 +1013,8 @@ def exportar(db: Session, *, solo_diferencias: bool, registrar: bool, usuario: s
             detalle=f"{len(filas)} productos ({'solo diferencias' if solo_diferencias else 'lista completa'})",
         )
         db.commit()
-    nombre = f"precios_{'diferencias' if solo_diferencias else 'completa'}_{date.today():%Y%m%d}.xlsx"
-    return buf.getvalue(), nombre, len(filas)
+    nombre = f"precios_{'diferencias' if solo_diferencias else 'completa'}_{date.today():%Y%m%d}.csv"
+    return contenido, nombre, len(filas)
 
 
 # -------------------------------------------------------------------- cargas

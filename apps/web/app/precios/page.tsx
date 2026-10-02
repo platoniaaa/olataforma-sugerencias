@@ -186,8 +186,13 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
           <Button
             variant="outline" size="sm" disabled={ocupado !== null}
             onClick={() => void accion("exportar", async () => {
-              const n = await api.exportarPrecios({ soloDiferencias: false, formato: "erp" });
-              return `Lista completa exportada: ${formatoNumero(n)} productos. Quedo registrado como envio.`;
+              // La lista entera con TODAS las columnas, para revisar. Antes este
+              // boton bajaba el archivo del ERP de los 39 mil productos y
+              // registraba un envio, con lo que el contador de "Solo
+              // diferencias" se iba a cero sin que nadie lo pidiera. El manual
+              // y el nombre del boton siempre dijeron esto otro.
+              const n = await api.exportarPrecios({ soloDiferencias: false, formato: "completa" });
+              return `Lista completa exportada: ${formatoNumero(n)} productos, con todas las columnas. No cuenta como envio al ERP.`;
             })}
           >
             <Download size={15} /> Exportar completa

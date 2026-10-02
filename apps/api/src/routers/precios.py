@@ -105,14 +105,16 @@ def exportar(
     db: Session = Depends(get_db),
     email: str = Depends(requiere_precios),
 ):
-    """El Excel para subir al ERP. `erp` son las 3 columnas que el ERP acepta
-    (SKU | Precio_Optimo | Costo); `completa` es para revisar."""
+    """El archivo para bajar. `erp` es el Excel de 3 columnas que el ERP acepta
+    (SKU | Precio_Optimo | Costo); `completa` es la lista entera en CSV, para
+    revisar: en Excel tardaba 83 s y el navegador cortaba la descarga."""
     contenido, nombre, n = precios_service.exportar(
         db, solo_diferencias=solo_diferencias, registrar=registrar and formato == "erp",
         usuario=email, formato=formato,
     )
+    tipo = "text/csv; charset=utf-8" if nombre.endswith(".csv") else _XLSX
     return StreamingResponse(
-        iter([contenido]), media_type=_XLSX,
+        iter([contenido]), media_type=tipo,
         headers={"Content-Disposition": f'attachment; filename="{nombre}"', "X-Filas": str(n)},
     )
 

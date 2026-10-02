@@ -1,4 +1,5 @@
 """Modulo de precios: la regla, la carga, los overrides y la exportacion."""
+import io
 from datetime import date
 
 import pytest
@@ -244,7 +245,7 @@ def test_exportar_erp_y_solo_diferencias(client, lista_cargada):
     svc.recalcular(lista_cargada)
     r = client.get("/api/precios/exportar")
     assert r.status_code == 200 and r.headers["X-Filas"] == "3"
-    assert r.headers["content-type"].startswith("application/vnd.openxmlformats")
+    assert r.headers["content-type"].startswith("text/csv")
     # Nada cambio: el delta viene vacio.
     r = client.get("/api/precios/exportar", params={"solo_diferencias": True})
     assert r.headers["X-Filas"] == "0"
@@ -252,6 +253,71 @@ def test_exportar_erp_y_solo_diferencias(client, lista_cargada):
     client.put("/api/precios/71 AAA1/override", json={"precio_fijo": 20000})
     r = client.get("/api/precios/exportar", params={"solo_diferencias": True})
     assert r.headers["X-Filas"] == "1"
+    assert client.get("/api/precios/resumen").json()["pendientes_envio"] == 0
+
+
+def test_la_exportacion_completa_sale_en_csv(client, lista_cargada):
+    """La lista completa se baja en CSV, no en Excel.
+
+    Con 39 mil productos x 14 columnas, armar el .xlsx tardaba 83 s en
+    produccion y el navegador cortaba la conexion antes de recibir nada: el
+    boton fallaba con "Failed to fetch". Medido sobre la misma base, el CSV se
+    arma en 0,3 s contra 30 s del Excel, porque openpyxl crea un objeto por cada
+    una de las 848 mil celdas y el CSV no crea ninguno.
+
+    El archivo que va al ERP (`formato=erp`) sigue siendo .xlsx: son pocas filas
+    y es el formato que el ERP acepta.
+    """
+    import csv as csv_mod
+
+    svc.recalcular(lista_cargada)
+    r = client.get("/api/precios/exportar", params={"formato": "completa"})
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/csv")
+    assert ".csv" in r.headers["content-disposition"]
+    assert r.headers["X-Filas"] == "3"
+
+    # BOM: sin el, Excel abre los acentos rotos.
+    crudo = r.content
+    assert crudo.startswith(b"\xef\xbb\xbf")
+    texto = crudo.decode("utf-8-sig")
+    # Punto y coma: es lo que Excel en español espera por defecto.
+    filas = list(csv_mod.reader(io.StringIO(texto), delimiter=";"))
+    assert filas[0][:4] == ["Producto", "Glosa", "Rubro", "Tipo"]
+    assert len(filas) - 1 == 3, filas
+    productos = sorted(f[0] for f in filas[1:])
+    assert productos == ["13 BBB2", "71 AAA1", "71 CCC3"]
+    # Los numeros, como los lee Excel en español: la plata sin decimales y el
+    # factor con COMA. Con punto, Excel toma 1.78 como mil setecientos ochenta.
+    cols = {c: i for i, c in enumerate(filas[0])}
+    aaa1 = next(f for f in filas[1:] if f[0] == "71 AAA1")
+    assert aaa1[cols["Precio final"]] == "17800"
+    assert aaa1[cols["Costo"]] == "10000"
+    assert aaa1[cols["Factor"]] == "1,78"
+
+    # Y no cuenta como envio al ERP: el delta no se mueve.
+    assert client.get("/api/precios/resumen").json()["pendientes_envio"] == 3
+
+
+def test_el_archivo_del_erp_tambien_es_csv(client, lista_cargada):
+    """Las tres columnas de siempre, en CSV.
+
+    Armar el .xlsx de 39 mil filas tardaba 35 s en Render y la descarga se
+    cortaba. El contenido no cambia: SKU, precio y costo, enteros.
+    """
+    import csv as csv_mod
+
+    svc.recalcular(lista_cargada)
+    r = client.get("/api/precios/exportar", params={"formato": "erp"})
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/csv")
+    assert ".csv" in r.headers["content-disposition"]
+    filas = list(csv_mod.reader(io.StringIO(r.content.decode("utf-8-sig")), delimiter=";"))
+    assert filas[0] == ["SKU", "Precio_Optimo", "Costo"]
+    aaa1 = next(f for f in filas[1:] if f[0] == "71 AAA1")
+    # Sin decimales: es lo que el ERP recibe y lo que mostraba el Excel.
+    assert aaa1 == ["71 AAA1", "17800", "10000"]
+    # Y sigue contando como envio: el delta se reinicia.
     assert client.get("/api/precios/resumen").json()["pendientes_envio"] == 0
 
 

@@ -344,19 +344,22 @@ const PASOS: Paso[] = [
     cuerpo: (
       <>
         <ul className="list-disc space-y-1.5 pl-5">
-          <li><b>Exportar completa</b>: baja toda la lista.</li>
           <li>
-            <b>Solo diferencias</b>: baja únicamente lo que cambió desde el último envío. Es lo
-            normal del día a día; el número al lado dice cuántos van.
+            <b>Exportar completa</b>: toda la lista con todas las columnas, para revisar. No se
+            sube al ERP y <b>no cuenta como envío</b>.
+          </li>
+          <li>
+            <b>Solo diferencias</b>: lo que cambió desde el último envío, con las tres columnas
+            que acepta el ERP —código, precio y costo—. Es lo normal del día a día, y el número
+            al lado dice cuántos van.
           </li>
         </ul>
         <p>
-          El archivo trae tres columnas, <b>código</b>, <b>precio</b> y <b>costo</b>, las mismas
-          que aceptaba el programa antiguo.
+          Los dos bajan un archivo <b>.csv</b>, que Excel abre con doble clic igual que siempre.
         </p>
         <Nota>
-          Las dos exportaciones quedan registradas como envío: si bajas la lista completa, el
-          contador de diferencias parte de cero desde ahí.
+          Solo <b>Solo diferencias</b> queda registrado como envío: después de bajarlo, el
+          contador parte de cero.
         </Nota>
       </>
     ),
