@@ -903,6 +903,12 @@ COLUMNAS_COMPLETA = [
     ("precio_final", "Precio final"), ("estado", "Estado"), ("stock", "Stock"),
     ("stock_transito", "En transito"), ("ultima_venta", "Ultima venta"),
 ]
+# Las dos ultimas columnas no salen de `precio_producto` sino de la politica, por
+# el par (tipo, procedencia). Van juntas porque son dos cosas distintas: el
+# descuento que dice la politica, y el numero que espera el ERP, que le suma uno
+# salvo cuando no hay descuento. Esa excepcion es la que se escapaba al armar el
+# archivo a mano y dejaba productos con "1% de descuento" que nadie decidio.
+CAB_DESCUENTO = ["Descuento máximo", "Descuento+1"]
 
 
 def _a_csv(encabezados: list[str], filas) -> bytes:
@@ -942,11 +948,35 @@ def _csv_completa(db: Session) -> tuple[bytes, int]:
         .order_by(PrecioProducto.producto)
     ).all()
     enteras = {"costo", "precio_erp", "precio_calculado", "precio_final", "stock", "stock_transito"}
-    datos = (
-        [_celda_csv(k, v, k in enteras) for (k, _), v in zip(COLUMNAS_COMPLETA, fila)]
-        for fila in filas
-    )
-    return _a_csv([t for _, t in COLUMNAS_COMPLETA], datos), len(filas)
+    desc = politica.descuentos(db)
+    i_tipo = next(i for i, (k, _) in enumerate(COLUMNAS_COMPLETA) if k == "tipo")
+    i_proc = next(i for i, (k, _) in enumerate(COLUMNAS_COMPLETA) if k == "procedencia_final")
+
+    def _fila(fila):
+        celdas = [_celda_csv(k, v, k in enteras) for (k, _), v in zip(COLUMNAS_COMPLETA, fila)]
+        d = _descuento_de(desc, fila[i_tipo], fila[i_proc])
+        celdas += ["" if d is None else str(int(d)),
+                   "" if d is None else str(int(d) + 1 if d > 0 else 0)]
+        return celdas
+
+    return _a_csv([t for _, t in COLUMNAS_COMPLETA] + CAB_DESCUENTO,
+                  (_fila(f) for f in filas)), len(filas)
+
+
+def _descuento_de(desc: dict, tipo, procedencia) -> float | None:
+    """El descuento del par, o el del tipo si la procedencia no resuelve.
+
+    En la politica, Nacional e Importado llevan el MISMO descuento, asi que un
+    producto sin procedencia -los que quedan en SIN REVISION, porque nunca se
+    les registro una compra- igual puede tener el suyo. Para el factor ese atajo
+    no vale: ahi las dos procedencias si difieren.
+    """
+    clave = politica._clave(tipo, procedencia)
+    if clave in desc:
+        return desc[clave]
+    canonico = politica.tipo_canonico(tipo)
+    delmismo = {v for (t, _), v in desc.items() if t == canonico}
+    return delmismo.pop() if len(delmismo) == 1 else None
 
 
 def _celda_csv(campo: str, valor, entera: bool) -> str:

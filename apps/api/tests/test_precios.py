@@ -299,6 +299,47 @@ def test_la_exportacion_completa_sale_en_csv(client, lista_cargada):
     assert client.get("/api/precios/resumen").json()["pendientes_envio"] == 3
 
 
+def test_la_exportacion_completa_trae_el_descuento(client, lista_cargada):
+    """El descuento maximo sale junto al factor, y tambien como lo quiere el ERP.
+
+    Son dos columnas porque son dos cosas: `Descuento maximo` es lo que dice la
+    politica (20, 34, 0) y `Descuento+1` es lo que el ERP recibe, que suma uno
+    salvo cuando no hay descuento. Esa resta de un caso -el 0 que no se convierte
+    en 1- es justo la que se habia escapado en el Excel que se armaba a mano y
+    dejaba 438 productos con "1% de descuento" sin que nadie lo hubiera decidido.
+
+    El descuento depende del TIPO: en la politica, Nacional e Importado llevan el
+    mismo. Por eso un producto sin procedencia igual puede tenerlo.
+    """
+    import csv as csv_mod
+
+    from src.models import PoliticaPrecio
+
+    db = lista_cargada
+    # Liviano 20% (los dos productos de rubro 71), Pesado 0% (el de rubro 13).
+    for tipo, proc, desc in (("Liviano", "Nacional", 20), ("Liviano", "Importado", 20),
+                             ("Pesado", "Nacional", 0), ("Pesado", "Importado", 0)):
+        fila = db.query(PoliticaPrecio).filter_by(tipo=tipo, procedencia=proc).one()
+        fila.descuento_max = desc
+    db.commit()
+    svc.recalcular(db)
+
+    r = client.get("/api/precios/exportar", params={"formato": "completa"})
+    filas = list(csv_mod.reader(io.StringIO(r.content.decode("utf-8-sig")), delimiter=";"))
+    cols = {c: i for i, c in enumerate(filas[0])}
+    assert "Descuento máximo" in cols and "Descuento+1" in cols
+
+    por_producto = {f[0]: f for f in filas[1:]}
+    liviano = por_producto["71 AAA1"]
+    assert liviano[cols["Descuento máximo"]] == "20"
+    assert liviano[cols["Descuento+1"]] == "21"
+
+    # Sin descuento NO pasa a 1: queda en 0.
+    pesado = por_producto["13 BBB2"]
+    assert pesado[cols["Descuento máximo"]] == "0"
+    assert pesado[cols["Descuento+1"]] == "0"
+
+
 def test_el_archivo_del_erp_tambien_es_csv(client, lista_cargada):
     """Las tres columnas de siempre, en CSV.
 

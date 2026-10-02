@@ -62,6 +62,23 @@ def factores(db: Session) -> dict[tuple[str, str], float]:
     return {_clave(t, p): float(f) for t, p, f in filas if f is not None}
 
 
+def descuentos(db: Session) -> dict[tuple[str, str], float]:
+    """{(tipo, procedencia) en minusculas: descuento maximo}.
+
+    Mismo camino que `factores`, incluida la normalizacion de la clave: asi un
+    producto cuyo tipo diga "Baterias" encuentra igual la fila "Bateria".
+    """
+    try:
+        filas = db.execute(
+            select(PoliticaPrecio.tipo, PoliticaPrecio.procedencia, PoliticaPrecio.descuento_max)
+            .where(PoliticaPrecio.tenant_id == settings.default_tenant_id)
+        ).all()
+    except Exception:  # noqa: BLE001 - tabla ausente en un despliegue viejo
+        db.rollback()
+        return {}
+    return {_clave(t, p): float(d) for t, p, d in filas if d is not None}
+
+
 def rubros(db: Session) -> dict[str, dict]:
     """{rubro: {"tipo", "procedencia_forzada"}}."""
     try:
