@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { MultiSelect } from "@/components/ui/multiselect";
 import { TablaPrecios } from "@/components/tabla-precios";
 import { ConfigurarColumnasPrecios } from "@/components/configurar-columnas-precios";
+import { ResumenDiferencias } from "@/components/resumen-diferencias";
 import { TutorialPrecios } from "@/components/tutorial-precios";
 import { api } from "@/lib/api-client";
 import { getPuedePrecios } from "@/lib/auth";
@@ -202,8 +203,8 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
             onClick={() => void accion("exportar", async () => {
               const n = await api.exportarPrecios({ soloDiferencias: true, formato: "erp" });
               return n
-                ? `Exportadas ${formatoNumero(n)} diferencias. Quedo registrado como envio.`
-                : "No hay diferencias desde el ultimo envio: no se genero archivo con filas.";
+                ? `${formatoNumero(n)} productos exportados. La proxima vez saldran solo los que cambien desde ahora.`
+                : "No hay nada nuevo desde la ultima descarga: el archivo salio vacio.";
             })}
           >
             <Download size={15} /> Solo diferencias
@@ -225,9 +226,14 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
           <Kpi etiqueta="Con cambios sin revisar" valor={formatoNumero(resumen.con_cambios)}
                destacar={resumen.con_cambios > 0}
                onClick={() => set({ con_cambios: !filtros.con_cambios })} activo={Boolean(filtros.con_cambios)} />
-          <Kpi etiqueta="Último recálculo" valor={resumen.ultimo_recalculo ? formatoFechaHora(resumen.ultimo_recalculo) : "—"}
-               nota={resumen.ultimo_envio ? `Último envío ${formatoFechaHora(resumen.ultimo_envio)}` : "Sin envíos aún"} />
+          <Kpi etiqueta="Último recálculo" valor={resumen.ultimo_recalculo ? formatoFechaHora(resumen.ultimo_recalculo) : "—"} />
         </div>
+      )}
+
+      {/* De cuando son los pendientes de "Solo diferencias". El numero del boton
+          por si solo no dice si son de hoy o de siempre. */}
+      {resumen && (
+        <ResumenDiferencias pendientes={resumen.pendientes_envio} ultimoEnvio={resumen.ultimo_envio} />
       )}
 
       <Card data-tour="filtros">
