@@ -850,9 +850,16 @@ def contar_diferencias(db: Session) -> int:
     Se cuenta en SQL a proposito: `_diferencias` materializa las ~40 mil filas y
     esto lo llama `resumen`, que corre cada vez que alguien abre la pantalla.
     Con la lista completa eso tardaba lo suficiente como para que Render cortara
-    la request y la pantalla mostrara un 500."""
+    la request y la pantalla mostrara un 500.
+
+    El costo se redondea con `floor(x + 0.5)` y no con `round(x)` porque lo que
+    quedo guardado en `precio_envio` lo escribio `redondear`, que sube el medio
+    peso. `round(double precision)` de Postgres lo baja al par: con un costo de
+    13.054,5 el envio guardo 13.055 y la cuenta comparaba contra 13.054, asi que
+    el producto figuraba pendiente para siempre aunque nada hubiera cambiado."""
     tenant = settings.default_tenant_id
     e = _sub_ultimo_envio(tenant)
+    costo = func.coalesce(PrecioProducto.costo, 0)
     try:
         return db.scalar(
             select(func.count())
@@ -864,7 +871,7 @@ def contar_diferencias(db: Session) -> int:
                 or_(
                     e.c.producto.is_(None),
                     e.c.precio.is_distinct_from(PrecioProducto.precio_final),
-                    e.c.costo.is_distinct_from(func.round(func.coalesce(PrecioProducto.costo, 0))),
+                    e.c.costo.is_distinct_from(func.floor(func.round(costo, 6) + 0.5)),
                 ),
             )
         ) or 0

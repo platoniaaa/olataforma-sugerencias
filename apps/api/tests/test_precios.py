@@ -477,6 +477,18 @@ def test_pendientes_de_envio_se_cuentan_en_sql_y_coinciden(client, lista_cargada
     db.commit()
     assert svc.contar_diferencias(db) == len(svc._diferencias(db)) == 1
 
+    # Un costo con medio peso no puede quedar pendiente para siempre. Al exportar
+    # se guarda `redondear(x)`, que sube el medio; si la cuenta usara `round(x)`
+    # de Postgres -que lo baja al par- el producto figuraria pendiente en cada
+    # carga de la pantalla y el archivo bajaria vacio. Paso en produccion con 767.
+    client.get("/api/precios/exportar")
+    assert svc.contar_diferencias(db) == 0
+    p = db.query(PrecioProducto).filter_by(producto="13 BBB2").one()
+    p.costo = 13054.5
+    db.commit()
+    client.get("/api/precios/exportar")
+    assert svc.contar_diferencias(db) == len(svc._diferencias(db)) == 0
+
 
 def test_la_politica_la_edita_el_equipo_de_precios_y_queda_en_auditoria(client, lista_cargada, db_session):
     """Editar el factor dejo de ser cosa de admin (23-09-2026).
