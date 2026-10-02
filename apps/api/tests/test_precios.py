@@ -644,3 +644,25 @@ def test_borrar_no_toca_el_resto_de_la_lista(db_session, client):
     client.delete("/api/precios/71 UNO")
 
     assert db_session.query(PrecioProducto).filter_by(producto="71 DOS").first() is not None
+
+
+def test_el_navegador_puede_leer_el_nombre_del_archivo(client, lista_cargada):
+    """Los headers de la descarga tienen que viajar hasta el JavaScript.
+
+    Por CORS el navegador solo entrega a la pagina unos pocos headers; el resto
+    los esconde salvo que el servidor los declare. `Content-Disposition` no
+    estaba declarado, asi que el front no podia leer el nombre y caia a su valor
+    por defecto, "precios.xlsx". Mientras el contenido fue .xlsx nadie lo noto;
+    al pasar a CSV, Excel empezo a decir que el archivo estaba danado -tenia
+    razon: era un CSV con nombre de Excel-.
+
+    `X-Filas` viajaba igual de escondido, asi que el aviso de "N productos
+    exportados" mostraba siempre 0.
+    """
+    svc.recalcular(lista_cargada)
+    r = client.get("/api/precios/exportar", params={"formato": "erp"},
+                   headers={"Origin": "http://localhost:3000"})
+    assert r.status_code == 200
+    expuestos = {h.strip().lower() for h in r.headers.get("access-control-expose-headers", "").split(",")}
+    assert "content-disposition" in expuestos, r.headers
+    assert "x-filas" in expuestos, r.headers

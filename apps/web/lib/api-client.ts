@@ -1001,8 +1001,12 @@ export const api = {
     if (!res.ok) throw new Error(await mensajeError(res, "No se pudo generar el archivo"));
     const filas = Number(res.headers.get("X-Filas") ?? "0");
     const blob = await res.blob();
+    // Si el servidor no declara Content-Disposition en expose_headers, el
+    // navegador lo esconde y esto queda vacio. El respaldo tiene que coincidir
+    // con lo que de verdad viene -un CSV-: con ".xlsx" el archivo baja igual
+    // pero Excel lo rechaza por "formato o extension no validos".
     const cd = res.headers.get("Content-Disposition") ?? "";
-    const nombre = /filename="?([^"]+)"?/.exec(cd)?.[1] ?? "precios.xlsx";
+    const nombre = /filename="?([^"]+)"?/.exec(cd)?.[1] ?? `precios_${new Date().toISOString().slice(0, 10)}.csv`;
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;

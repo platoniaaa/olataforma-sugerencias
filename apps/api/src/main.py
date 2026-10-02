@@ -77,6 +77,12 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Por CORS el navegador solo le entrega a la pagina unos pocos headers y
+    # esconde el resto, aunque lleguen en la respuesta. Estos dos los lee el
+    # front al bajar un archivo: sin declararlos, el nombre caia a un valor por
+    # defecto -"precios.xlsx" sobre un contenido CSV, que Excel rechaza- y el
+    # contador de filas quedaba siempre en cero.
+    expose_headers=["Content-Disposition", "X-Filas"],
 )
 
 # Publicos:
