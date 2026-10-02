@@ -299,6 +299,49 @@ def test_la_exportacion_completa_sale_en_csv(client, lista_cargada):
     assert client.get("/api/precios/resumen").json()["pendientes_envio"] == 3
 
 
+def test_la_exportacion_completa_cuadra_con_lo_que_muestra_la_pantalla(client, lista_cargada):
+    """Mismo total que el contador de arriba, sin excepciones.
+
+    El archivo del ERP deja fuera a los que no tienen precio calculado -mandar
+    una fila sin precio no sirve de nada-, y la exportacion completa heredaba ese
+    filtro. El resultado es que no cuadraba: la pantalla decia 39.471 y el
+    archivo traia 39.446. Los 25 que faltaban eran justo los que hay que mirar:
+    20 SIN REVISION, que no tienen precio porque les falta la procedencia, y 5
+    NO PRODUCTO.
+
+    Que un numero no cuadre con otro obliga a ir a buscar por que cada vez, y esa
+    busqueda ya se hizo una vez de mas.
+    """
+    import csv as csv_mod
+
+    db = lista_cargada
+    svc.recalcular(db)
+    # Un producto sin precio calculado, como los 25 de produccion: 20 en SIN
+    # REVISION -sin procedencia no hay factor- y 5 NO PRODUCTO.
+    sin_precio = db.query(PrecioProducto).filter_by(producto="71 CCC3").one()
+    sin_precio.precio_final = None
+    sin_precio.estado = "SIN REVISION"
+    db.commit()
+    total_pantalla = client.get("/api/precios/resumen").json()["productos"]
+
+    r = client.get("/api/precios/exportar", params={"formato": "completa"})
+    filas = list(csv_mod.reader(io.StringIO(r.content.decode("utf-8-sig")), delimiter=";"))
+    assert len(filas) - 1 == total_pantalla, "el archivo tiene que traer lo mismo que la pantalla"
+    assert r.headers["X-Filas"] == str(total_pantalla)
+    assert "71 CCC3" in {f[0] for f in filas[1:]}
+
+    # Viene, con el precio en blanco: es lo que hay que revisar, no un error.
+    cols = {c: i for i, c in enumerate(filas[0])}
+    ccc3 = next(f for f in filas[1:] if f[0] == "71 CCC3")
+    assert ccc3[cols["Precio final"]] == ""
+    assert ccc3[cols["Estado"]] == "SIN REVISION"
+
+    # El del ERP sigue dejandolo fuera: alla una fila sin precio no sirve.
+    r = client.get("/api/precios/exportar", params={"formato": "erp"})
+    erp = list(csv_mod.reader(io.StringIO(r.content.decode("utf-8-sig")), delimiter=";"))
+    assert "71 CCC3" not in {f[0] for f in erp[1:]}
+
+
 def test_la_exportacion_completa_trae_el_descuento(client, lista_cargada):
     """El descuento maximo sale junto al factor, y tambien como lo quiere el ERP.
 

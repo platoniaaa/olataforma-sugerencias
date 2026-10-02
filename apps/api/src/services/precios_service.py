@@ -940,11 +940,15 @@ def _csv_completa(db: Session) -> tuple[bytes, int]:
     lo que Excel en español espera -con coma, todo cae en una sola columna- y el
     BOM va porque sin el Excel abre los acentos rotos.
     """
+    # Sin filtrar por precio: este archivo tiene que cuadrar con el contador de
+    # la pantalla. Los que no tienen precio calculado -SIN REVISION porque les
+    # falta la procedencia, NO PRODUCTO porque no llevan- son justo los que hay
+    # que revisar, y quedaban fuera. El del ERP si los deja fuera: alla una fila
+    # sin precio no sirve de nada.
     campos = [getattr(PrecioProducto, k) for k, _ in COLUMNAS_COMPLETA]
     filas = db.execute(
         select(*campos)
-        .where(PrecioProducto.tenant_id == settings.default_tenant_id,
-               PrecioProducto.precio_final.is_not(None))
+        .where(PrecioProducto.tenant_id == settings.default_tenant_id)
         .order_by(PrecioProducto.producto)
     ).all()
     enteras = {"costo", "precio_erp", "precio_calculado", "precio_final", "stock", "stock_transito"}
