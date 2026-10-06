@@ -666,3 +666,31 @@ def test_el_navegador_puede_leer_el_nombre_del_archivo(client, lista_cargada):
     expuestos = {h.strip().lower() for h in r.headers.get("access-control-expose-headers", "").split(",")}
     assert "content-disposition" in expuestos, r.headers
     assert "x-filas" in expuestos, r.headers
+
+
+def test_la_cuenta_de_pendientes_compila_para_postgres():
+    """SQLite acepta `round(real, 6)`; Postgres solo tiene `round(numeric, int)`.
+
+    El 02-10-2026 se desplego la cuenta con `round(costo, 6)` sobre la columna
+    Float: en produccion la consulta reventaba, el except la tapaba y la pantalla
+    dijo "Todo al dia" durante 4 dias con 940 productos pendientes. Los tests
+    corren en SQLite y no lo vieron. Este compila la consulta para el dialecto
+    de Postgres y exige que el round reciba un NUMERIC."""
+    from sqlalchemy.dialects import postgresql
+
+    sql = str(svc._consulta_contar_diferencias("curifor").compile(dialect=postgresql.dialect()))
+    assert "round(CAST(" in sql, sql
+    assert "round(coalesce(" not in sql, sql
+
+
+def test_el_contador_de_pendientes_no_se_cae_mudo(db_session, monkeypatch, caplog):
+    """Si la consulta falla, se muestra 0 pero queda escrito en el log."""
+    import logging
+
+    def revienta(*a, **k):
+        raise RuntimeError("function round(double precision, integer) does not exist")
+
+    monkeypatch.setattr(db_session, "scalar", revienta)
+    with caplog.at_level(logging.WARNING, logger="src.services.precios_service"):
+        assert svc.contar_diferencias(db_session) == 0
+    assert "contar_diferencias" in caplog.text and "does not exist" in caplog.text

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import math
 import re
 import unicodedata
@@ -33,7 +34,7 @@ from datetime import date, datetime, timezone
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
-from sqlalchemy import delete, func, insert, or_, select, update
+from sqlalchemy import Numeric, cast, delete, func, insert, or_, select, update
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -89,6 +90,9 @@ def _num(v) -> float | None:
         return float(str(v).replace(",", "."))
     except (TypeError, ValueError):
         return None
+
+
+log = logging.getLogger(__name__)
 
 
 def redondear(v: float) -> int:
@@ -857,27 +861,40 @@ def contar_diferencias(db: Session) -> int:
     peso. `round(double precision)` de Postgres lo baja al par: con un costo de
     13.054,5 el envio guardo 13.055 y la cuenta comparaba contra 13.054, asi que
     el producto figuraba pendiente para siempre aunque nada hubiera cambiado."""
-    tenant = settings.default_tenant_id
-    e = _sub_ultimo_envio(tenant)
-    costo = func.coalesce(PrecioProducto.costo, 0)
     try:
-        return db.scalar(
-            select(func.count())
-            .select_from(PrecioProducto)
-            .outerjoin(e, e.c.producto == PrecioProducto.producto)
-            .where(
-                PrecioProducto.tenant_id == tenant,
-                PrecioProducto.precio_final.isnot(None),
-                or_(
-                    e.c.producto.is_(None),
-                    e.c.precio.is_distinct_from(PrecioProducto.precio_final),
-                    e.c.costo.is_distinct_from(func.floor(func.round(costo, 6) + 0.5)),
-                ),
-            )
-        ) or 0
-    except Exception:  # noqa: BLE001 - tabla ausente en un despliegue viejo
+        return db.scalar(_consulta_contar_diferencias(settings.default_tenant_id)) or 0
+    except Exception as exc:  # noqa: BLE001 - tabla ausente en un despliegue viejo
         db.rollback()
+        # Antes este except era mudo y escondio durante 4 dias que la consulta
+        # reventaba en Postgres (06-10-2026): la pantalla decia "todo al dia"
+        # con 940 productos pendientes. Que al menos quede en el log de Render.
+        log.warning("contar_diferencias: la cuenta en SQL fallo y se muestra 0: %s", exc)
         return 0
+
+
+def _consulta_contar_diferencias(tenant: str):
+    """La consulta de `contar_diferencias`, aparte para poder compilarla en los tests.
+
+    El costo se castea a Numeric antes del `round(x, 6)`: Postgres solo tiene
+    `round(numeric, int)`, no `round(double precision, int)`, y `costo` es Float.
+    Sin el cast la consulta revienta en produccion y el except devuelve 0
+    (SQLite si acepta `round(real, 6)`, por eso los tests no lo veian)."""
+    e = _sub_ultimo_envio(tenant)
+    costo = cast(func.coalesce(PrecioProducto.costo, 0), Numeric)
+    return (
+        select(func.count())
+        .select_from(PrecioProducto)
+        .outerjoin(e, e.c.producto == PrecioProducto.producto)
+        .where(
+            PrecioProducto.tenant_id == tenant,
+            PrecioProducto.precio_final.isnot(None),
+            or_(
+                e.c.producto.is_(None),
+                e.c.precio.is_distinct_from(PrecioProducto.precio_final),
+                e.c.costo.is_distinct_from(func.floor(func.round(costo, 6) + 0.5)),
+            ),
+        )
+    )
 
 
 def _diferencias(db: Session) -> list[PrecioProducto]:
