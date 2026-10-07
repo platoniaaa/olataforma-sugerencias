@@ -269,8 +269,10 @@ def _stock(db: Session, codigos: list[str]) -> tuple[dict[str, float], dict[str,
     Tampoco cuenta el stock de Frontera, que `stock_unificado` trae junto al de
     Curifor (el sugerido usa los dos). La lista es la de Curifor: hasta el
     07-10-2026 sumaba las dos empresas y 154 productos que solo tenia Frontera
-    salian con precio, como si Curifor los pudiera vender. Una fila sin origen
-    -cargas viejas, antes de que el motor lo mandara- se cuenta como Curifor.
+    salian con precio, como si Curifor los pudiera vender. Lo mismo el transito:
+    una OC de Frontera no salva del precio 0 a un producto que Curifor no tiene.
+    Una fila sin origen -cargas viejas, antes de que el motor lo mandara- se
+    cuenta como Curifor.
     """
     excluidas = bodegas_excluidas(db)
     # Si la tabla de stock esta poblada, la AUSENCIA de un producto significa cero.
@@ -299,7 +301,9 @@ def _stock(db: Session, codigos: list[str]) -> tuple[dict[str, float], dict[str,
                 stock[p] = float(t or 0)
             for p, t in db.execute(
                 select(StockTransito.producto, func.coalesce(func.sum(StockTransito.cantidad), 0))
-                .where(StockTransito.producto.in_(lote)).group_by(StockTransito.producto)
+                .where(StockTransito.producto.in_(lote),
+                       func.upper(func.coalesce(StockTransito.origen, "CURIFOR")) != "FRONTERA")
+                .group_by(StockTransito.producto)
             ).all():
                 transito[p] = float(t or 0)
         except Exception:  # noqa: BLE001 - tabla ausente

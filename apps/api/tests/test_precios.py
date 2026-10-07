@@ -718,3 +718,38 @@ def test_la_lista_cuenta_solo_el_stock_de_curifor(lista_cargada):
     # 71 AAA1 no tiene decisiones manuales: sin stock de Curifor, queda sin precio.
     solo_frontera = db.query(PrecioProducto).filter_by(producto="71 AAA1").one()
     assert solo_frontera.estado == "SIN STOCK" and solo_frontera.precio_final == 0
+
+
+def test_el_transito_de_frontera_no_salva_del_precio_cero(lista_cargada):
+    """Sin stock de Curifor y nada en camino PARA Curifor, el precio es 0: una OC
+    de Frontera no la va a recibir Curifor (decision del 07-10-2026)."""
+    from src.models import StockTransito
+
+    db = lista_cargada
+    db.add(StockUnificado(tenant_id="curifor", producto="13 BBB2", bodega="B1",
+                          sucursal_id="LINDEROS", stock=1, origen="CURIFOR"))
+    for cod, u, origen in (("71 AAA1", 4, "FRONTERA"), ("71 CCC3", 2, None)):
+        db.add(StockTransito(tenant_id="curifor", producto=cod, sucursal_id="X",
+                             cantidad=u, origen=origen))
+    db.commit()
+
+    svc.recalcular(db)
+
+    f = {p.producto: p for p in db.query(PrecioProducto).all()}
+    assert f["71 AAA1"].stock_transito == 0
+    assert f["71 AAA1"].estado == "SIN STOCK" and f["71 AAA1"].precio_final == 0
+    # Una fila sin origen (motor anterior al cambio) sigue contando como Curifor.
+    assert f["71 CCC3"].stock_transito == 2
+
+
+def test_el_transito_guarda_la_empresa(db_session):
+    from src.models import StockTransito
+    from src.services import transito_service
+
+    transito_service.reemplazar(db_session, [
+        {"producto": "71 A", "sucursal_id": "S", "cantidad": 3, "origen": "frontera"},
+        {"producto": "71 B", "sucursal_id": "S", "cantidad": 1},
+    ])
+
+    origen = {t.producto: t.origen for t in db_session.query(StockTransito).all()}
+    assert origen == {"71 A": "FRONTERA", "71 B": None}

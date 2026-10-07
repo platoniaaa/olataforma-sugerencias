@@ -31,6 +31,11 @@ class StockTransito(Base):
     # hace 4 meses": lo segundo es una OC que probablemente no va a llegar.
     pedido_desde: Mapped[date | None] = mapped_column(Date, nullable=True)
 
+    # CURIFOR o FRONTERA. El sugerido usa el transito de las dos empresas, pero la
+    # lista de precios es de Curifor y solo cuenta el suyo (07-10-2026). Vacio en
+    # las cargas anteriores a esa fecha: se lee como Curifor.
+    origen: Mapped[str | None] = mapped_column(String, nullable=True)
+
     __table_args__ = (
         Index("ix_transito_producto", "producto", "tenant_id"),
         Index("ix_transito_producto_sucursal", "producto", "sucursal_id"),

@@ -34,7 +34,8 @@ def _fecha(v) -> date | None:
 def reemplazar(db: Session, filas: list[dict]) -> dict:
     """Reemplaza la foto del transito con la que acaba de calcular el motor.
 
-    Cada fila: producto, sucursal_id, cantidad, pedido_desde.
+    Cada fila: producto, sucursal_id, cantidad, pedido_desde y origen (CURIFOR o
+    FRONTERA; un motor anterior al 07-10-2026 no lo manda y queda vacio).
     """
     tenant = settings.default_tenant_id
     validas: list[dict] = []
@@ -56,6 +57,7 @@ def reemplazar(db: Session, filas: list[dict]) -> dict:
                 "sucursal_id": (f.get("sucursal_id") or "").strip() or None,
                 "cantidad": cantidad,
                 "pedido_desde": _fecha(f.get("pedido_desde")),
+                "origen": (f.get("origen") or "").strip().upper() or None,
             }
         )
 

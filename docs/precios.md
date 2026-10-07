@@ -71,7 +71,7 @@ REVISION` (queda sin precio hasta que alguien decida).
   tablas que el motor ya publica (`stock_unificado`, `stock_transito`,
   `sugerido`, `venta_historica`). Del stock cuenta solo el de Curifor y solo
   bodegas reales: `stock_unificado` trae tambien Frontera porque el sugerido la
-  usa (decision del 07-10-2026). El transito todavia no distingue empresa.
+  usa (decision del 07-10-2026). El transito igual: solo las OC de Curifor.
 
 ## Exportar al ERP
 

@@ -178,6 +178,8 @@ def create_all() -> None:
         # 2026-09: % de cumplimiento InStock del mes. La foto guarda el minimo de
         # las posiciones de pauta; sin el no se sabe si "3 unidades" cumplia.
         "ALTER TABLE sugerido_snapshot ADD COLUMN IF NOT EXISTS instock_minimo INTEGER",
+        # 2026-10: empresa de cada OC en transito; la lista de precios cuenta solo Curifor.
+        "ALTER TABLE stock_transito ADD COLUMN IF NOT EXISTS origen VARCHAR",
     ]
     # SQLite NO soporta "ADD COLUMN IF NOT EXISTS" (error de sintaxis que se
     # tragaba el try, dejando bases locales viejas sin las columnas nuevas):

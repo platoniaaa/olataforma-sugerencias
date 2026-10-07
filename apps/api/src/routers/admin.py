@@ -120,7 +120,7 @@ def publicar_stock_transito(
 ) -> dict:
     """El motor publica el transito vigente de TODO el catalogo (reemplaza la foto).
 
-    payload: {"filas": [{producto, sucursal_id, cantidad, pedido_desde}]}
+    payload: {"filas": [{producto, sucursal_id, cantidad, pedido_desde, origen}]}
 
     Hasta ahora el transito solo existia pegado a las filas del sugerido, que es
     un subconjunto chico del catalogo. El comprador que revisa un requerimiento
