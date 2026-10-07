@@ -180,6 +180,8 @@ def create_all() -> None:
         "ALTER TABLE sugerido_snapshot ADD COLUMN IF NOT EXISTS instock_minimo INTEGER",
         # 2026-10: empresa de cada OC en transito; la lista de precios cuenta solo Curifor.
         "ALTER TABLE stock_transito ADD COLUMN IF NOT EXISTS origen VARCHAR",
+        # 2026-10: margen fijo (% sobre la venta) en la ficha de la lista de precios.
+        "ALTER TABLE precio_override ADD COLUMN IF NOT EXISTS margen_fijo FLOAT",
     ]
     # SQLite NO soporta "ADD COLUMN IF NOT EXISTS" (error de sintaxis que se
     # tragaba el try, dejando bases locales viejas sin las columnas nuevas):

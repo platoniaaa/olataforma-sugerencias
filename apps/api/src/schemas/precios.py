@@ -33,6 +33,7 @@ class PrecioRow(BaseModel):
     desviacion_pct: float | None = None
     # Override (decision humana), aplanado en la fila para la grilla.
     precio_fijo: float | None = None
+    margen_fijo: float | None = None
     congelar: bool = False
     congelado_precio: float | None = None
     no_producto: bool = False
@@ -91,6 +92,8 @@ class OverrideIn(BaseModel):
     solo los que vengan. `precio_fijo: null` explicitamente quita el fijo."""
 
     precio_fijo: float | None = Field(default=None, ge=0)
+    # % sobre la venta. 100 seria un factor infinito.
+    margen_fijo: float | None = Field(default=None, gt=0, lt=100)
     congelar: bool | None = None
     tipo_manual: str | None = Field(default=None, max_length=40)
     procedencia_manual: str | None = Field(default=None, max_length=20)

@@ -21,6 +21,7 @@ import { TutorialPrecios } from "@/components/tutorial-precios";
 import { api } from "@/lib/api-client";
 import { getPuedePrecios } from "@/lib/auth";
 import { KEYS_PRECIOS_DEFAULT, claseEstado, explicacionPrecio } from "@/lib/columnas-precios";
+import { factorDesdeMargen } from "@/lib/margen";
 import { formatoCLP, formatoFecha, formatoFechaHora, formatoNumero } from "@/lib/formato";
 import type {
   PrecioDetalle, PrecioFiltros, PrecioOpciones, PrecioResumen, PrecioRow,
@@ -397,6 +398,7 @@ function ModalProducto({ producto, puedeEditar, tipos, onCerrar, onGuardado }: {
   const [error, setError] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [precioFijo, setPrecioFijo] = useState<string>("");
+  const [margenFijo, setMargenFijo] = useState<string>("");
   const [congelar, setCongelar] = useState(false);
   const [tipoManual, setTipoManual] = useState("");
   const [procManual, setProcManual] = useState("");
@@ -408,6 +410,7 @@ function ModalProducto({ producto, puedeEditar, tipos, onCerrar, onGuardado }: {
       const det = await api.precioDetalle(producto);
       setD(det);
       setPrecioFijo(det.precio_fijo === null ? "" : String(det.precio_fijo));
+      setMargenFijo(det.margen_fijo === null ? "" : String(det.margen_fijo));
       setCongelar(det.congelar);
       setTipoManual(det.tipo_manual ?? "");
       setProcManual(det.procedencia_manual ?? "");
@@ -429,6 +432,7 @@ function ModalProducto({ producto, puedeEditar, tipos, onCerrar, onGuardado }: {
     try {
       await api.guardarPrecioOverride(producto, {
         precio_fijo: precioFijo.trim() === "" ? null : Number(precioFijo.replace(",", ".")),
+        margen_fijo: margenFijo.trim() === "" ? null : Number(margenFijo.replace(",", ".")),
         congelar,
         tipo_manual: tipoManual || null,
         procedencia_manual: procManual || null,
@@ -481,7 +485,7 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
     }
   }
 
-  const tieneOverride = d && (d.precio_fijo !== null || d.congelar || d.tipo_manual || d.procedencia_manual || d.no_producto || d.obs);
+  const tieneOverride = d && (d.precio_fijo !== null || d.margen_fijo !== null || d.congelar || d.tipo_manual || d.procedencia_manual || d.no_producto || d.obs);
   const campo = "h-9 w-full rounded-md border border-ink-200 px-2 text-sm outline-none focus:border-brand disabled:bg-ink-50";
 
   return (
@@ -527,7 +531,8 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
               <FilaOrigen k="Tipo" v={d.tipo ?? "—"} origen={d.tipo_origen} />
               <FilaOrigen k="Procedencia" v={d.procedencia_final ?? "—"} origen={d.procedencia_origen} />
               <Fila k="Rubro" v={d.rubro ?? "—"} />
-              <Fila k="Factor" v={d.factor ? formatoNumero(d.factor, 2) : "—"} />
+              <FilaOrigen k="Factor" v={d.factor ? formatoNumero(d.factor, 2) : "—"}
+                          origen={d.margen_fijo !== null ? `margen ${formatoNumero(d.margen_fijo, 1)} %` : null} />
               <Fila k="Costo" v={formatoCLP(d.costo)} />
               {d.precio_sugerido !== null && <Fila k="Precio proveedor" v={formatoCLP(d.precio_sugerido)} />}
 
@@ -565,6 +570,15 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
                          value={precioFijo} onChange={(e) => setPrecioFijo(e.target.value)}
                          placeholder="Precio fijo — vacío sigue la regla" />
                   <span className="text-[11px] text-ink-400">Gana a todo, incluso sin stock.</span>
+                </label>
+                {/* Margen fijo: a diferencia del precio fijo, sigue al costo. Se
+                    escribe como lo mira contabilidad (% sobre la venta) y se ve
+                    al tiro a qué factor y precio equivale con el costo de hoy. */}
+                <label className="block text-sm">
+                  <input className={campo} type="number" min="0" max="99.9" step="0.1" disabled={!puedeEditar}
+                         value={margenFijo} onChange={(e) => setMargenFijo(e.target.value)}
+                         placeholder="Margen fijo en % sobre la venta — vacío sigue la regla" />
+                  <span className="text-[11px] text-ink-400">{explicacionMargen(margenFijo, d.costo)}</span>
                 </label>
                 <label className="flex items-start gap-2 text-sm text-ink-700">
                   <input type="checkbox" className="mt-0.5 accent-brand" disabled={!puedeEditar}
@@ -683,10 +697,19 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
 }
 
 /** Una fila con el valor y, al lado, de dónde salió. */
+/** Lo que se ve bajo el campo de margen mientras se escribe. */
+function explicacionMargen(texto: string, costo: number | null): string {
+  if (texto.trim() === "") return "Sobre la venta. El precio sigue al costo; sin stock queda en $0.";
+  const factor = factorDesdeMargen(Number(texto.replace(",", ".")));
+  if (factor === null) return "El margen tiene que estar entre 0 y 100.";
+  const precio = costo && costo > 0 ? ` → ${formatoCLP(Math.floor(costo * factor + 0.5))} con el costo de hoy` : "";
+  return `Factor ${formatoNumero(factor, 2)}${precio}. Sin stock queda en $0.`;
+}
+
 function FilaOrigen({ k, v, origen }: { k: string; v: string; origen?: string | null }) {
-  // "manual" es lo único que conviene que salte a la vista: significa que alguien
-  // decidió y que la regla no lo va a tocar.
-  const esManual = origen === "manual";
+  // "manual" y "margen" son lo único que conviene que salte a la vista: significa
+  // que alguien decidió y que la regla no lo va a tocar.
+  const esManual = origen === "manual" || (origen ?? "").startsWith("margen");
   return (
     <div className="flex items-baseline justify-between gap-3">
       <span className="text-ink-500">{k}</span>

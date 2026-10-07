@@ -1282,7 +1282,7 @@ export interface PrecioRow {
   precio_sugerido: number | null;
   precio_calculado: number | null;
   precio_final: number | null;
-  /** "OK" | "FIJO" | "CONGELADO" | "SUGERIDO" | "SIN REVISION" | "NO PRODUCTO" | "SIN STOCK" */
+  /** "OK" | "FIJO" | "MARGEN" | "CONGELADO" | "SUGERIDO" | "SIN REVISION" | "NO PRODUCTO" | "SIN STOCK" */
   estado: string | null;
   cambios_pendientes: number;
   /** "maestro" (vino del ERP) | "manual" (creado desde la plataforma) */
@@ -1290,6 +1290,8 @@ export interface PrecioRow {
   desviacion_pesos: number | null;
   desviacion_pct: number | null;
   precio_fijo: number | null;
+  /** % sobre la venta: el precio sigue al costo con factor 1/(1 - margen/100). */
+  margen_fijo: number | null;
   congelar: boolean;
   congelado_precio: number | null;
   no_producto: boolean;
@@ -1360,6 +1362,7 @@ export interface PrecioResumen {
 /** Lo que una persona decide sobre un precio. Solo viajan los campos que se tocan. */
 export interface PrecioOverrideIn {
   precio_fijo?: number | null;
+  margen_fijo?: number | null;
   congelar?: boolean;
   tipo_manual?: string | null;
   procedencia_manual?: string | null;

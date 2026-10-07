@@ -17,8 +17,10 @@ En este orden; gana el primero que aplica (`services/precios_service.calcular`):
    costo cambie despues.
 3. **Stock 0 y nada en transito**: precio 0 (el ERP no lo ofrece).
 4. **No es producto** (servicios, mano de obra): sin precio.
-5. **Tipo Sugerido**: la lista del proveedor (Gildemeister).
-6. **El resto**: `ROUND(costo x factor)`, redondeando como Excel (la mitad hacia
+5. **Margen fijo** (decision humana, % sobre la venta): `ROUND(costo x 1/(1 - margen))`.
+   Sigue al costo y sin stock cae a 0 como la regla. No convive con el precio fijo.
+6. **Tipo Sugerido**: la lista del proveedor (Gildemeister).
+7. **El resto**: `ROUND(costo x factor)`, redondeando como Excel (la mitad hacia
    arriba).
 
 El **factor** sale de la politica por (tipo, procedencia).
@@ -36,7 +38,7 @@ REVISION` (queda sin precio hasta que alguien decida).
 | Tabla | Que es | Quien la escribe |
 |---|---|---|
 | `precio_producto` | Una fila por producto con todo lo calculado. Se pisa en cada recalculo. `origen` distingue lo que vino del ERP (`maestro`) de lo creado en la plataforma (`manual`): una recarga del maestro borra solo lo primero. | el recalculo y las cargas |
-| `precio_override` | Precio fijo, congelar, tipo/procedencia a mano, "no es producto", observacion. | solo personas |
+| `precio_override` | Precio fijo, margen fijo, congelar, tipo/procedencia a mano, "no es producto", observacion. | solo personas |
 | `politica_precio` | Factor por (tipo, procedencia). | admin |
 | `politica_rubro` | Tipo y procedencia forzada por rubro. | admin |
 | `precio_cambio` | Que cambio en cada recalculo (procedencia, costo, stock, precio, tipo), pendiente hasta que alguien lo marca visto. | el recalculo |

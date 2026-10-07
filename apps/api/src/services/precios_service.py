@@ -10,6 +10,7 @@ primero que aplica):
   2. Congelado (override)         -> el precio que tenia al congelar.
   3. No es producto (override)    -> sin precio (servicios, mano de obra).
   4. Stock 0 y nada en transito   -> precio 0 (el ERP no lo ofrece).
+  4b. Margen fijo (override)      -> ROUND(costo x 1/(1 - margen)), sigue al costo.
   5. Tipo Sugerido                -> la lista del proveedor (Gildemeister).
   6. El resto                     -> ROUND(costo x factor).
 
@@ -61,7 +62,8 @@ _RUBRO = re.compile(r"^(\d{1,3})\s+")
 _LOTE = 500          # filas por INSERT
 _IN = 800            # codigos por clausula IN (SQLite acepta 999 parametros)
 
-ESTADOS = ("OK", "FIJO", "CONGELADO", "SUGERIDO", "SIN REVISION", "NO PRODUCTO", "SIN STOCK")
+ESTADOS = ("OK", "FIJO", "MARGEN", "CONGELADO", "SUGERIDO", "SIN REVISION", "NO PRODUCTO",
+           "SIN STOCK")
 CAMPOS_CAMBIO = ("procedencia", "costo", "stock", "precio", "tipo")
 
 
@@ -102,6 +104,19 @@ def redondear(v: float) -> int:
     # 54.115 x 2,3 da 124.464,49999999999 en binario; Excel lo ve como ,5 porque
     # trabaja a 15 digitos. Se recorta a 6 decimales antes de decidir.
     return int(math.floor(round(float(v), 6) + 0.5))
+
+
+def factor_desde_margen(margen) -> float | None:
+    """Factor equivalente a un margen en % SOBRE LA VENTA: 35 -> 1,5385.
+
+    Sobre la venta y no sobre el costo (decision de Ignacio, 07-10-2026): es el
+    margen como lo mira contabilidad. A 4 decimales, que es lo que se ve en la
+    lista y en el CSV; el error sobre el margen queda bajo 0,01 punto.
+    """
+    m = _num(margen)
+    if m is None or m <= 0 or m >= 100:
+        return None
+    return round(1 / (1 - m / 100), 4)
 
 
 def _fecha(v) -> date | None:
@@ -160,6 +175,12 @@ def calcular(fila: dict, ov: dict | None, factores: dict, rubros: dict) -> dict:
     tipo, tipo_origen = _tipo(fila, ov, rubros)
     proc, proc_origen = _procedencia(fila, ov, rubros)
     factor = factores.get((politica.tipo_canonico(tipo), (proc or "").lower())) if tipo else None
+    # Margen fijo (decision humana): reemplaza el factor de la politica para este
+    # producto. Va como factor y no como precio para que siga al costo y para
+    # que sin stock caiga a 0 igual que la regla.
+    margen = factor_desde_margen(ov.get("margen_fijo"))
+    if margen is not None:
+        factor = margen
 
     costo = _num(fila.get("costo")) or 0.0
     stock = _num(fila.get("stock")) or 0.0
@@ -173,6 +194,10 @@ def calcular(fila: dict, ov: dict | None, factores: dict, rubros: dict) -> dict:
         calculado, estado = 0.0, "SIN STOCK"
     elif ov.get("no_producto"):
         calculado, estado = None, "NO PRODUCTO"
+    elif margen is not None:
+        # Le gana a la lista del proveedor: lo decidio una persona.
+        calculado = float(redondear(costo * margen)) if costo > 0 else None
+        estado = "MARGEN" if calculado is not None else "SIN REVISION"
     elif (tipo or "").lower() == TIPO_SUGERIDO.lower():
         calculado = float(redondear(sugerido)) if sugerido and sugerido > 0 else None
         estado = "SUGERIDO" if calculado is not None else "SIN REVISION"
@@ -386,7 +411,7 @@ def _overrides(db: Session, codigos: list[str] | None = None) -> dict[str, dict]
 
 def _override_dict(o: PrecioOverride) -> dict:
     return {
-        "precio_fijo": o.precio_fijo, "congelar": bool(o.congelar),
+        "precio_fijo": o.precio_fijo, "margen_fijo": o.margen_fijo, "congelar": bool(o.congelar),
         "congelado_precio": o.congelado_precio,
         "congelado_en": o.congelado_en.isoformat() if o.congelado_en else None,
         "tipo_manual": o.tipo_manual, "procedencia_manual": o.procedencia_manual,
@@ -585,6 +610,7 @@ def _fila_dict(p: PrecioProducto, ov: dict | None) -> dict:
     )
     ov = ov or {}
     d["precio_fijo"] = ov.get("precio_fijo")
+    d["margen_fijo"] = ov.get("margen_fijo")
     d["congelar"] = bool(ov.get("congelar"))
     d["congelado_precio"] = ov.get("congelado_precio")
     d["no_producto"] = bool(ov.get("no_producto"))
@@ -694,6 +720,15 @@ def guardar_override(db: Session, producto: str, datos: dict, usuario: str | Non
         o = PrecioOverride(tenant_id=tenant, producto=producto)
         db.add(o)
 
+    # Precio fijo y margen fijo no conviven: serian dos respuestas para el mismo
+    # precio. Se valida ANTES de tocar nada.
+    precio_nuevo = datos["precio_fijo"] if "precio_fijo" in datos else o.precio_fijo
+    margen_nuevo = datos["margen_fijo"] if "margen_fijo" in datos else o.margen_fijo
+    if precio_nuevo is not None and margen_nuevo is not None:
+        raise ValueError("Elige precio fijo o margen fijo, no los dos")
+    if margen_nuevo is not None and factor_desde_margen(margen_nuevo) is None:
+        raise ValueError("El margen es % sobre la venta: tiene que estar entre 0 y 100")
+
     detalle_ = []
     if "precio_fijo" in datos:
         v = datos["precio_fijo"]
@@ -702,6 +737,11 @@ def guardar_override(db: Session, producto: str, datos: dict, usuario: str | Non
         if (o.precio_fijo or None) != (v if v is None else float(v)):
             detalle_.append(f"precio fijo {o.precio_fijo} -> {v}")
         o.precio_fijo = None if v is None else float(v)
+    if "margen_fijo" in datos:
+        v = None if datos["margen_fijo"] is None else float(datos["margen_fijo"])
+        if (o.margen_fijo or None) != v:
+            detalle_.append(f"margen fijo {o.margen_fijo} -> {v}")
+        o.margen_fijo = v
     if "congelar" in datos:
         nuevo = bool(datos["congelar"])
         if nuevo and not o.congelar:
@@ -1311,7 +1351,8 @@ def eliminar(db: Session, productos: list[str], usuario: str | None,
             select(PrecioOverride.producto).where(
                 PrecioOverride.tenant_id == tenant,
                 PrecioOverride.producto.in_(list(existen)),
-                or_(PrecioOverride.precio_fijo.isnot(None), PrecioOverride.congelar.is_(True)),
+                or_(PrecioOverride.precio_fijo.isnot(None), PrecioOverride.margen_fijo.isnot(None),
+                    PrecioOverride.congelar.is_(True)),
             )
         ).all()}
         conservados += sorted(con_decision)

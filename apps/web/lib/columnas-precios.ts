@@ -65,6 +65,8 @@ export function claseEstado(estado: string | null | undefined): string {
       return "bg-emerald-50 text-emerald-700";
     case "FIJO":
       return "bg-sky-50 text-sky-700";
+    case "MARGEN":
+      return "bg-teal-50 text-teal-700";
     case "CONGELADO":
       return "bg-indigo-50 text-indigo-700";
     case "SUGERIDO":
@@ -94,6 +96,10 @@ export function explicacionPrecio(d: PrecioDetalle): string {
   if (d.congelar) return "Congelado: no sigue al costo";
   if (d.no_producto) return "No es un producto: sin precio";
   if ((d.stock ?? 0) <= 0 && (d.stock_transito ?? 0) <= 0) return "Sin stock ni tránsito → 0";
+  if (d.margen_fijo != null && d.costo && d.factor) {
+    return `${formatoCLP(d.costo)} × ${formatoNumero(d.factor, 2)} (margen ${formatoNumero(d.margen_fijo, 1)} %) = ${formatoCLP(d.precio_calculado)}`;
+  }
+  if (d.margen_fijo != null) return "Margen fijo sin costo cargado";
   if ((d.tipo ?? "").toLowerCase() === "sugerido") return "Precio de lista del proveedor";
   if (d.costo && d.factor) {
     return `${formatoCLP(d.costo)} × ${formatoNumero(d.factor, 2)} = ${formatoCLP(d.precio_calculado)}`;

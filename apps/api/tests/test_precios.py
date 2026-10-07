@@ -753,3 +753,51 @@ def test_el_transito_guarda_la_empresa(db_session):
 
     origen = {t.producto: t.origen for t in db_session.query(StockTransito).all()}
     assert origen == {"71 A": "FRONTERA", "71 B": None}
+
+
+def test_margen_fijo_sigue_al_costo_y_gana_al_proveedor():
+    """Margen en % SOBRE LA VENTA (decision del 07-10-2026): 35 % es factor 1,5385."""
+    r = svc.calcular(_fila(costo=10000), {"margen_fijo": 35}, FACT, RUB)
+    assert r["estado"] == "MARGEN" and r["factor"] == 1.5385
+    assert r["precio_final"] == r["precio_calculado"] == 15385
+    # Sigue al costo: no es un precio clavado.
+    assert svc.calcular(_fila(costo=20000), {"margen_fijo": 35}, FACT, RUB)["precio_final"] == 30770
+    # Sin stock cae a 0 como la regla; el precio fijo, en cambio, gana a todo.
+    r = svc.calcular(_fila(stock=0), {"margen_fijo": 35}, FACT, RUB)
+    assert r["precio_final"] == 0 and r["estado"] == "SIN STOCK"
+    # Le gana a la lista del proveedor: lo decidio una persona.
+    r = svc.calcular(_fila(rubro="95", precio_sugerido=12345.6, costo=10000), {"margen_fijo": 35}, FACT, RUB)
+    assert r["estado"] == "MARGEN" and r["precio_final"] == 15385
+    # Sin costo no hay de donde sacarlo.
+    assert svc.calcular(_fila(costo=0), {"margen_fijo": 35}, FACT, RUB)["estado"] == "SIN REVISION"
+
+
+def test_api_margen_fijo(client, lista_cargada):
+    svc.recalcular(lista_cargada)
+    r = client.put("/api/precios/71 AAA1/override", json={"margen_fijo": 35, "obs": "campania"})
+    assert r.status_code == 200, r.text
+    assert r.json()["estado"] == "MARGEN" and r.json()["margen_fijo"] == 35
+    assert r.json()["factor"] == 1.5385 and r.json()["precio_final"] == 15385
+    # No convive con el precio fijo, y se valida antes de guardar nada.
+    r = client.put("/api/precios/71 AAA1/override", json={"precio_fijo": 9990})
+    assert r.status_code == 422 and "no los dos" in r.text
+    assert client.get("/api/precios/71 AAA1").json()["estado"] == "MARGEN"
+    # Fuera de rango: 100 % seria un factor infinito.
+    assert client.put("/api/precios/71 AAA1/override", json={"margen_fijo": 100}).status_code == 422
+    # Sube el costo: el precio se mueve con el, al reves del congelado.
+    p = lista_cargada.query(PrecioProducto).filter_by(producto="71 AAA1").one()
+    p.costo = 20000
+    lista_cargada.commit()
+    svc.recalcular(lista_cargada, refrescar_insumos=False)
+    assert client.get("/api/precios/71 AAA1").json()["precio_final"] == 30770
+    # Volver a la regla lo quita como a cualquier decision manual.
+    r = client.delete("/api/precios/71 AAA1/override")
+    assert r.json()["estado"] == "OK" and r.json()["margen_fijo"] is None
+
+
+def test_el_margen_fijo_sobrevive_a_sacar_el_producto(client, lista_cargada):
+    """Es una decision de precio, como el fijo: se conserva por si el producto vuelve."""
+    svc.recalcular(lista_cargada)
+    assert client.put("/api/precios/71 AAA1/override", json={"margen_fijo": 35}).status_code == 200
+    body = client.post("/api/admin/precios/eliminar", json={"productos": ["71 AAA1"]}).json()
+    assert body["overrides_conservados"] == 1 and body["conservados"] == ["71 AAA1"]

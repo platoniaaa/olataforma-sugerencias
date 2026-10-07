@@ -45,6 +45,12 @@ describe("explicacionPrecio", () => {
     expect(explicacionPrecio(con({ stock: 0, stock_transito: 3 }))).toContain("×");
   });
 
+  it("el margen fijo muestra la cuenta con el margen, y le gana al proveedor", () => {
+    const t = explicacionPrecio(con({ margen_fijo: 35, factor: 1.5385, precio_calculado: 4129, tipo: "Sugerido" }));
+    expect(t).toContain("×");
+    expect(t).toContain("margen 35");
+  });
+
   it("el tipo Sugerido no usa costo por factor", () => {
     expect(explicacionPrecio(con({ tipo: "Sugerido" }))).toContain("proveedor");
   });

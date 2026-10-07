@@ -15,6 +15,8 @@ Orden en que gana cada decision (ver `precios_service.calcular`):
   2. `congelar`         -> se queda con el precio que tenia al momento de
                            congelar (`congelado_precio`), aunque el costo cambie.
   3. `no_producto`      -> no lleva precio (servicios, cargos, mano de obra).
+  3b. `margen_fijo`     -> ROUND(costo x 1/(1 - margen)): sigue al costo, y sin
+                           stock cae a 0 como la regla. No convive con el fijo.
   4. `tipo_manual` / `procedencia_manual` -> cambian el factor que se aplica,
                            pero el precio se sigue calculando.
 """
@@ -38,6 +40,9 @@ class PrecioOverride(Base):
     producto: Mapped[str] = mapped_column(String, nullable=False)
 
     precio_fijo: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Margen en % SOBRE LA VENTA (decision del 07-10-2026): el precio sigue al
+    # costo con factor 1 / (1 - margen/100). No convive con `precio_fijo`.
+    margen_fijo: Mapped[float | None] = mapped_column(Float, nullable=True)
     congelar: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # El precio que tenia cuando se congelo. Se anota al marcar `congelar`, no
     # en cada corrida: si se recalculara, congelar no congelaria nada.

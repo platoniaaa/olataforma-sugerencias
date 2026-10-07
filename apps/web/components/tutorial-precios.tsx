@@ -170,7 +170,7 @@ const PASOS: Paso[] = [
       <>
         <p>
           Una fila por producto. El <b>Estado</b> dice de un vistazo qué pasa con el precio:{" "}
-          <b>OK</b> sigue la regla, <b>FIJO</b> lo puso una persona, <b>SIN STOCK</b> sale en
+          <b>OK</b> sigue la regla, <b>FIJO</b> y <b>MARGEN</b> los decidió una persona, <b>SIN STOCK</b> sale en
           $0 y <b>SIN REVISION</b>, en rojo, es el que hay que mirar antes de mandar la lista.
         </p>
         <p>
