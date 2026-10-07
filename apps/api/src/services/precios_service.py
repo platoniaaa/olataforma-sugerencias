@@ -256,7 +256,7 @@ def bodegas_excluidas(db: Session) -> set[str]:
 
 
 def _stock(db: Session, codigos: list[str]) -> tuple[dict[str, float], dict[str, float], bool]:
-    """Stock y transito por producto, contando SOLO las bodegas reales.
+    """Stock y transito por producto, contando SOLO las bodegas reales de Curifor.
 
     El ERP mezcla bodegas fisicas con bodegas de proceso -danados, devolucion,
     scrap, PE por regularizar-. Para decidir un precio solo cuenta lo que se puede
@@ -265,6 +265,12 @@ def _stock(db: Session, codigos: list[str]) -> tuple[dict[str, float], dict[str,
 
     Si `bodega_tipo` esta vacia no se filtra nada: la lista sigue como antes en vez
     de quedarse sin stock de golpe.
+
+    Tampoco cuenta el stock de Frontera, que `stock_unificado` trae junto al de
+    Curifor (el sugerido usa los dos). La lista es la de Curifor: hasta el
+    07-10-2026 sumaba las dos empresas y 154 productos que solo tenia Frontera
+    salian con precio, como si Curifor los pudiera vender. Una fila sin origen
+    -cargas viejas, antes de que el motor lo mandara- se cuenta como Curifor.
     """
     excluidas = bodegas_excluidas(db)
     # Si la tabla de stock esta poblada, la AUSENCIA de un producto significa cero.
@@ -283,7 +289,8 @@ def _stock(db: Session, codigos: list[str]) -> tuple[dict[str, float], dict[str,
         try:
             q = (
                 select(StockUnificado.producto, func.coalesce(func.sum(StockUnificado.stock), 0))
-                .where(StockUnificado.producto.in_(lote))
+                .where(StockUnificado.producto.in_(lote),
+                       func.upper(func.coalesce(StockUnificado.origen, "CURIFOR")) != "FRONTERA")
                 .group_by(StockUnificado.producto)
             )
             if excluidas:

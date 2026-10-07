@@ -69,7 +69,9 @@ REVISION` (queda sin precio hasta que alguien decida).
   `producto_catalogo.costo`: es una carga unica sin fecha.
 - **Stock, precio del proveedor y ultima venta** los toma el recalculo de las
   tablas que el motor ya publica (`stock_unificado`, `stock_transito`,
-  `sugerido`, `venta_historica`).
+  `sugerido`, `venta_historica`). Del stock cuenta solo el de Curifor y solo
+  bodegas reales: `stock_unificado` trae tambien Frontera porque el sugerido la
+  usa (decision del 07-10-2026). El transito todavia no distingue empresa.
 
 ## Exportar al ERP
 

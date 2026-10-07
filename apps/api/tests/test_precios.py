@@ -694,3 +694,27 @@ def test_el_contador_de_pendientes_no_se_cae_mudo(db_session, monkeypatch, caplo
     with caplog.at_level(logging.WARNING, logger="src.services.precios_service"):
         assert svc.contar_diferencias(db_session) == 0
     assert "contar_diferencias" in caplog.text and "does not exist" in caplog.text
+
+
+def test_la_lista_cuenta_solo_el_stock_de_curifor(lista_cargada):
+    """`stock_unificado` trae las dos empresas porque el sugerido las usa, pero la
+    lista de precios es de Curifor (decision del 07-10-2026). Antes 154 productos
+    que solo tenia Frontera salian con precio en la lista de Curifor."""
+    db = lista_cargada
+    filas = [
+        ("71 AAA1", 40, "FRONTERA"),                              # solo Frontera
+        ("71 CCC3", 5, "CURIFOR"), ("71 CCC3", 9, "FRONTERA"),    # suma solo los 5
+        ("13 BBB2", 3, None),                                     # carga vieja sin origen
+    ]
+    for cod, u, origen in filas:
+        db.add(StockUnificado(tenant_id="curifor", producto=cod, bodega="B1",
+                              sucursal_id="LINDEROS", stock=u, origen=origen))
+    db.commit()
+
+    svc.recalcular(db)
+
+    stock = {p.producto: p.stock for p in db.query(PrecioProducto).all()}
+    assert stock == {"71 AAA1": 0, "71 CCC3": 5, "13 BBB2": 3}
+    # 71 AAA1 no tiene decisiones manuales: sin stock de Curifor, queda sin precio.
+    solo_frontera = db.query(PrecioProducto).filter_by(producto="71 AAA1").one()
+    assert solo_frontera.estado == "SIN STOCK" and solo_frontera.precio_final == 0
