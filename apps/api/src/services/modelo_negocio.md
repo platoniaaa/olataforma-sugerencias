@@ -136,6 +136,30 @@ Para los productos centralizados, antes de comprarle al proveedor se reparte el 
 
 **Orden de prioridad del CD** (ranking fijo): 1 Diez de Julio (2), 2 Brasil 18, 3 Linderos, 4 Placilla, 5 Rancagua, 6 Rancagua 2, 7 Curicó, 8 Talca, 9 Talca (2), 10 Chillán, 11 Chillán Viejo. El resto queda en prioridad más baja.
 
+## Sugerencias manuales
+
+Una sugerencia manual es una orden de comprar que agrega una persona encima de lo que calcula el modelo (pedido especial, promocion, quiebre que el modelo no ve). No cambia ninguna de las 8 etapas: sus unidades se suman al Total sugerido de ese producto en esa sucursal y la fila queda con Pedir = Si. Si el modelo no tiene ese producto en esa sucursal, la fila aparece igual armada desde el catalogo (con stock de bodega, sin ABC ni proveedor). Se muestra aunque esten activos "solo pedir" o "solo nacionales". Queda en la auditoria y en la campanita con quien, cuando y motivo.
+
+**Cuanto pide (modo):**
+
+- **Dias:** los dias de venta que se quieren cubiertos. Nivel = demanda diaria del modelo x dias, redondeado hacia arriba. Se pide Nivel - stock - transito - lo que ya sugiere el sistema (minimo 0). Si el producto no tiene demanda registrada en esa sucursal, no se puede usar.
+- **Unidades:** una cantidad fija que se suma encima de lo que sugiere el sistema, sin mirar stock ni transito. Siempre suma.
+- **Mantener stock:** el nivel que se quiere en bodega. Se pide nivel - stock - transito - lo que ya sugiere el sistema (minimo 0). Sirve tambien para productos que el modelo no pide: ahi mira el stock de bodega.
+- Ejemplo con demanda 0,8 u/dia, stock 5, transito 2 y sistema 3: Dias 30 -> nivel 24 -> pide 14 (total 17); Mantener 12 -> pide 2 (total 5); Unidades 10 -> pide 10 (total 13).
+- **Las unidades se calculan una sola vez, al guardar,** y se suman igual todos los dias hasta la fecha limite aunque el stock cambie. Dos manuales del mismo producto y sucursal se suman entre si.
+
+**A que productos (tipo):**
+
+- **Individual:** un producto en una sucursal. En Dias y Mantener muestra el desglose antes de guardar; si ya esta cubierto no guarda nada (salvo regla con Repetir). Rechaza codigos que no existen y avisa si FORD reemplazo el codigo.
+- **Por grupo:** los productos que cumplen a la vez los filtros de sucursal, proveedor y ABC. Mismo modo y numero para cada uno; omite los cubiertos y, en Dias, los sin demanda. Quedan en una misma carga que se borra de una vez.
+- **Todos:** todos los productos del sugerido, sin filtros. Avisa sobre 1.000 productos. En Por grupo y Todos viene marcado "Solo productos con pedir = Si" (recomendado).
+- **Pegar lista:** lista desde Excel, cada linea con producto, sucursal y su propia cantidad (unidades, dias o mantener). Con encabezado las columnas van en cualquier orden. Si una linea trae mas de una cantidad manda mantener > dias > unidades. Hay vista previa antes de guardar.
+
+**Fecha limite y Repetir periodicamente:**
+
+- **Fecha limite:** suma hasta ese dia incluido (hora de Chile) y al dia siguiente se archiva sola. Sin fecha no vence: pide lo mismo todos los dias hasta que alguien la borre (la plataforma pide confirmar).
+- **Repetir periodicamente:** convierte la sugerencia en una regla que se aplica al guardar y cada N dias hasta "Hasta" o hasta eliminarla. Cada repeticion reemplaza la anterior y recalcula: Dias con la demanda y el stock del momento; Mantener stock solo lo que falta para volver al nivel; Unidades suma el mismo numero. En Por grupo y Todos los filtros se revisan de nuevo. Mantener stock marca Repetir solo.
+
 ## Reglas de negocio adicionales
 
 Sobre el cálculo del modelo, la plataforma aplica algunos ajustes de sentido común:

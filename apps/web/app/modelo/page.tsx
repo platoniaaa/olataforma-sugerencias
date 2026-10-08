@@ -24,6 +24,7 @@ const SECCIONES: Seccion[] = [
   { id: "colchon", titulo: "6 · Stock de seguridad" },
   { id: "sugerido", titulo: "7 · El sugerido de compra" },
   { id: "traslados", titulo: "8 · Distribución y traslados" },
+  { id: "manuales", titulo: "Sugerencias manuales" },
   { id: "reglas", titulo: "Reglas de negocio" },
   { id: "parametros", titulo: "Parámetros de referencia" },
 ];
@@ -318,6 +319,81 @@ export default function ModeloPage() {
             </div>
           </Section>
 
+          <Section id="manuales" titulo="Sugerencias manuales">
+            <P>
+              Una sugerencia manual es una <strong>orden de comprar que agrega una persona</strong>{" "}
+              encima de lo que calcula el modelo: un pedido especial, una promoción o un quiebre
+              que el modelo todavía no ve. No cambia ninguna de las 8 etapas: sus unidades{" "}
+              <strong>se suman al Total sugerido</strong> de ese producto en esa sucursal, y la fila
+              queda con Pedir = Sí.
+            </P>
+            <ul className="max-w-3xl space-y-2 text-[14px] text-ink-700">
+              <Bullet><strong>Si el modelo no tiene ese producto en esa sucursal,</strong> la fila aparece igual, armada desde el catálogo: con el stock de bodega, pero sin clase ABC ni proveedor.</Bullet>
+              <Bullet><strong>Se muestra aunque esté activo “solo pedir” o “solo nacionales”:</strong> es una orden explícita de comprar.</Bullet>
+              <Bullet><strong>Queda registrada</strong> con quién la cargó, cuándo y el motivo, en la auditoría y en la campanita.</Bullet>
+            </ul>
+
+            <Sub>Cuánto pide: Días, Unidades y Mantener stock</Sub>
+            <Tabla
+              headers={["Modo", "Qué escribes", "Cuánto pide", "Cuándo no pide nada"]}
+              rows={[
+                ["Días", "Los días de venta que quieres tener cubiertos.", "Lo que falta para cubrir esos días según la demanda diaria del modelo. Descuenta el stock, lo que viene en tránsito y lo que el sistema ya sugiere.", "Si lo que hay ya alcanza para esos días. Tampoco sirve si el producto no tiene demanda registrada en esa sucursal: sin demanda no hay cómo pasar días a unidades."],
+                ["Unidades", "Una cantidad fija.", "Exactamente esas unidades, encima de lo que sugiere el sistema. No mira el stock ni el tránsito.", "Nunca: siempre suma, aunque la sucursal tenga de sobra."],
+                ["Mantener stock", "El nivel que quieres tener en bodega.", "Lo que falta para llegar a ese nivel. Descuenta el stock, lo que viene en tránsito y lo que el sistema ya sugiere.", "Si el nivel ya está cubierto. Sirve también para productos que el modelo no pide: ahí mira el stock de bodega."],
+              ]}
+            />
+            <Formula>
+              Días → Nivel = Demanda diaria × Días
+              <span className="block text-ink-500">(redondeado hacia arriba a unidades enteras)</span>
+            </Formula>
+            <Formula>
+              Se pide = Nivel − Stock − En tránsito − Lo que ya sugiere el sistema
+              <span className="block text-ink-500">(en Días y en Mantener stock; si da 0 o menos, no se pide nada)</span>
+            </Formula>
+            <P>
+              Ejemplo: un producto que vende 0,8 unidades al día, con 5 en stock, 2 en tránsito y
+              3 que ya sugiere el sistema.
+            </P>
+            <Tabla
+              headers={["Si escribes", "Cuenta", "Se pide", "Total a comprar"]}
+              rows={[
+                ["Días: 30", "0,8 × 30 = 24 → 24 − 5 − 2 − 3", "14", "17 (los 3 del sistema + 14)"],
+                ["Mantener stock: 12", "12 − 5 − 2 − 3", "2", "5 (3 + 2)"],
+                ["Unidades: 10", "No descuenta nada", "10", "13 (3 + 10)"],
+              ]}
+            />
+            <Callout>
+              <strong>Las unidades se calculan una sola vez, al guardar.</strong> Desde ahí la
+              sugerencia suma ese mismo número todos los días hasta su fecha límite, aunque el stock
+              cambie o la mercadería ya haya llegado. Para que se recalcule sola, usa{" "}
+              <strong>Repetir periódicamente</strong>. Dos sugerencias manuales del mismo producto
+              y sucursal se suman entre sí: la segunda no descuenta la primera.
+            </Callout>
+
+            <Sub>A qué productos se aplica: Individual, Por grupo, Todos y Pegar lista</Sub>
+            <Tabla
+              headers={["Pestaña", "A qué se aplica", "Cómo funciona"]}
+              rows={[
+                ["Individual", "Un producto en una sucursal.", "En Días y Mantener stock, antes de guardar muestra de dónde sale el número: el stock por bodega, el tránsito y lo que ya sugiere el sistema. Si ya está cubierto, avisa y no guarda nada, salvo que sea una regla con Repetir. Rechaza códigos que no existen en el catálogo y avisa si FORD reemplazó el código por otro."],
+                ["Por grupo", "Los productos que cumplen a la vez los filtros elegidos: sucursal, proveedor y ABC.", "Aplica el mismo modo y número a cada producto × sucursal, y antes de guardar dice a cuántos. Omite los que ya están cubiertos y, en Días, los que no tienen demanda. Todas quedan en una misma carga, que se puede borrar de una vez."],
+                ["Todos", "Todos los productos del sugerido, sin filtros.", "Igual que Por grupo. Avisa cuando la carga pasa de 1.000 productos."],
+                ["Pegar lista", "Una lista copiada desde Excel.", "Cada línea trae su producto, su sucursal y su propia cantidad: unidades, días o mantener. Con encabezado, las columnas pueden ir en cualquier orden. Si una línea trae más de una cantidad, manda mantener, después días y al final unidades. Antes de guardar muestra lo que va a pedir cada línea y cuáles se omiten."],
+              ]}
+            />
+            <ul className="max-w-3xl space-y-2 text-[14px] text-ink-700">
+              <Bullet><strong>En Por grupo y Todos viene marcado “Solo productos con pedir = Sí”</strong> (recomendado): así solo se tocan los productos que el modelo ya pide.</Bullet>
+              <Bullet><strong>Para corregir o borrar,</strong> la página Sugerencias manuales lista cada una con su motivo. Se puede eliminar una sola, una carga completa o una regla.</Bullet>
+            </ul>
+
+            <Sub>Fecha límite y Repetir periódicamente</Sub>
+            <ul className="max-w-3xl space-y-2 text-[14px] text-ink-700">
+              <Bullet><strong>Fecha límite:</strong> la sugerencia suma a la compra hasta ese día, incluido, y al día siguiente se archiva sola. <strong>Sin fecha no vence nunca:</strong> pide las mismas unidades todos los días hasta que alguien la borre. Por eso la plataforma pide confirmar antes de guardar una sin fecha.</Bullet>
+              <Bullet><strong>Repetir periódicamente</strong> convierte la sugerencia en una regla. Se aplica al guardar y se vuelve a aplicar cada N días, hasta la fecha “Hasta” o hasta que se elimine. Cada repetición reemplaza a la anterior: no se acumulan. Con repetición no hay fecha límite.</Bullet>
+              <Bullet><strong>Cada repetición recalcula:</strong> en Días, con la demanda y el stock del momento; en Mantener stock, solo lo que falta para volver al nivel, y si está cubierto esa vez no pide nada; en Unidades vuelve a sumar el mismo número. En Por grupo y Todos los filtros se revisan de nuevo, así que entran los productos que empiecen a cumplirlos.</Bullet>
+              <Bullet><strong>Mantener stock marca Repetir solo,</strong> porque es una regla y no una compra puntual: sin repetición el nivel se cubre una vez y nunca más. Se puede desmarcar si solo se quiere el relleno de hoy. Con Repetir, la regla queda guardada aunque hoy no pida nada.</Bullet>
+            </ul>
+          </Section>
+
           <Section id="reglas" titulo="Reglas de negocio adicionales">
             <P>Sobre el cálculo del modelo, la plataforma aplica algunos ajustes de sentido común:</P>
             <ul className="max-w-3xl space-y-2 text-[14px] text-ink-700">
@@ -361,6 +437,12 @@ function Section({ id, titulo, children }: { id: string; titulo: string; childre
       </h2>
       {children}
     </section>
+  );
+}
+
+function Sub({ children }: { children: ReactNode }) {
+  return (
+    <h3 className="pt-2 font-display text-lg font-medium tracking-tight text-ink-900">{children}</h3>
   );
 }
 
