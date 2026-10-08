@@ -27,14 +27,17 @@ describe("Modelo: sugerencias manuales", () => {
     const t = texto();
     for (const palabra of [
       "una sola vez", "nunca haya menos de", "días de venta",
-      "Reemplazarla", "Sumar las dos", "marcar el producto como pedido", "a los 7 días",
+      "Reemplazarla", "Sumar las dos", "Cuando su compra aparece en el ERP", "a los 7 días",
+      "Queda anotada la OC que la cerró",
       "Un producto", "Varios productos", "Pegar lista",
     ]) {
       expect(t).toContain(palabra);
     }
     expect(t).toContain("Las reglas se recalculan todos los días");
-    // Lo que ya no existe en el modal no se sigue explicando.
+    // Lo que ya no existe en el modal no se sigue explicando, y el boton de marcar
+    // como pedido no lo usa nadie: no puede ser lo que cierra una sugerencia.
     expect(t).not.toContain("Repetir periódicamente");
+    expect(t).not.toContain("como pedid");
   });
 
   it("el ejemplo cuadra con lo que calcula el modal", () => {

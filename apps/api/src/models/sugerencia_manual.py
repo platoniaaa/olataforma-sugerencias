@@ -1,9 +1,9 @@
 """Tabla `sugerencia_manual`: sugerencias agregadas a mano por el usuario,
 por encima de las que calcula el sistema."""
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
@@ -59,3 +59,12 @@ class SugerenciaManual(Base):
     # Si vino de una carga masiva (por grupo / a todos), todas las filas del mismo lote
     # comparten este UUID. Permite borrar el lote completo en un solo SQL.
     lote_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+
+    # Se cerro sola porque aparecio en el ERP una OC del mismo producto y sucursal,
+    # de fecha igual o posterior y con al menos estas unidades (08-10-2026). Queda
+    # anotada para que se pueda revisar: el ERP no dice por que se hizo la OC, asi
+    # que una sin relacion tambien podria cerrarla (services/oc_service.py).
+    cerrada_por_oc: Mapped[str | None] = mapped_column(String, nullable=True)
+    cerrada_oc_fecha: Mapped[date | None] = mapped_column(Date, nullable=True)
+    cerrada_oc_unidades: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cerrada_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

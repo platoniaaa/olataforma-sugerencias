@@ -130,6 +130,11 @@ class SugerenciaManualOut(BaseModel):
     stock_objetivo: int | None = None
     # Si vino de una regla que se repite (para distinguirla de una carga puntual).
     recurrente_id: str | None = None
+    # La OC del ERP que la cerro sola (ver services/oc_service.py).
+    cerrada_por_oc: str | None = None
+    cerrada_oc_fecha: date | None = None
+    cerrada_oc_unidades: float | None = None
+    cerrada_en: datetime | None = None
 
     # --- Contexto del producto, para poder LEER la lista ---
     # La pantalla mostraba el codigo pelado ("74 1324409TBW0000") y habia que ir al

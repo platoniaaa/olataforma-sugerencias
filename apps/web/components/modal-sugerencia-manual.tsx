@@ -8,8 +8,9 @@
  * Mantener stock" con una casilla de "Repetir cada N días" y una fecha límite, y
  * casi nadie sabía qué resultaba. Ahora se completa una de tres frases y, antes de
  * guardar, se ve cuánto se compra hoy:
- *   - "N unidades más, una sola vez": se borra sola al marcarla como pedida, o a los
- *     7 días si nadie la compra (nunca queda pidiéndose para siempre por omisión).
+ *   - "N unidades más, una sola vez": se borra sola cuando su compra aparece en el
+ *     ERP (services/oc_service.py en la API), o a los 7 días si nadie la compra:
+ *     nunca queda pidiéndose para siempre por omisión.
  *   - "nunca menos de N unidades": regla que cada día pide solo lo que falte.
  *   - "que alcance para N días de venta": lo mismo, con la venta del momento.
  * Las cuentas del recuadro están en `lib/pedido-especial.ts` y son las del servidor.
@@ -514,14 +515,16 @@ export function ModalSugerenciaManual({
   // Lo que pasa después de guardar, bajo la frase elegida.
   const varios = alcance === "varios";
   const hasta = hastaFecha && fechaFin ? ` Sigue hasta el ${formatoFecha(fechaFin)}.` : "";
+  // Se cierra sola cuando aparece su OC en el ERP: nadie aprieta "Marcar como
+  // pedido", así que prometer eso dejaba la sugerencia sumando después de comprada.
   const notaUna =
     plazo === "nunca"
       ? varios
-        ? "Cada una se borra sola cuando la marques como pedida. Sin plazo: si nadie las compra, siguen sumándose hasta que las borres."
-        : "Se borra sola cuando la marques como pedida. Sin plazo: si nadie la compra, sigue sumándose hasta que la borres."
+        ? "Cada una se borra sola cuando su compra aparece en el ERP. Sin plazo: si nadie las compra, siguen sumándose hasta que las borres."
+        : "Se borra sola cuando su compra aparece en el ERP. Sin plazo: si nadie la compra, sigue sumándose hasta que la borres."
       : varios
-        ? `Cada una se borra sola cuando la marques como pedida. Si nadie las compra, a los ${plazo} días.`
-        : `Se borra sola cuando la marques como pedida. Si nadie la compra, a los ${plazo} días.`;
+        ? `Cada una se borra sola cuando su compra aparece en el ERP. Si nadie las compra, a los ${plazo} días.`
+        : `Se borra sola cuando su compra aparece en el ERP. Si nadie la compra, a los ${plazo} días.`;
   const notaMin = `No compra todos los días: cada día revisa el stock y pide solo lo que falte. Lo que ya viene en camino no se vuelve a pedir.${hasta}`;
   const notaDias = `No compra todos los días: cada día revisa el stock con la venta del momento y pide solo lo que falte. Si se vende más, pide más.${varios ? " Los productos sin venta registrada no piden nada." : ""}${hasta}`;
 
@@ -1075,8 +1078,8 @@ export function ModalSugerenciaManual({
                     <p className="mt-1 flex items-start gap-1.5 text-[11.5px] text-amber-700">
                       <TriangleAlert size={13} className="mt-px shrink-0" />
                       <span>
-                        Sin plazo sigue sumándose a la compra todos los días hasta que la
-                        marques como pedida o la borres.
+                        Sin plazo sigue sumándose a la compra todos los días hasta que su
+                        compra aparezca en el ERP o la borres.
                       </span>
                     </p>
                   )}

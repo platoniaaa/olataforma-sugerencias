@@ -144,16 +144,18 @@ Una sugerencia manual es una orden de comprar que agrega una persona encima de l
 
 - **"Quiero N unidades mas, una sola vez":** compra puntual. Suma exactamente N encima de lo que sugiere el sistema, sin mirar stock ni transito.
 - **"Quiero que nunca haya menos de N unidades":** regla que se revisa todos los dias. Pide N - stock - transito - lo que ya sugiere el sistema (minimo 0). No compra todos los dias: solo cuando el stock baja. Sirve tambien para productos que el modelo no pide (mira el stock de bodega).
-- **"Quiero que siempre alcance para N dias de venta":** regla diaria con la venta del momento. Nivel = demanda diaria del modelo x dias, redondeado hacia arriba; pide nivel - stock - transito - sistema (minimo 0). Sin venta registrada en esa sucursal no se puede: el modal no la deja guardar y propone "nunca haya menos de".
+- **"Quiero que siempre alcance para N dias de venta":** regla diaria con la venta del momento. Nivel = demanda diaria del modelo x dias, redondeado hacia arriba; pide nivel - stock - transito - sistema (minimo 0). Sin venta registrada no se puede pasar dias a unidades: con un producto el modal no la deja guardar y propone "nunca haya menos de"; con varios productos, esos no piden nada.
 - Ejemplo con demanda 0,8 u/dia, stock 5, transito 2 y sistema 3: 7 una sola vez -> total 10; nunca menos de 12 -> pide 2 (total 5); alcance para 30 dias -> nivel 24 -> pide 14 (total 17).
-- **Las reglas se recalculan todos los dias** al final de la corrida del motor, con el stock, el transito y el sugerido del dia: lo que ya viene en camino no se vuelve a pedir. Lo de una sola vez suma el mismo numero cada dia hasta que se marque como pedido o se borre.
+- **Las reglas se recalculan todos los dias** al final de la corrida del motor, con el stock, el transito y el sugerido del dia: lo que ya viene en camino no se vuelve a pedir. Lo de una sola vez suma el mismo numero cada dia hasta que aparece su compra en el ERP, vence o se borra.
 
 **Si ya hay una para el mismo producto y sucursal:** dos manuales del mismo par se suman entre si. El modal muestra la que ya existe (sugerencia o regla) y pregunta: Reemplazarla (lo normal: se cierra la anterior) o Sumar las dos. Lo que viene de una regla de varios productos no se toca.
 
 **Cuando se borra:**
 
-- Al marcar el producto como pedido en Compras se cierran sus sugerencias manuales en esa sucursal. Si venia de una regla, la regla sigue y al dia siguiente recalcula con lo que ya viene en camino.
-- Si nadie la compra, la de una sola vez se borra a los 7 dias (en "Mas opciones" se elige 14, 30 o Nunca; con Nunca sigue sumandose hasta marcarla como pedida o borrarla).
+- Lo de una sola vez se cierra solo cuando su compra aparece en el ERP (desde el 08-10-2026). Cada mañana el motor manda las OC de los ultimos 90 dias, de cualquier motivo, tambien compra calzada; la sugerencia se cierra con la primera OC del mismo producto y la misma sucursal, de fecha igual o posterior al dia en que se creo y con al menos esas unidades. La OC de un dia llega en el archivo de seguimiento de la mañana siguiente. Las OC de importacion no cuentan porque vienen sin sucursal.
+- La OC que la cerro queda anotada en la pagina Sugerencias manuales ("Cerradas por su OC", ultimos 14 dias). El ERP no dice por que se hizo una OC: una sin relacion que cumpla lo mismo tambien la cierra, igual que una del mismo dia hecha antes de la sugerencia (la fecha de la OC no trae hora). Si pasa, se vuelve a crear.
+- Tambien se cierra si alguien aprieta "Marcar como pedido" en la ficha del producto, pero ese boton casi no se usa.
+- Si nadie la compra, la de una sola vez se borra a los 7 dias (en "Mas opciones" se elige 14, 30 o Nunca; con Nunca sigue sumandose hasta que aparezca su compra o se borre).
 - Las reglas siguen hasta que se borren o hasta la fecha elegida en "Hasta cuando".
 - La pagina Sugerencias manuales lista cada una con su motivo; se borra una sola, una carga completa o una regla.
 

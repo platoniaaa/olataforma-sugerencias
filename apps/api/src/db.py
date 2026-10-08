@@ -182,6 +182,11 @@ def create_all() -> None:
         "ALTER TABLE stock_transito ADD COLUMN IF NOT EXISTS origen VARCHAR",
         # 2026-10: margen fijo (% sobre la venta) en la ficha de la lista de precios.
         "ALTER TABLE precio_override ADD COLUMN IF NOT EXISTS margen_fijo FLOAT",
+        # 2026-10: lo de una sola vez se cierra solo cuando aparece su OC en el ERP.
+        "ALTER TABLE sugerencia_manual ADD COLUMN IF NOT EXISTS cerrada_por_oc VARCHAR",
+        "ALTER TABLE sugerencia_manual ADD COLUMN IF NOT EXISTS cerrada_oc_fecha DATE",
+        "ALTER TABLE sugerencia_manual ADD COLUMN IF NOT EXISTS cerrada_oc_unidades FLOAT",
+        "ALTER TABLE sugerencia_manual ADD COLUMN IF NOT EXISTS cerrada_en TIMESTAMP WITH TIME ZONE",
     ]
     # SQLite NO soporta "ADD COLUMN IF NOT EXISTS" (error de sintaxis que se
     # tragaba el try, dejando bases locales viejas sin las columnas nuevas):

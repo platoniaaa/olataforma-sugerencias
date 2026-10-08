@@ -254,6 +254,12 @@ export interface SugerenciaManual {
   valor_clp?: number | null;
   /** Stock que hay hoy en esa sucursal. */
   stock_actual?: number | null;
+  /** La OC del ERP que la cerró sola: mismo producto y sucursal, de fecha igual o
+   *  posterior y con al menos esas unidades. */
+  cerrada_por_oc?: string | null;
+  cerrada_oc_fecha?: string | null;
+  cerrada_oc_unidades?: number | null;
+  cerrada_en?: string | null;
 }
 
 /**

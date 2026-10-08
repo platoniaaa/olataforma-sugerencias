@@ -135,6 +135,7 @@ export default function SugerenciasManualesPage() {
   const [unicas, setUnicas] = useState<SugerenciaManual[] | null>(null);
   const [recurrentes, setRecurrentes] = useState<Recurrente[] | null>(null);
   const [instock, setInstock] = useState<InstockResumen | null>(null);
+  const [cerradasPorOc, setCerradasPorOc] = useState<SugerenciaManual[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const cargar = useCallback(async () => {
@@ -155,6 +156,13 @@ export default function SugerenciasManualesPage() {
       setInstock(await api.instockResumen());
     } catch {
       setInstock(null);
+    }
+    // Las que se cerraron solas por su OC: aparte por la misma razón. Si falla, la
+    // lista de vigentes se ve igual.
+    try {
+      setCerradasPorOc(await api.sugerenciasCerradasPorOc());
+    } catch {
+      setCerradasPorOc([]);
     }
   }, []);
 
@@ -245,11 +253,14 @@ export default function SugerenciasManualesPage() {
       )}
 
       {tab === "unicas" && (
-        <SeccionUnicas
-          items={unicas}
-          onEliminar={eliminarUnica}
-          onEliminarLote={eliminarLote}
-        />
+        <>
+          <SeccionUnicas
+            items={unicas}
+            onEliminar={eliminarUnica}
+            onEliminarLote={eliminarLote}
+          />
+          <SeccionCerradasPorOc items={cerradasPorOc} />
+        </>
       )}
 
       {tab === "recurrentes" && (
@@ -387,8 +398,8 @@ function SeccionUnicas({
     return (
       <Card>
         <CardContent className="text-[13px] text-slate-500">
-          No hay sugerencias únicas vigentes. Para crear una, andá al dashboard, hacé
-          click en “Sugerencia manual” y <b>no</b> marqués “Repetir periódicamente”.
+          No hay sugerencias únicas vigentes. Para crear una, aprieta “Sugerencia
+          manual” en el dashboard y elige <b>una sola vez</b>.
         </CardContent>
       </Card>
     );
@@ -436,6 +447,58 @@ function SeccionUnicas({
                 <Trash2 size={16} />
               </button>
             </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Las de una sola vez que se cerraron solas porque apareció su OC en el ERP.
+ *
+ * El ERP no dice por qué se hizo una OC: se cierran con la primera del mismo
+ * producto y sucursal, de fecha igual o posterior y con al menos esas unidades.
+ * Una OC sin relación podría cerrar una que nadie compró, por eso se muestra cuál
+ * fue: si no tenía nada que ver, se vuelve a crear.
+ */
+function SeccionCerradasPorOc({ items }: { items: SugerenciaManual[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="space-y-2 pt-2">
+      <div>
+        <h2 className="text-[14px] font-semibold text-slate-900">
+          Cerradas por su OC · últimos 14 días
+        </h2>
+        <p className="text-[12.5px] text-slate-500">
+          Se cierran solas cuando aparece en el ERP una OC del mismo producto y sucursal,
+          con al menos esas unidades. Si la OC no tenía nada que ver, vuelve a crearla.
+        </p>
+      </div>
+      {items.map((s) => (
+        <Card key={s.id} className="bg-slate-50/60">
+          <CardContent className="py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold text-slate-900">{s.producto}</span>
+              <span className="text-[13px] text-slate-500">·</span>
+              <span className="text-[13px] text-slate-600">
+                {s.nombre_sucursal ?? s.sucursal_id}
+              </span>
+              <Badge className="bg-slate-100 text-slate-600">
+                {formatoNumero(s.unidades)} u
+              </Badge>
+              <Badge className="bg-emerald-50 text-emerald-700">
+                OC N° {s.cerrada_por_oc} del {formatoFecha(s.cerrada_oc_fecha)} ·{" "}
+                {formatoNumero(s.cerrada_oc_unidades ?? 0)} u
+              </Badge>
+            </div>
+            <FichaProducto m={s} />
+            <p className="mt-1 text-[12px] text-slate-500">
+              {s.creado_por && <>{s.creado_por} · </>}
+              cargada el {formatoFechaHora(s.creado_en)}
+              {s.cerrada_en && <> · cerrada el {formatoFechaHora(s.cerrada_en)}</>}
+              {s.motivo && <> · {s.motivo}</>}
+            </p>
           </CardContent>
         </Card>
       ))}

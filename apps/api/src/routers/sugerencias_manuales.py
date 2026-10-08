@@ -258,6 +258,30 @@ def previsualizar_dias(
     return {**d, "sin_demanda": False, "desglose": _desglose(d)}
 
 
+@router.get("/cerradas-por-oc", response_model=list[SugerenciaManualOut])
+def cerradas_por_oc(
+    dias: int = Query(14, ge=1, le=90),
+    db: Session = Depends(get_db),
+):
+    """Las que se cerraron solas en los ultimos dias porque aparecio su OC.
+
+    Se muestran con la OC que las cerro: el ERP no dice por que se hizo una OC, asi
+    que si alguien ve que no tenia nada que ver, la vuelve a crear.
+    """
+    desde = datetime.now(timezone.utc) - timedelta(days=dias)
+    filas = list(
+        db.scalars(
+            select(SugerenciaManual)
+            .where(
+                SugerenciaManual.cerrada_por_oc.isnot(None),
+                SugerenciaManual.cerrada_en >= desde,
+            )
+            .order_by(SugerenciaManual.cerrada_en.desc())
+        ).all()
+    )
+    return _con_contexto(db, filas)
+
+
 @router.get("", response_model=list[SugerenciaManualOut])
 def listar(
     producto: str | None = Query(None),

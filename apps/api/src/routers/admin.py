@@ -14,6 +14,7 @@ from ..services import (
     excel_loader,
     lead_time_service,
     motor_comparacion,
+    oc_service,
     politica_precio_service,
     powerbi_desktop_loader,
     powerbi_loader,
@@ -477,6 +478,28 @@ def tomar_snapshot(
     )
     db.commit()
     return {"filas": filas}
+
+
+@router.post("/oc-recientes")
+def publicar_oc_recientes(
+    payload: dict,
+    db: Session = Depends(get_db),
+) -> dict:
+    """El motor manda las OC de los ultimos 90 dias y se cierran las sugerencias de
+    una sola vez que ya se compraron.
+
+    payload: {"filas": [{producto, sucursal_id, n_oc, fecha_oc, cantidad, motivo,
+    origen}], "previsualizar": bool}. Con previsualizar solo dice cuales cerraria.
+
+    Nadie aprieta "Marcar como pedido": sin esto, lo de una sola vez seguia sumando
+    despues de comprado y la descarga siguiente lo volvia a pedir.
+    """
+    filas = payload.get("filas")
+    if not isinstance(filas, list):
+        raise HTTPException(status_code=400, detail="Falta la lista 'filas'")
+    return oc_service.cerrar_por_oc(
+        db, filas, previsualizar=bool(payload.get("previsualizar"))
+    )
 
 
 @router.post("/procesar-recurrentes")

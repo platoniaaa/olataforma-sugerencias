@@ -93,6 +93,10 @@ describe("ModalSugerenciaManual · frases", () => {
     expect(
       screen.getByText("3 que pide el sistema + 7 tuyas. Quedas con 17, unos 21 días de venta.")
     ).toBeInTheDocument();
+    // Se cierra sola con su OC: nadie aprieta "Marcar como pedido".
+    expect(
+      screen.getByText("Se borra sola cuando su compra aparece en el ERP. Si nadie la compra, a los 7 días.")
+    ).toBeInTheDocument();
   });
 
   it("una sola vez se guarda con plazo de 7 días, sin preguntar nada", async () => {

@@ -400,6 +400,12 @@ export const api = {
     return getJSON(`/api/sugerencias-manuales?${p.toString()}`);
   },
 
+  /** Las de una sola vez que se cerraron solas en los últimos días porque apareció
+   *  su OC en el ERP, con la OC que las cerró. */
+  async sugerenciasCerradasPorOc(dias = 14): Promise<SugerenciaManual[]> {
+    return getJSON(`/api/sugerencias-manuales/cerradas-por-oc?dias=${dias}`);
+  },
+
   async crearSugerenciaManual(payload: {
     producto: string;
     sucursal_id: string;

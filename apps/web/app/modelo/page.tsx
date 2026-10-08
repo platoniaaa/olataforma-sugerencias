@@ -343,7 +343,7 @@ export default function ModeloPage() {
               rows={[
                 ["Quiero N unidades más, una sola vez.", "Una compra puntual.", "Exactamente N, encima de lo que sugiere el sistema. No mira el stock ni el tránsito.", "Nunca: siempre suma mientras está vigente."],
                 ["Quiero que nunca haya menos de N unidades.", "Una regla que se revisa todos los días.", "Lo que falta para llegar a N. Descuenta el stock, lo que viene en tránsito y lo que el sistema ya sugiere.", "Cuando el nivel ya está cubierto. No compra todos los días: solo cuando el stock baja. Sirve también para productos que el modelo no pide: ahí mira el stock de bodega."],
-                ["Quiero que siempre alcance para N días de venta.", "Una regla que se revisa todos los días con la venta del momento.", "Lo que falta para cubrir N días según la demanda diaria del modelo. Descuenta lo mismo que la anterior.", "Cuando lo que hay ya alcanza. Sin venta registrada en esa sucursal no hay cómo pasar días a unidades: el modal no la deja guardar y propone “nunca haya menos de”."],
+                ["Quiero que siempre alcance para N días de venta.", "Una regla que se revisa todos los días con la venta del momento.", "Lo que falta para cubrir N días según la demanda diaria del modelo. Descuenta lo mismo que la anterior.", "Cuando lo que hay ya alcanza. Sin venta registrada no hay cómo pasar días a unidades: con un producto, el modal no la deja guardar y propone “nunca haya menos de”; con varios, esos productos no piden nada."],
               ]}
             />
             <Formula>
@@ -370,7 +370,7 @@ export default function ModeloPage() {
               <strong>Las reglas se recalculan todos los días</strong>, al final de la corrida del
               motor, con el stock, el tránsito y el sugerido del día. Lo que ya viene en camino no
               se vuelve a pedir. Lo de una sola vez, en cambio, suma el mismo número cada día
-              hasta que se marque como pedido o se borre.
+              hasta que aparece su compra en el ERP, vence o se borra.
             </Callout>
 
             <Sub>Si ya hay una para el mismo producto</Sub>
@@ -384,8 +384,9 @@ export default function ModeloPage() {
 
             <Sub>Cuándo se borra</Sub>
             <ul className="max-w-3xl space-y-2 text-[14px] text-ink-700">
-              <Bullet><strong>Al marcar el producto como pedido</strong> en Compras se cierran sus sugerencias manuales en esa sucursal: lo de una sola vez ya cumplió. Si venía de una regla, la regla sigue y al día siguiente recalcula con lo que ya viene en camino.</Bullet>
-              <Bullet><strong>Si nadie la compra,</strong> la de una sola vez se borra a los 7 días. En “Más opciones” se puede elegir 14 o 30 días, o Nunca. Con Nunca sigue sumándose todos los días hasta que se marque como pedida o se borre a mano, y la plataforma lo advierte.</Bullet>
+              <Bullet><strong>Cuando su compra aparece en el ERP.</strong> Cada mañana el motor revisa las OC de los últimos 90 días, de cualquier motivo, también las de compra calzada. Lo de una sola vez se cierra con la primera OC del mismo producto y la misma sucursal, de fecha igual o posterior al día en que se creó y con al menos esas unidades. La OC de un día llega en el archivo de seguimiento de la mañana siguiente. Las OC de importación no cuentan porque vienen sin sucursal.</Bullet>
+              <Bullet><strong>Queda anotada la OC que la cerró,</strong> en la página Sugerencias manuales. El ERP no dice por qué se hizo una OC: una sin relación que cumpla lo mismo también la cierra, igual que una del mismo día hecha antes de la sugerencia, porque la fecha de la OC no trae hora. Si pasa, vuelve a crearla.</Bullet>
+              <Bullet><strong>Si nadie la compra,</strong> la de una sola vez se borra a los 7 días. En “Más opciones” se puede elegir 14 o 30 días, o Nunca. Con Nunca sigue sumándose todos los días hasta que aparezca su compra o se borre a mano, y la plataforma lo advierte.</Bullet>
               <Bullet><strong>Las reglas siguen hasta que se borren,</strong> o hasta la fecha que se elija en “¿Hasta cuándo?”.</Bullet>
               <Bullet><strong>Para corregir o borrar,</strong> la página Sugerencias manuales lista cada una con su motivo. Se puede eliminar una sola, una carga completa o una regla.</Bullet>
             </ul>
