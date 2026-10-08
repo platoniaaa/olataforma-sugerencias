@@ -333,13 +333,17 @@ export default function ModeloPage() {
               <Bullet><strong>Queda registrada</strong> con quién la cargó, cuándo y el motivo, en la auditoría y en la campanita.</Bullet>
             </ul>
 
-            <Sub>Cuánto pide: Días, Unidades y Mantener stock</Sub>
+            <Sub>Las tres frases</Sub>
+            <P>
+              El modal pide completar una frase. Antes de guardar muestra cuánto se compra hoy en
+              total y para cuántos días de venta alcanza.
+            </P>
             <Tabla
-              headers={["Modo", "Qué escribes", "Cuánto pide", "Cuándo no pide nada"]}
+              headers={["Frase", "Qué es", "Cuánto pide", "Cuándo no pide nada"]}
               rows={[
-                ["Días", "Los días de venta que quieres tener cubiertos.", "Lo que falta para cubrir esos días según la demanda diaria del modelo. Descuenta el stock, lo que viene en tránsito y lo que el sistema ya sugiere.", "Si lo que hay ya alcanza para esos días. Tampoco sirve si el producto no tiene demanda registrada en esa sucursal: sin demanda no hay cómo pasar días a unidades."],
-                ["Unidades", "Una cantidad fija.", "Exactamente esas unidades, encima de lo que sugiere el sistema. No mira el stock ni el tránsito.", "Nunca: siempre suma, aunque la sucursal tenga de sobra."],
-                ["Mantener stock", "El nivel que quieres tener en bodega.", "Lo que falta para llegar a ese nivel. Descuenta el stock, lo que viene en tránsito y lo que el sistema ya sugiere.", "Si el nivel ya está cubierto. Sirve también para productos que el modelo no pide: ahí mira el stock de bodega."],
+                ["Quiero N unidades más, una sola vez.", "Una compra puntual.", "Exactamente N, encima de lo que sugiere el sistema. No mira el stock ni el tránsito.", "Nunca: siempre suma mientras está vigente."],
+                ["Quiero que nunca haya menos de N unidades.", "Una regla que se revisa todos los días.", "Lo que falta para llegar a N. Descuenta el stock, lo que viene en tránsito y lo que el sistema ya sugiere.", "Cuando el nivel ya está cubierto. No compra todos los días: solo cuando el stock baja. Sirve también para productos que el modelo no pide: ahí mira el stock de bodega."],
+                ["Quiero que siempre alcance para N días de venta.", "Una regla que se revisa todos los días con la venta del momento.", "Lo que falta para cubrir N días según la demanda diaria del modelo. Descuenta lo mismo que la anterior.", "Cuando lo que hay ya alcanza. Sin venta registrada en esa sucursal no hay cómo pasar días a unidades: el modal no la deja guardar y propone “nunca haya menos de”."],
               ]}
             />
             <Formula>
@@ -348,50 +352,53 @@ export default function ModeloPage() {
             </Formula>
             <Formula>
               Se pide = Nivel − Stock − En tránsito − Lo que ya sugiere el sistema
-              <span className="block text-ink-500">(en Días y en Mantener stock; si da 0 o menos, no se pide nada)</span>
+              <span className="block text-ink-500">(en las dos reglas; si da 0 o menos, ese día no se pide nada)</span>
             </Formula>
             <P>
               Ejemplo: un producto que vende 0,8 unidades al día, con 5 en stock, 2 en tránsito y
               3 que ya sugiere el sistema.
             </P>
             <Tabla
-              headers={["Si escribes", "Cuenta", "Se pide", "Total a comprar"]}
+              headers={["Si escribes", "Cuenta", "Se pide", "Total a comprar hoy"]}
               rows={[
-                ["Días: 30", "0,8 × 30 = 24 → 24 − 5 − 2 − 3", "14", "17 (los 3 del sistema + 14)"],
-                ["Mantener stock: 12", "12 − 5 − 2 − 3", "2", "5 (3 + 2)"],
-                ["Unidades: 10", "No descuenta nada", "10", "13 (3 + 10)"],
+                ["7 unidades más, una sola vez", "No descuenta nada", "7", "10 (los 3 del sistema + 7)"],
+                ["Nunca menos de 12", "12 − 5 − 2 − 3", "2", "5 (3 + 2)"],
+                ["Que alcance para 30 días", "0,8 × 30 = 24 → 24 − 5 − 2 − 3", "14", "17 (3 + 14)"],
               ]}
             />
             <Callout>
-              <strong>Las unidades se calculan una sola vez, al guardar.</strong> Desde ahí la
-              sugerencia suma ese mismo número todos los días hasta su fecha límite, aunque el stock
-              cambie o la mercadería ya haya llegado. Para que se recalcule sola, usa{" "}
-              <strong>Repetir periódicamente</strong>. Dos sugerencias manuales del mismo producto
-              y sucursal se suman entre sí: la segunda no descuenta la primera.
+              <strong>Las reglas se recalculan todos los días</strong>, al final de la corrida del
+              motor, con el stock, el tránsito y el sugerido del día. Lo que ya viene en camino no
+              se vuelve a pedir. Lo de una sola vez, en cambio, suma el mismo número cada día
+              hasta que se marque como pedido o se borre.
             </Callout>
 
-            <Sub>A qué productos se aplica: Individual, Por grupo, Todos y Pegar lista</Sub>
-            <Tabla
-              headers={["Pestaña", "A qué se aplica", "Cómo funciona"]}
-              rows={[
-                ["Individual", "Un producto en una sucursal.", "En Días y Mantener stock, antes de guardar muestra de dónde sale el número: el stock por bodega, el tránsito y lo que ya sugiere el sistema. Si ya está cubierto, avisa y no guarda nada, salvo que sea una regla con Repetir. Rechaza códigos que no existen en el catálogo y avisa si FORD reemplazó el código por otro."],
-                ["Por grupo", "Los productos que cumplen a la vez los filtros elegidos: sucursal, proveedor y ABC.", "Aplica el mismo modo y número a cada producto × sucursal, y antes de guardar dice a cuántos. Omite los que ya están cubiertos y, en Días, los que no tienen demanda. Todas quedan en una misma carga, que se puede borrar de una vez."],
-                ["Todos", "Todos los productos del sugerido, sin filtros.", "Igual que Por grupo. Avisa cuando la carga pasa de 1.000 productos."],
-                ["Pegar lista", "Una lista copiada desde Excel.", "Cada línea trae su producto, su sucursal y su propia cantidad: unidades, días o mantener. Con encabezado, las columnas pueden ir en cualquier orden. Si una línea trae más de una cantidad, manda mantener, después días y al final unidades. Antes de guardar muestra lo que va a pedir cada línea y cuáles se omiten."],
-              ]}
-            />
+            <Sub>Si ya hay una para el mismo producto</Sub>
+            <P>
+              Dos sugerencias del mismo producto y sucursal se suman entre sí: la segunda no
+              descuenta la primera. Por eso, si ya hay una sugerencia o una regla para ese producto
+              en esa sucursal, el modal la muestra y pregunta: <strong>Reemplazarla</strong> (lo
+              normal: se cierra la anterior y queda la nueva) o <strong>Sumar las dos</strong>. Lo
+              que viene de una regla de varios productos no se toca.
+            </P>
+
+            <Sub>Cuándo se borra</Sub>
             <ul className="max-w-3xl space-y-2 text-[14px] text-ink-700">
-              <Bullet><strong>En Por grupo y Todos viene marcado “Solo productos con pedir = Sí”</strong> (recomendado): así solo se tocan los productos que el modelo ya pide.</Bullet>
+              <Bullet><strong>Al marcar el producto como pedido</strong> en Compras se cierran sus sugerencias manuales en esa sucursal: lo de una sola vez ya cumplió. Si venía de una regla, la regla sigue y al día siguiente recalcula con lo que ya viene en camino.</Bullet>
+              <Bullet><strong>Si nadie la compra,</strong> la de una sola vez se borra a los 7 días. En “Más opciones” se puede elegir 14 o 30 días, o Nunca. Con Nunca sigue sumándose todos los días hasta que se marque como pedida o se borre a mano, y la plataforma lo advierte.</Bullet>
+              <Bullet><strong>Las reglas siguen hasta que se borren,</strong> o hasta la fecha que se elija en “¿Hasta cuándo?”.</Bullet>
               <Bullet><strong>Para corregir o borrar,</strong> la página Sugerencias manuales lista cada una con su motivo. Se puede eliminar una sola, una carga completa o una regla.</Bullet>
             </ul>
 
-            <Sub>Fecha límite y Repetir periódicamente</Sub>
-            <ul className="max-w-3xl space-y-2 text-[14px] text-ink-700">
-              <Bullet><strong>Fecha límite:</strong> la sugerencia suma a la compra hasta ese día, incluido, y al día siguiente se archiva sola. <strong>Sin fecha no vence nunca:</strong> pide las mismas unidades todos los días hasta que alguien la borre. Por eso la plataforma pide confirmar antes de guardar una sin fecha.</Bullet>
-              <Bullet><strong>Repetir periódicamente</strong> convierte la sugerencia en una regla. Se aplica al guardar y se vuelve a aplicar cada N días, hasta la fecha “Hasta” o hasta que se elimine. Cada repetición reemplaza a la anterior: no se acumulan. Con repetición no hay fecha límite.</Bullet>
-              <Bullet><strong>Cada repetición recalcula:</strong> en Días, con la demanda y el stock del momento; en Mantener stock, solo lo que falta para volver al nivel, y si está cubierto esa vez no pide nada; en Unidades vuelve a sumar el mismo número. En Por grupo y Todos los filtros se revisan de nuevo, así que entran los productos que empiecen a cumplirlos.</Bullet>
-              <Bullet><strong>Mantener stock marca Repetir solo,</strong> porque es una regla y no una compra puntual: sin repetición el nivel se cubre una vez y nunca más. Se puede desmarcar si solo se quiere el relleno de hoy. Con Repetir, la regla queda guardada aunque hoy no pida nada.</Bullet>
-            </ul>
+            <Sub>A qué productos se aplica: Un producto, Varios productos y Pegar lista</Sub>
+            <Tabla
+              headers={["Pestaña", "A qué se aplica", "Cómo funciona"]}
+              rows={[
+                ["Un producto", "Un producto en una sucursal.", "Muestra el stock, lo que viene en camino, lo que ya pide el sistema y la venta diaria, y calcula el resultado mientras se escribe. Avisa si el código no existe en el catálogo y si FORD lo reemplazó por otro."],
+                ["Varios productos", "Los productos que cumplen a la vez los filtros elegidos: sucursal, proveedor y ABC. Sin filtros, todos.", "Las mismas tres frases para cada producto × sucursal, y antes de guardar dice a cuántos. Viene marcado “Solo productos con Pedir = Sí” (recomendado). Avisa cuando la carga pasa de 1.000 productos. Lo de una sola vez queda en una misma carga, que se puede borrar de una vez."],
+                ["Pegar lista", "Una lista copiada desde Excel.", "Cada línea trae su producto, su sucursal y su propia cantidad: unidades, días o mantener. Cada línea se calcula al guardar y se carga una sola vez, con el mismo plazo. Si una línea trae más de una cantidad, manda mantener, después días y al final unidades. Antes de guardar muestra lo que va a pedir cada línea y cuáles se omiten."],
+              ]}
+            />
           </Section>
 
           <Section id="reglas" titulo="Reglas de negocio adicionales">

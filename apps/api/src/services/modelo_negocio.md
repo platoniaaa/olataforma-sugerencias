@@ -140,25 +140,28 @@ Para los productos centralizados, antes de comprarle al proveedor se reparte el 
 
 Una sugerencia manual es una orden de comprar que agrega una persona encima de lo que calcula el modelo (pedido especial, promocion, quiebre que el modelo no ve). No cambia ninguna de las 8 etapas: sus unidades se suman al Total sugerido de ese producto en esa sucursal y la fila queda con Pedir = Si. Si el modelo no tiene ese producto en esa sucursal, la fila aparece igual armada desde el catalogo (con stock de bodega, sin ABC ni proveedor). Se muestra aunque esten activos "solo pedir" o "solo nacionales". Queda en la auditoria y en la campanita con quien, cuando y motivo.
 
-**Cuanto pide (modo):**
+**Las tres frases (desde el 08-10-2026):** el modal pide completar una frase y, antes de guardar, muestra cuanto se compra hoy en total y para cuantos dias de venta alcanza.
 
-- **Dias:** los dias de venta que se quieren cubiertos. Nivel = demanda diaria del modelo x dias, redondeado hacia arriba. Se pide Nivel - stock - transito - lo que ya sugiere el sistema (minimo 0). Si el producto no tiene demanda registrada en esa sucursal, no se puede usar.
-- **Unidades:** una cantidad fija que se suma encima de lo que sugiere el sistema, sin mirar stock ni transito. Siempre suma.
-- **Mantener stock:** el nivel que se quiere en bodega. Se pide nivel - stock - transito - lo que ya sugiere el sistema (minimo 0). Sirve tambien para productos que el modelo no pide: ahi mira el stock de bodega.
-- Ejemplo con demanda 0,8 u/dia, stock 5, transito 2 y sistema 3: Dias 30 -> nivel 24 -> pide 14 (total 17); Mantener 12 -> pide 2 (total 5); Unidades 10 -> pide 10 (total 13).
-- **Las unidades se calculan una sola vez, al guardar,** y se suman igual todos los dias hasta la fecha limite aunque el stock cambie. Dos manuales del mismo producto y sucursal se suman entre si.
+- **"Quiero N unidades mas, una sola vez":** compra puntual. Suma exactamente N encima de lo que sugiere el sistema, sin mirar stock ni transito.
+- **"Quiero que nunca haya menos de N unidades":** regla que se revisa todos los dias. Pide N - stock - transito - lo que ya sugiere el sistema (minimo 0). No compra todos los dias: solo cuando el stock baja. Sirve tambien para productos que el modelo no pide (mira el stock de bodega).
+- **"Quiero que siempre alcance para N dias de venta":** regla diaria con la venta del momento. Nivel = demanda diaria del modelo x dias, redondeado hacia arriba; pide nivel - stock - transito - sistema (minimo 0). Sin venta registrada en esa sucursal no se puede: el modal no la deja guardar y propone "nunca haya menos de".
+- Ejemplo con demanda 0,8 u/dia, stock 5, transito 2 y sistema 3: 7 una sola vez -> total 10; nunca menos de 12 -> pide 2 (total 5); alcance para 30 dias -> nivel 24 -> pide 14 (total 17).
+- **Las reglas se recalculan todos los dias** al final de la corrida del motor, con el stock, el transito y el sugerido del dia: lo que ya viene en camino no se vuelve a pedir. Lo de una sola vez suma el mismo numero cada dia hasta que se marque como pedido o se borre.
 
-**A que productos (tipo):**
+**Si ya hay una para el mismo producto y sucursal:** dos manuales del mismo par se suman entre si. El modal muestra la que ya existe (sugerencia o regla) y pregunta: Reemplazarla (lo normal: se cierra la anterior) o Sumar las dos. Lo que viene de una regla de varios productos no se toca.
 
-- **Individual:** un producto en una sucursal. En Dias y Mantener muestra el desglose antes de guardar; si ya esta cubierto no guarda nada (salvo regla con Repetir). Rechaza codigos que no existen y avisa si FORD reemplazo el codigo.
-- **Por grupo:** los productos que cumplen a la vez los filtros de sucursal, proveedor y ABC. Mismo modo y numero para cada uno; omite los cubiertos y, en Dias, los sin demanda. Quedan en una misma carga que se borra de una vez.
-- **Todos:** todos los productos del sugerido, sin filtros. Avisa sobre 1.000 productos. En Por grupo y Todos viene marcado "Solo productos con pedir = Si" (recomendado).
-- **Pegar lista:** lista desde Excel, cada linea con producto, sucursal y su propia cantidad (unidades, dias o mantener). Con encabezado las columnas van en cualquier orden. Si una linea trae mas de una cantidad manda mantener > dias > unidades. Hay vista previa antes de guardar.
+**Cuando se borra:**
 
-**Fecha limite y Repetir periodicamente:**
+- Al marcar el producto como pedido en Compras se cierran sus sugerencias manuales en esa sucursal. Si venia de una regla, la regla sigue y al dia siguiente recalcula con lo que ya viene en camino.
+- Si nadie la compra, la de una sola vez se borra a los 7 dias (en "Mas opciones" se elige 14, 30 o Nunca; con Nunca sigue sumandose hasta marcarla como pedida o borrarla).
+- Las reglas siguen hasta que se borren o hasta la fecha elegida en "Hasta cuando".
+- La pagina Sugerencias manuales lista cada una con su motivo; se borra una sola, una carga completa o una regla.
 
-- **Fecha limite:** suma hasta ese dia incluido (hora de Chile) y al dia siguiente se archiva sola. Sin fecha no vence: pide lo mismo todos los dias hasta que alguien la borre (la plataforma pide confirmar).
-- **Repetir periodicamente:** convierte la sugerencia en una regla que se aplica al guardar y cada N dias hasta "Hasta" o hasta eliminarla. Cada repeticion reemplaza la anterior y recalcula: Dias con la demanda y el stock del momento; Mantener stock solo lo que falta para volver al nivel; Unidades suma el mismo numero. En Por grupo y Todos los filtros se revisan de nuevo. Mantener stock marca Repetir solo.
+**A que productos (pestanas):**
+
+- **Un producto:** un producto en una sucursal. Muestra stock, en camino, lo que pide el sistema y la venta diaria, y calcula mientras se escribe. Avisa si el codigo no existe y si FORD lo reemplazo.
+- **Varios productos:** los que cumplen a la vez los filtros de sucursal, proveedor y ABC (sin filtros, todos). Las mismas tres frases para cada producto x sucursal; dice a cuantos antes de guardar. Viene marcado "Solo productos con Pedir = Si" (recomendado). Avisa sobre 1.000 productos. Lo de una sola vez queda en una carga que se borra de una vez.
+- **Pegar lista:** lista desde Excel, cada linea con producto, sucursal y su propia cantidad (unidades, dias o mantener). Cada linea se calcula al guardar y se carga una sola vez, con el mismo plazo. Si una linea trae mas de una cantidad manda mantener > dias > unidades. Hay vista previa antes de guardar.
 
 ## Reglas de negocio adicionales
 

@@ -26,6 +26,11 @@ class SugerenciaManualCreate(BaseModel):
         description="Fecha limite (inclusive) hasta la que la sugerencia sigue vigente; al pasar se archiva. None = no vence.",
     )
     motivo: str | None = None
+    reemplazar: bool = Field(
+        default=False,
+        description="Si ya hay sugerencias o una regla para el mismo producto y sucursal, "
+        "las cierra antes de crear esta. Sin esto se suman entre si.",
+    )
 
 
 class SugerenciaManualMasiva(BaseModel):
@@ -162,6 +167,11 @@ class RecurrenteCreate(BaseModel):
     motivo: str | None = None
     cada_dias: int = Field(gt=0, le=365, description="Repetir cada N días")
     fecha_fin: date | None = None
+    reemplazar: bool = Field(
+        default=False,
+        description="Solo modo individual: cierra las sugerencias y reglas que ya hay para "
+        "ese producto y sucursal antes de crear esta.",
+    )
 
 
 class RecurrenteOut(BaseModel):

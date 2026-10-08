@@ -325,6 +325,29 @@ export interface CarrosResponse {
   total_unidades: number;
 }
 
+/** Lo que el modal de sugerencia manual muestra de un producto en una sucursal. */
+export interface ContextoSugerencia {
+  stock: number;
+  transito: number;
+  sugerido_sistema: number;
+  /** Venta diaria del modelo; null si no hay venta registrada en esa sucursal. */
+  demanda_diaria: number | null;
+  /** Si el producto está en el sugerido de esa sucursal (si no, el stock sale de bodega). */
+  en_sugerido: boolean;
+  cubierto?: number;
+  bodegas: { bodega: string; stock: number; origen: string | null }[];
+  /** Sugerencias de una sola vez que ya están cargadas para este par. */
+  vigentes: { id: string; unidades: number; creado_por: string | null; creado_en: string | null }[];
+  /** Reglas activas para este par. */
+  reglas: {
+    id: string;
+    stock_objetivo: number | null;
+    dias_inventario: number | null;
+    unidades: number | null;
+    creado_por: string | null;
+  }[];
+}
+
 export interface RecurrenteCreate {
   modo: "individual" | "grupo";
   producto?: string | null;
@@ -337,6 +360,8 @@ export interface RecurrenteCreate {
   motivo?: string | null;
   cada_dias: number;
   fecha_fin?: string | null; // YYYY-MM-DD
+  /** Solo individual: cierra lo que ya hay para ese producto y sucursal. */
+  reemplazar?: boolean;
 }
 
 export interface Recurrente {

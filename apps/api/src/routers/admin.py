@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from ..config import get_settings
 from ..db import get_db
 from ..services import (
+    recurrentes_service,
     auditoria_service,
     config_modelo_service,
     excel_loader,
@@ -476,6 +477,23 @@ def tomar_snapshot(
     )
     db.commit()
     return {"filas": filas}
+
+
+@router.post("/procesar-recurrentes")
+def procesar_recurrentes_admin(
+    db: Session = Depends(get_db),
+    _email: str = Depends(requiere_admin),
+) -> dict:
+    """Aplica las reglas de sugerencias manuales que tocan hoy y archiva las vencidas.
+
+    Lo llama el motor al final de su corrida diaria, con el stock y el sugerido del
+    dia ya publicados. El workflow de GitHub que debia hacerlo fallaba con 403 todos
+    los dias (no tenia CRON_SECRET): las reglas se aplicaban solo el dia en que se
+    creaban. Llamarlo dos veces el mismo dia no repite nada.
+    """
+    resultado = recurrentes_service.procesar(db)
+    resultado["expiradas_archivadas"] = recurrentes_service.archivar_expiradas(db)
+    return resultado
 
 
 @router.post("/precios/erp")

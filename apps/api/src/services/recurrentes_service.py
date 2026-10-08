@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -261,6 +261,86 @@ def archivar_expiradas(db: Session, ahora: datetime | None = None) -> int:
     return n
 
 
+def reemplazar_par(
+    db: Session, producto: str, sucursal_id: str, usuario_email: str | None = None
+) -> dict:
+    """Cierra lo que ya hay para un producto y sucursal antes de crear algo nuevo.
+
+    Dos sugerencias manuales del mismo par se SUMAN entre si (la segunda no
+    descuenta la primera), y casi nunca es lo que se quiere: el modal pregunta y,
+    si la persona elige reemplazar, se archivan las sugerencias vigentes del par y
+    se apagan sus reglas individuales. Archivar y no borrar: queda el historial.
+
+    Lo que viene de una regla POR GRUPO no se toca: el modal no la muestra como
+    "ya hay una" (es de muchos productos), asi que borrar su cantidad de hoy seria
+    quitar algo que la persona no vio.
+    """
+    reglas_del_par = select(SugerenciaRecurrente.id).where(
+        SugerenciaRecurrente.modo == "individual",
+        SugerenciaRecurrente.producto == producto,
+        SugerenciaRecurrente.sucursal_id == sucursal_id,
+    )
+    n_sug = db.execute(
+        update(SugerenciaManual)
+        .where(
+            SugerenciaManual.producto == producto,
+            SugerenciaManual.sucursal_id == sucursal_id,
+            SugerenciaManual.archivada.is_(False),
+            or_(
+                SugerenciaManual.recurrente_id.is_(None),
+                SugerenciaManual.recurrente_id.in_(reglas_del_par),
+            ),
+        )
+        .values(archivada=True)
+    ).rowcount or 0
+    n_reg = db.execute(
+        update(SugerenciaRecurrente)
+        .where(
+            SugerenciaRecurrente.modo == "individual",
+            SugerenciaRecurrente.producto == producto,
+            SugerenciaRecurrente.sucursal_id == sucursal_id,
+            SugerenciaRecurrente.activa.is_(True),
+        )
+        .values(activa=False)
+    ).rowcount or 0
+    if n_sug or n_reg:
+        auditoria_service.registrar(
+            db, accion="reemplazadas", entidad="sugerencia_manual",
+            usuario_email=usuario_email, producto=producto, sucursal_id=sucursal_id,
+            detalle=f"Reemplazadas por una nueva: {n_sug} sugerencia(s), {n_reg} regla(s)",
+        )
+    return {"sugerencias": n_sug, "reglas": n_reg}
+
+
+def cerrar_por_pedido(
+    db: Session, producto: str, sucursal_id: str, usuario_email: str | None = None
+) -> int:
+    """Al marcar un producto como pedido se cierran sus sugerencias manuales vigentes.
+
+    Una sugerencia "una sola vez" ya cumplio: si siguiera sumando, el que mire la
+    compra manana la veria de nuevo y la compraria dos veces. Tambien se archiva la
+    instancia de hoy de una regla, pero la regla sigue activa: la proxima corrida la
+    recalcula con lo que ya viene en camino.
+    """
+    n = db.execute(
+        update(SugerenciaManual)
+        .where(
+            SugerenciaManual.producto == producto,
+            SugerenciaManual.sucursal_id == sucursal_id,
+            SugerenciaManual.archivada.is_(False),
+        )
+        .values(archivada=True)
+    ).rowcount or 0
+    if n:
+        auditoria_service.registrar(
+            db, accion="cerradas_por_pedido", entidad="sugerencia_manual",
+            usuario_email=usuario_email, producto=producto, sucursal_id=sucursal_id,
+            detalle=f"Marcado como pedido: {n} sugerencia(s) manual(es) cerrada(s)",
+        )
+    db.commit()
+    return n
+
+
 def resumen(rec: SugerenciaRecurrente) -> str:
     """Texto corto para mostrar la regla en la UI."""
     if rec.modo == "individual":
@@ -272,6 +352,8 @@ def resumen(rec: SugerenciaRecurrente) -> str:
     partes: list[str] = []
     if f.get("sucursales"):
         partes.append("Sucursal: " + ", ".join(f["sucursales"]))
+    if f.get("proveedores"):
+        partes.append("Proveedor: " + ", ".join(f["proveedores"]))
     if f.get("filtro1"):
         partes.append("Marca: " + ", ".join(f["filtro1"]))
     if f.get("abc"):

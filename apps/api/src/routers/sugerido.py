@@ -59,6 +59,10 @@ def _filtros(
     filtro1: list[str] = Query(default=[], description="Marca / segmento"),
     tipo_origen: list[str] = Query(default=[]),
     proveedor: str | None = Query(None),
+    # Multi-seleccion exacta (pestana "Varios productos" del modal de sugerencia
+    # manual). Sin esto el conteo del modal ignoraba el proveedor elegido y decia
+    # "Se aplica a N productos" con N sin filtrar, mientras la carga si filtraba.
+    proveedores: list[str] = Query(default=[], description="Proveedores exactos"),
     solo_pedir: bool = Query(True, description="Mostrar solo pedir=Si"),
     solo_nacionales: bool = Query(False, description="Excluye productos importados"),
     vista: str = Query("todas", description="todas | sucursales | cd | distribucion"),
@@ -69,7 +73,8 @@ def _filtros(
 ) -> SugeridoFiltros:
     return SugeridoFiltros(
         q=q, sucursales=sucursal, abc=abc, filtro1=filtro1,
-        tipo_origen=tipo_origen, proveedor=proveedor, solo_pedir=solo_pedir,
+        tipo_origen=tipo_origen, proveedor=proveedor, proveedores=proveedores,
+        solo_pedir=solo_pedir,
         solo_nacionales=solo_nacionales, vista=vista,
         sucursales_permitidas=permitidas,
         filtros_columna=_parse_filtros_columna(filtros_columna),

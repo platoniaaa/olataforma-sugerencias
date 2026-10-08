@@ -88,6 +88,7 @@ function filtrosToParams(f: SugeridoFiltros): URLSearchParams {
   (f.filtro1 ?? []).forEach((s) => p.append("filtro1", s));
   (f.tipo_origen ?? []).forEach((s) => p.append("tipo_origen", s));
   if (f.proveedor) p.set("proveedor", f.proveedor);
+  (f.proveedores ?? []).forEach((s) => p.append("proveedores", s));
   p.set("solo_pedir", String(f.solo_pedir ?? true));
   if (f.solo_nacionales) p.set("solo_nacionales", "true");
   if (f.vista && f.vista !== "todas") p.set("vista", f.vista);
@@ -407,6 +408,8 @@ export const api = {
     stock_objetivo?: number; // nivel de stock a mantener
     expira_en?: string; // fecha límite YYYY-MM-DD; vacío = no vence
     motivo?: string;
+    /** Cierra lo que ya hay para ese producto y sucursal en vez de sumarse. */
+    reemplazar?: boolean;
   }): Promise<SugerenciaManual> {
     const res = await req("/api/sugerencias-manuales", {
       method: "POST",
@@ -418,6 +421,16 @@ export const api = {
       throw new Error(err.detail ?? "No se pudo guardar la sugerencia");
     }
     return res.json();
+  },
+
+  /** Stock, en camino, lo que pide el sistema, venta diaria y lo que ya hay
+   * cargado para un producto en una sucursal: el modal calcula con esto. */
+  async contextoSugerencia(
+    producto: string,
+    sucursalId: string
+  ): Promise<import("./types").ContextoSugerencia> {
+    const p = new URLSearchParams({ producto, sucursal_id: sucursalId });
+    return getJSON(`/api/sugerencias-manuales/contexto?${p.toString()}`);
   },
 
   /** Que pasaria al pedir ese nivel de stock, antes de guardar. */

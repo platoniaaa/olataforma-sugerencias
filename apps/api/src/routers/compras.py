@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..schemas import CarrosResponse, ExportCarrosRequest, SugeridoFiltros
-from ..services import compras_service, excel_export, pedidos_service
+from ..services import compras_service, excel_export, pedidos_service, recurrentes_service
 from ..services.auth import requiere_escritura, sucursales_permitidas
 
 
@@ -80,7 +80,13 @@ def crear_pedido(
         proveedor=payload.proveedor,
         usuario_email=email,
     )
-    return {"id": linea.id, "producto": linea.producto, "unidades": linea.unidades}
+    # Lo que se cargo a mano para este producto ya se pidio: si siguiera sumando,
+    # manana alguien lo compraria de nuevo.
+    cerradas = recurrentes_service.cerrar_por_pedido(
+        db, payload.producto, payload.sucursal_id, email
+    )
+    return {"id": linea.id, "producto": linea.producto, "unidades": linea.unidades,
+            "sugerencias_cerradas": cerradas}
 
 
 @router.post("/pedidos/{linea_id}/recibida")

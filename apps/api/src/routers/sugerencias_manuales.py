@@ -30,7 +30,7 @@ def _expira_en(fecha_limite: date | None) -> datetime | None:
 
 from ..config import get_settings
 from ..db import get_db
-from ..models import SugerenciaManual
+from ..models import SugerenciaManual, SugerenciaRecurrente
 from ..schemas import (
     LineaManualPegada,
     RecurrenteCreate,
@@ -175,6 +175,56 @@ def pausar_recurrente(
     return r
 
 
+@router.get("/contexto")
+def contexto(
+    producto: str = Query(...),
+    sucursal_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    """Todo lo que el modal muestra de un producto en una sucursal, antes de guardar.
+
+    Stock, en camino, lo que ya pide el sistema y la venta diaria -para calcular el
+    resultado de cada frase en la pantalla- y lo que ya hay cargado para ese par,
+    para preguntar si se reemplaza o se suma.
+    """
+    d = sugerido_service.contexto_par(db, producto, sucursal_id)
+    vigentes = db.scalars(
+        select(SugerenciaManual)
+        .where(
+            SugerenciaManual.producto == producto,
+            SugerenciaManual.sucursal_id == sucursal_id,
+            SugerenciaManual.archivada.is_(False),
+            SugerenciaManual.recurrente_id.is_(None),
+            sugerido_service._no_vencida(),
+        )
+        .order_by(SugerenciaManual.creado_en)
+    ).all()
+    reglas = db.scalars(
+        select(SugerenciaRecurrente).where(
+            SugerenciaRecurrente.modo == "individual",
+            SugerenciaRecurrente.producto == producto,
+            SugerenciaRecurrente.sucursal_id == sucursal_id,
+            SugerenciaRecurrente.activa.is_(True),
+        )
+    ).all()
+    d["vigentes"] = [
+        {
+            "id": s.id, "unidades": s.unidades, "creado_por": s.creado_por,
+            "creado_en": s.creado_en.isoformat() if s.creado_en else None,
+        }
+        for s in vigentes
+    ]
+    d["reglas"] = [
+        {
+            "id": r.id, "stock_objetivo": r.stock_objetivo, "dias_inventario": r.dias_inventario,
+            "unidades": None if (r.stock_objetivo or r.dias_inventario) else r.unidades,
+            "creado_por": r.creado_por,
+        }
+        for r in reglas
+    ]
+    return d
+
+
 @router.get("/previsualizar-objetivo")
 def previsualizar_objetivo(
     producto: str = Query(...),
@@ -310,6 +360,8 @@ def crear(
         raise HTTPException(
             status_code=400, detail="Falta unidades, dias_inventario o stock_objetivo."
         )
+    if payload.reemplazar:
+        recurrentes_service.reemplazar_par(db, payload.producto, payload.sucursal_id, email)
     s = SugerenciaManual(
         producto=payload.producto,
         sucursal_id=payload.sucursal_id,
@@ -568,6 +620,8 @@ def crear_recurrente(
         raise HTTPException(
             status_code=400, detail="Falta unidades, dias_inventario o stock_objetivo."
         )
+    if payload.modo == "individual" and payload.reemplazar:
+        recurrentes_service.reemplazar_par(db, payload.producto, payload.sucursal_id, email)
     rec = recurrentes_service.crear(db, payload, usuario_email=email)
     return _recurrente_out(rec)
 

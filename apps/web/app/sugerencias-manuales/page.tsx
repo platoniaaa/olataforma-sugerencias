@@ -577,13 +577,13 @@ function SeccionRecurrentes({
                 <span className="font-semibold text-slate-900">{r.resumen}</span>
                 <Badge className="bg-brand-50 text-brand">
                   {r.stock_objetivo
-                    ? `mantener ${formatoNumero(r.stock_objetivo)} u`
+                    ? `nunca menos de ${formatoNumero(r.stock_objetivo)} u`
                     : r.dias_inventario
-                      ? `cubrir ${r.dias_inventario} días`
+                      ? `alcanza para ${r.dias_inventario} días`
                       : `+${formatoNumero(r.unidades)} u`}
                 </Badge>
                 <Badge className="bg-slate-100 text-slate-600">
-                  cada {r.cada_dias} días
+                  {r.cada_dias === 1 ? "todos los días" : `cada ${r.cada_dias} días`}
                 </Badge>
                 <Badge className="bg-slate-100 text-slate-500">
                   {r.modo === "individual" ? "Individual" : "Por grupo"}

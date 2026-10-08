@@ -1856,6 +1856,30 @@ def detalle_objetivo(
     }
 
 
+def contexto_par(db: Session, producto: str, sucursal_id: str) -> dict:
+    """Lo que el modal de sugerencia manual necesita para explicar el resultado.
+
+    Stock, transito y lo que ya pide el sistema (lo mismo que `detalle_objetivo`)
+    mas la venta diaria del modelo, en una sola consulta: con eso la pantalla
+    calcula las tres frases -una vez, nunca menos de N, que alcance para N dias-
+    mientras se escribe, sin volver al servidor por cada tecla. Las cuentas son
+    las de `_faltante_para_objetivo` y `_objetivo_dias`.
+
+    `demanda_diaria` es None cuando el modelo no tiene venta para ese par: ahi
+    "dias de venta" no se puede pasar a unidades.
+    """
+    d = detalle_objetivo(db, producto, sucursal_id, 1)
+    d.pop("objetivo", None)
+    d.pop("faltante", None)
+    dem = db.scalar(
+        select(Sugerido.demanda_diaria)
+        .where(Sugerido.producto == producto, Sugerido.sucursal_id == sucursal_id)
+        .limit(1)
+    )
+    d["demanda_diaria"] = float(dem) if dem is not None and float(dem) > 0 else None
+    return d
+
+
 def detalle_dias(
     db: Session, producto: str, sucursal_id: str, dias: int
 ) -> dict | None:
