@@ -193,7 +193,10 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
               // registraba un envio, con lo que el contador de "Solo
               // diferencias" se iba a cero sin que nadie lo pidiera. El manual
               // y el nombre del boton siempre dijeron esto otro.
-              const n = await api.exportarPrecios({ soloDiferencias: false, formato: "completa" });
+              const n = await api.exportarPrecios(
+                { soloDiferencias: false, formato: "completa" },
+                (intento, total) => setAviso(`El servidor no responde. Reintentando (${intento} de ${total})…`),
+              );
               return `Lista completa exportada: ${formatoNumero(n)} productos, con todas las columnas. No cuenta como envio al ERP.`;
             })}
           >
@@ -202,7 +205,11 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
           <Button
             size="sm" disabled={ocupado !== null}
             onClick={() => void accion("exportar", async () => {
-              const n = await api.exportarPrecios({ soloDiferencias: true, formato: "erp" });
+              const n = await api.exportarPrecios(
+                { soloDiferencias: true, formato: "erp" },
+                // La descarga espera y reintenta sola si el servidor no responde.
+                (intento, total) => setAviso(`El servidor no responde. Reintentando (${intento} de ${total})…`),
+              );
               return n
                 ? `${formatoNumero(n)} productos exportados. La proxima vez saldran solo los que cambien desde ahora.`
                 : "No hay nada nuevo desde la ultima descarga: el archivo salio vacio.";

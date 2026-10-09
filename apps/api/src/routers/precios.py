@@ -102,6 +102,10 @@ def exportar(
     solo_diferencias: bool = Query(False, description="Solo lo que cambio desde el ultimo envio"),
     formato: str = Query("erp", pattern="^(erp|completa)$"),
     registrar: bool = Query(True, description="Anotar este envio para el proximo delta"),
+    lote: str | None = Query(
+        None, pattern=r"^[0-9a-fA-F-]{8,64}$",
+        description="Identificador de la descarga. Si ya se registro, devuelve el mismo archivo",
+    ),
     db: Session = Depends(get_db),
     email: str = Depends(requiere_precios),
 ):
@@ -110,7 +114,7 @@ def exportar(
     revisar: en Excel tardaba 83 s y el navegador cortaba la descarga."""
     contenido, nombre, n = precios_service.exportar(
         db, solo_diferencias=solo_diferencias, registrar=registrar and formato == "erp",
-        usuario=email, formato=formato,
+        usuario=email, formato=formato, lote_id=lote,
     )
     tipo = "text/csv; charset=utf-8" if nombre.endswith(".csv") else _XLSX
     return StreamingResponse(

@@ -5,8 +5,9 @@ Levantar con:
 """
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from .config import get_settings
 from .db import create_all
@@ -84,6 +85,30 @@ app.add_middleware(
     # contador de filas quedaba siempre en cero.
     expose_headers=["Content-Disposition", "X-Filas"],
 )
+
+
+@app.exception_handler(Exception)
+async def error_interno(request: Request, exc: Exception) -> JSONResponse:
+    """Un error no atajado responde JSON y CON las cabeceras de CORS.
+
+    El error 500 que arma Starlette para una excepcion sin atajar sale por fuera
+    del middleware de CORS, asi que no lleva `Access-Control-Allow-Origin` y el
+    navegador lo esconde: la persona ve "Failed to fetch", igual que si se hubiera
+    caido la red, y no hay forma de distinguir una falla del servidor de un corte
+    (09-10-2026, descarga de "Solo diferencias"). Starlette igual vuelve a lanzar
+    la excepcion despues de responder, asi que el traceback sigue en el log."""
+    resp = JSONResponse(
+        status_code=500,
+        content={"detail": "El servidor tuvo un error al procesar la solicitud. "
+                           "Vuelve a intentarlo; si se repite, avisale al administrador."},
+    )
+    origen = request.headers.get("origin")
+    permitidos = settings.cors_origins_list
+    if origen and ("*" in permitidos or origen in permitidos):
+        resp.headers["Access-Control-Allow-Origin"] = "*" if "*" in permitidos else origen
+        resp.headers["Vary"] = "Origin"
+    return resp
+
 
 # Publicos:
 app.include_router(health.router)

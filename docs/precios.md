@@ -83,3 +83,11 @@ descuento maximo de la politica mas uno, salvo cuando es 0 (desde el 09-10-2026;
 antes la tercera columna era el costo). Con `solo_diferencias=true` salen solo los productos cuyo
 precio o costo difiere de lo ultimo enviado (o nunca enviados). Cada
 exportacion queda registrada en `precio_envio`.
+
+**Que pasa si la descarga se corta (09-10-2026).** El navegador manda `lote=<uuid>`
+en cada descarga del archivo del ERP. Si ese lote ya quedo registrado -el servidor
+alcanzo a anotar el envio y la respuesta se perdio-, el reintento recibe el MISMO
+archivo en vez de uno vacio. La pantalla reintenta sola los cortes de conexion y
+los 502, 503 y 504 (hasta 4 veces, unos 76 s), y si el servidor no vuelve dice que
+puede estar reiniciandose en vez de mostrar "Failed to fetch". Las filas de
+"solo diferencias" salen de SQL con la misma condicion que el numero del boton.

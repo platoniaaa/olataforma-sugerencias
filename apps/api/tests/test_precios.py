@@ -845,3 +845,79 @@ def test_descuento_para_erp():
     assert svc.descuento_para_erp(20) == 21
     assert svc.descuento_para_erp(34.0) == 35
     assert svc.descuento_para_erp(0) == 0
+
+
+def test_reintentar_la_misma_descarga_devuelve_el_mismo_archivo(client, lista_cargada):
+    """Si la respuesta se pierde y el navegador reintenta, no puede salir vacio.
+
+    El primer intento ya marco todo como enviado: sin el identificador de la
+    descarga, el reintento calculaba de nuevo, daba cero filas y la persona se
+    quedaba sin el archivo creyendo que no habia cambios (09-10-2026)."""
+    import uuid
+
+    from src.models import PrecioEnvio
+
+    db = lista_cargada
+    svc.recalcular(db)
+    lote = str(uuid.uuid4())
+
+    def pedir(lote_id):
+        return client.get("/api/precios/exportar",
+                          params={"formato": "erp", "solo_diferencias": True, "lote": lote_id})
+
+    primero = pedir(lote)
+    assert primero.status_code == 200 and int(primero.headers["X-Filas"]) > 0
+    envios = db.query(PrecioEnvio).count()
+
+    # Una descarga NUEVA sale vacia: ya no hay nada distinto de lo enviado.
+    assert int(pedir(str(uuid.uuid4())).headers["X-Filas"]) == 0
+
+    # El reintento con el MISMO identificador devuelve lo mismo y no registra otra vez.
+    otra_vez = pedir(lote)
+    assert otra_vez.content == primero.content
+    assert otra_vez.headers["X-Filas"] == primero.headers["X-Filas"]
+    assert db.query(PrecioEnvio).count() == envios
+
+
+def test_el_identificador_de_descarga_se_valida(client, lista_cargada):
+    r = client.get("/api/precios/exportar", params={"formato": "erp", "lote": "no es un id!"})
+    assert r.status_code == 422
+
+
+def test_sin_identificador_la_descarga_funciona_como_antes(client, lista_cargada):
+    """Un navegador con la version vieja de la pantalla no manda `lote`."""
+    svc.recalcular(lista_cargada)
+    r = client.get("/api/precios/exportar", params={"formato": "erp", "solo_diferencias": True})
+    assert r.status_code == 200 and int(r.headers["X-Filas"]) > 0
+
+
+def test_las_diferencias_son_las_mismas_que_cuenta_la_pantalla(client, lista_cargada):
+    """El numero del boton y las filas del archivo salen de la misma condicion."""
+    db = lista_cargada
+    svc.recalcular(db)
+    assert svc.contar_diferencias(db) == len(svc._diferencias(db)) > 0
+    client.get("/api/precios/exportar", params={"formato": "erp", "solo_diferencias": True})
+    assert svc.contar_diferencias(db) == len(svc._diferencias(db)) == 0
+    # Las filas traen lo que necesita el archivo, sin cargar el objeto entero.
+    client.put("/api/precios/71 AAA1/override", json={"precio_fijo": 12345})
+    filas = svc._diferencias(db)
+    assert [(f.producto, f.precio_final) for f in filas] == [("71 AAA1", 12345.0)]
+    assert {"tipo", "procedencia_final", "costo"} <= set(filas[0]._mapping)
+
+
+def test_un_sku_empatado_en_dos_envios_sale_una_sola_vez(client, lista_cargada):
+    """Dos envios del mismo producto con la misma fecha no pueden repetir el SKU."""
+    from datetime import datetime, timezone
+
+    from src.models import PrecioEnvio
+
+    db = lista_cargada
+    svc.recalcular(db)
+    ts = datetime.now(timezone.utc)
+    for precio in (1.0, 2.0):
+        db.add(PrecioEnvio(tenant_id="curifor", producto="71 AAA1", precio=precio, costo=1.0,
+                           lote_id=f"lote-{precio}", enviado_en=ts, enviado_por="x"))
+    db.commit()
+
+    skus = [f.producto for f in svc._diferencias(db)]
+    assert skus.count("71 AAA1") == 1

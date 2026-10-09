@@ -63,6 +63,57 @@ export async function req(path: string, init: RequestInit = {}): Promise<Respons
   return res;
 }
 
+/** Lo que se le dice a la persona cuando el servidor no contesta. */
+export const MENSAJE_SIN_SERVIDOR =
+  "No se pudo conectar con el servidor. Puede estar reiniciándose: espera un minuto y vuelve a intentar.";
+
+// Cuánto se espera antes de cada reintento. Render (plan gratis) tarda hasta un
+// minuto en volver cuando se reinicia, y suma ~76 s en total.
+const ESPERAS_REINTENTO_MS = [3_000, 8_000, 20_000, 45_000];
+
+/**
+ * `req`, pero reintenta los cortes de conexión y las caídas del proxy (502, 503,
+ * 504). `fetch` rechaza con TypeError ("Failed to fetch") cuando no hay respuesta
+ * utilizable: el servidor se está reiniciando, se cortó la red, o respondió un
+ * error sin cabeceras de CORS. Sirve para pedidos que se pueden repetir sin
+ * efectos; los que escriben necesitan además un identificador (ver `lote` en
+ * `exportarPrecios`).
+ */
+export async function reqConReintentos(
+  path: string,
+  init: RequestInit = {},
+  opciones: { esperasMs?: number[]; alReintentar?: (intento: number, total: number) => void } = {}
+): Promise<Response> {
+  const esperas = opciones.esperasMs ?? ESPERAS_REINTENTO_MS;
+  for (let intento = 0; ; intento++) {
+    const ultimo = intento >= esperas.length;
+    try {
+      const res = await req(path, init);
+      if (ultimo || ![502, 503, 504].includes(res.status)) return res;
+    } catch (e) {
+      if (ultimo || !(e instanceof TypeError)) throw e;
+    }
+    opciones.alReintentar?.(intento + 1, esperas.length);
+    await new Promise((r) => setTimeout(r, esperas[intento]));
+  }
+}
+
+/** Identificador de una descarga. `randomUUID` solo existe en contextos seguros. */
+function nuevoIdentificador(): string {
+  const c = typeof crypto !== "undefined" ? crypto : undefined;
+  if (c && typeof c.randomUUID === "function") return c.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (ch) => {
+    const r = (Math.random() * 16) | 0;
+    return (ch === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
+// El identificador de la descarga del archivo del ERP que sigue sin completarse.
+// Se mantiene entre clics hasta que el archivo llega: si el servidor ya la
+// registró pero la respuesta se perdió, el próximo intento recibe el MISMO archivo
+// en vez de uno vacío.
+let loteErpEnCurso: string | null = null;
+
 async function getJSON<T>(path: string): Promise<T> {
   const res = await req(path);
   if (!res.ok) throw new Error(`Error ${res.status} en ${path}`);
@@ -1012,14 +1063,38 @@ export const api = {
   },
 
   /** Descarga el Excel para el ERP. Devuelve cuantas filas salieron. */
-  async exportarPrecios(opts: { soloDiferencias: boolean; formato: "erp" | "completa" }): Promise<number> {
+  async exportarPrecios(
+    opts: { soloDiferencias: boolean; formato: "erp" | "completa" },
+    alReintentar?: (intento: number, total: number) => void
+  ): Promise<number> {
     const p = new URLSearchParams();
     if (opts.soloDiferencias) p.set("solo_diferencias", "true");
     p.set("formato", opts.formato);
-    const res = await req(`/api/precios/exportar?${p.toString()}`);
-    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo generar el archivo"));
+    // Solo el archivo del ERP registra un envío, y es el que necesita identificador.
+    const esErp = opts.formato === "erp";
+    if (esErp) {
+      loteErpEnCurso ??= nuevoIdentificador();
+      p.set("lote", loteErpEnCurso);
+    }
+    let res: Response;
+    try {
+      res = await reqConReintentos(`/api/precios/exportar?${p.toString()}`, {}, { alReintentar });
+    } catch (e) {
+      if (e instanceof TypeError) throw new Error(MENSAJE_SIN_SERVIDOR);
+      throw e;
+    }
+    if (!res.ok) {
+      if ([502, 503, 504].includes(res.status)) throw new Error(MENSAJE_SIN_SERVIDOR);
+      throw new Error(await mensajeError(res, "No se pudo generar el archivo"));
+    }
     const filas = Number(res.headers.get("X-Filas") ?? "0");
-    const blob = await res.blob();
+    let blob: Blob;
+    try {
+      blob = await res.blob();
+    } catch (e) {
+      if (e instanceof TypeError) throw new Error(MENSAJE_SIN_SERVIDOR);
+      throw e;
+    }
     // Si el servidor no declara Content-Disposition en expose_headers, el
     // navegador lo esconde y esto queda vacio. El respaldo tiene que coincidir
     // con lo que de verdad viene -un CSV-: con ".xlsx" el archivo baja igual
@@ -1032,6 +1107,8 @@ export const api = {
     a.download = nombre;
     a.click();
     URL.revokeObjectURL(url);
+    // El archivo llegó: la próxima descarga es otra.
+    if (esErp) loteErpEnCurso = null;
     return filas;
   },
 

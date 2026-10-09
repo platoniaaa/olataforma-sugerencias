@@ -35,7 +35,7 @@ from datetime import date, datetime, timezone
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
-from sqlalchemy import Numeric, cast, delete, func, insert, or_, select, update
+from sqlalchemy import Numeric, and_, cast, delete, func, insert, or_, select, update
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -870,17 +870,6 @@ def marcar_vistos(db: Session, productos: list[str] | None, usuario: str | None)
 
 
 # --------------------------------------------------------------- exportacion
-def _ultimo_envio(db: Session) -> dict[str, tuple[float | None, float | None]]:
-    """{producto: (precio, costo)} del envio mas reciente de cada producto."""
-    e = _sub_ultimo_envio(settings.default_tenant_id)
-    try:
-        filas = db.execute(select(e.c.producto, e.c.precio, e.c.costo)).all()
-    except Exception:  # noqa: BLE001
-        db.rollback()
-        return {}
-    return {p: (pr, co) for p, pr, co in filas}
-
-
 def _sub_ultimo_envio(tenant: str):
     """Subconsulta {producto -> precio, costo} del envio mas reciente de cada uno."""
     maxs = (
@@ -923,50 +912,68 @@ def contar_diferencias(db: Session) -> int:
         return 0
 
 
-def _consulta_contar_diferencias(tenant: str):
-    """La consulta de `contar_diferencias`, aparte para poder compilarla en los tests.
+def _condicion_diferencias(tenant: str, e):
+    """Cuando un producto difiere de lo ultimo enviado (o nunca se envio).
+
+    La usan la cuenta del boton y el archivo: una sola condicion, asi el numero
+    que se ve y las filas que salen no pueden separarse.
 
     El costo se castea a Numeric antes del `round(x, 6)`: Postgres solo tiene
     `round(numeric, int)`, no `round(double precision, int)`, y `costo` es Float.
     Sin el cast la consulta revienta en produccion y el except devuelve 0
     (SQLite si acepta `round(real, 6)`, por eso los tests no lo veian)."""
-    e = _sub_ultimo_envio(tenant)
     costo = cast(func.coalesce(PrecioProducto.costo, 0), Numeric)
+    return and_(
+        PrecioProducto.tenant_id == tenant,
+        PrecioProducto.precio_final.isnot(None),
+        or_(
+            e.c.producto.is_(None),
+            e.c.precio.is_distinct_from(PrecioProducto.precio_final),
+            e.c.costo.is_distinct_from(func.floor(func.round(costo, 6) + 0.5)),
+        ),
+    )
+
+
+def _consulta_contar_diferencias(tenant: str):
+    """La consulta de `contar_diferencias`, aparte para poder compilarla en los tests."""
+    e = _sub_ultimo_envio(tenant)
     return (
         select(func.count())
         .select_from(PrecioProducto)
         .outerjoin(e, e.c.producto == PrecioProducto.producto)
-        .where(
-            PrecioProducto.tenant_id == tenant,
-            PrecioProducto.precio_final.isnot(None),
-            or_(
-                e.c.producto.is_(None),
-                e.c.precio.is_distinct_from(PrecioProducto.precio_final),
-                e.c.costo.is_distinct_from(func.floor(func.round(costo, 6) + 0.5)),
-            ),
-        )
+        .where(_condicion_diferencias(tenant, e))
     )
 
 
-def _diferencias(db: Session) -> list[PrecioProducto]:
+# Lo unico que necesita el archivo del ERP de cada producto. Se piden estas
+# columnas y no el objeto entero: eran 40 mil objetos ORM por descarga.
+_COLUMNAS_ENVIO = (PrecioProducto.producto, PrecioProducto.precio_final, PrecioProducto.costo,
+                   PrecioProducto.tipo, PrecioProducto.procedencia_final)
+
+
+def _consulta_filas_diferencias(tenant: str):
+    """Las filas que cuenta `_consulta_contar_diferencias`, con lo que va al archivo."""
+    e = _sub_ultimo_envio(tenant)
+    return (
+        select(*_COLUMNAS_ENVIO)
+        .select_from(PrecioProducto)
+        .outerjoin(e, e.c.producto == PrecioProducto.producto)
+        .where(_condicion_diferencias(tenant, e))
+    )
+
+
+def _diferencias(db: Session) -> list:
     """Productos cuyo precio o costo actual difiere del ultimo enviado (o nunca enviados).
 
-    Materializa las filas porque el export las necesita. Para contarlas esta
-    `contar_diferencias`, que lo hace en SQL."""
-    tenant = settings.default_tenant_id
-    ultimo = _ultimo_envio(db)
-    filas = db.scalars(select(PrecioProducto).where(PrecioProducto.tenant_id == tenant)).all()
-    out = []
-    for p in filas:
-        if p.precio_final is None:
-            continue
-        env = ultimo.get(p.producto)
-        if env is None:
-            out.append(p)
-            continue
-        if _txt(env[0]) != _txt(p.precio_final) or _txt(env[1]) != _txt(redondear(p.costo or 0)):
-            out.append(p)
-    return out
+    Sale de SQL con la MISMA condicion que `contar_diferencias`, y trae solo las
+    columnas del archivo. Antes comparaba en Python los ~40 mil objetos ORM: en el
+    servidor gratis de Render eso tardaba lo bastante como para que la descarga se
+    cortara y el navegador mostrara "Failed to fetch" (09-10-2026)."""
+    filas = db.execute(_consulta_filas_diferencias(settings.default_tenant_id)).all()
+    # Un SKU, una fila: si dos envios del mismo producto empataran en la fecha, el
+    # join los traeria dos veces y el archivo del ERP saldria con el SKU repetido.
+    unicas = {p.producto: p for p in filas}
+    return sorted(unicas.values(), key=lambda p: p.producto)
 
 
 # Columnas de la exportacion completa, en orden. Se declaran aca arriba porque
@@ -1089,23 +1096,39 @@ def _celda_csv(campo: str, valor, entera: bool) -> str:
 
 
 def exportar(db: Session, *, solo_diferencias: bool, registrar: bool, usuario: str | None,
-             formato: str = "erp") -> tuple[bytes, str, int]:
+             formato: str = "erp", lote_id: str | None = None) -> tuple[bytes, str, int]:
     """El archivo para bajar. `formato="erp"`: SKU | Precio_Optimo | Descuento, que
     es lo que se sube al ERP. `formato="completa"`: la lista con todas las columnas
     en CSV, para revisar.
     Con `registrar`, deja en `precio_envio` lo que salio, para que el proximo
-    "solo diferencias" parta de aca."""
+    "solo diferencias" parta de aca.
+
+    `lote_id` es el identificador que manda el navegador en cada descarga. Si ese
+    lote ya quedo registrado -la respuesta se perdio y el navegador reintenta-, se
+    devuelve el MISMO archivo en vez de calcular de nuevo: sin esto el reintento
+    salia vacio, porque el primer intento ya habia marcado todo como enviado, y la
+    persona se quedaba sin el archivo creyendo que no habia cambios."""
     if formato == "completa":
         contenido, n = _csv_completa(db)
         return contenido, f"lista_precios_completa_{date.today():%Y-%m-%d}.csv", n
 
     tenant = settings.default_tenant_id
+    nombre = f"precios_{'diferencias' if solo_diferencias else 'completa'}_{date.today():%Y%m%d}.csv"
+    desc = politica.descuentos(db)
+
+    if registrar and lote_id:
+        ya = _filas_de_lote(db, tenant, lote_id)
+        if ya:
+            return _csv_erp(ya, desc), nombre, len(ya)
+
     if solo_diferencias:
         filas = _diferencias(db)
     else:
-        filas = [p for p in db.scalars(select(PrecioProducto).where(PrecioProducto.tenant_id == tenant)).all()
-                 if p.precio_final is not None]
-    filas.sort(key=lambda p: p.producto)
+        filas = db.execute(
+            select(*_COLUMNAS_ENVIO).where(PrecioProducto.tenant_id == tenant,
+                                           PrecioProducto.precio_final.isnot(None))
+        ).all()
+        filas = sorted(filas, key=lambda p: p.producto)
 
     # Tres columnas en CSV: armar el .xlsx de 39 mil filas tardaba 35 s en Render y
     # el navegador cortaba la descarga antes de recibir nada. No es openpyxl el
@@ -1116,19 +1139,10 @@ def exportar(db: Session, *, solo_diferencias: bool, registrar: bool, usuario: s
     # La tercera es el DESCUENTO, no el costo (09-10-2026): es lo que se carga al
     # ERP junto al precio. Es el mismo numero de la columna Descuento+1 de la lista
     # completa, por (tipo, procedencia) segun la politica.
-    desc = politica.descuentos(db)
-
-    def _descuento(p) -> str | int:
-        d = _descuento_de(desc, p.tipo, p.procedencia_final)
-        return "" if d is None else descuento_para_erp(d)
-
-    contenido = _a_csv(
-        ["SKU", "Precio_Optimo", "Descuento"],
-        ([p.producto, int(redondear(p.precio_final)), _descuento(p)] for p in filas),
-    )
+    contenido = _csv_erp(filas, desc)
 
     if registrar and filas:
-        lote = str(uuid.uuid4())
+        lote = lote_id or str(uuid.uuid4())
         ahora = _now()
         regs = [
             {"tenant_id": tenant, "producto": p.producto, "precio": p.precio_final,
@@ -1142,8 +1156,39 @@ def exportar(db: Session, *, solo_diferencias: bool, registrar: bool, usuario: s
             detalle=f"{len(filas)} productos ({'solo diferencias' if solo_diferencias else 'lista completa'})",
         )
         db.commit()
-    nombre = f"precios_{'diferencias' if solo_diferencias else 'completa'}_{date.today():%Y%m%d}.csv"
     return contenido, nombre, len(filas)
+
+
+def _csv_erp(filas, desc: dict) -> bytes:
+    """El archivo del ERP: SKU | Precio_Optimo | Descuento. `filas` trae producto,
+    precio_final, tipo y procedencia_final (producto de la lista o fila de lote)."""
+
+    def _descuento(p) -> str | int:
+        d = _descuento_de(desc, p.tipo, p.procedencia_final)
+        return "" if d is None else descuento_para_erp(d)
+
+    return _a_csv(
+        ["SKU", "Precio_Optimo", "Descuento"],
+        ([p.producto, int(redondear(p.precio_final)), _descuento(p)] for p in filas),
+    )
+
+
+def _filas_de_lote(db: Session, tenant: str, lote_id: str) -> list:
+    """Lo que quedo registrado en un lote de envio, con el tipo y la procedencia
+    actuales de cada producto (para calcular su descuento)."""
+    return sorted(
+        db.execute(
+            select(PrecioEnvio.producto.label("producto"), PrecioEnvio.precio.label("precio_final"),
+                   PrecioProducto.tipo.label("tipo"),
+                   PrecioProducto.procedencia_final.label("procedencia_final"))
+            .select_from(PrecioEnvio)
+            .outerjoin(PrecioProducto, and_(PrecioProducto.producto == PrecioEnvio.producto,
+                                            PrecioProducto.tenant_id == PrecioEnvio.tenant_id))
+            .where(PrecioEnvio.tenant_id == tenant, PrecioEnvio.lote_id == lote_id,
+                   PrecioEnvio.precio.isnot(None))
+        ).all(),
+        key=lambda p: p.producto,
+    )
 
 
 # -------------------------------------------------------------------- cargas
