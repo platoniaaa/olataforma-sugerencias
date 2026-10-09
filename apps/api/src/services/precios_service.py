@@ -1035,11 +1035,21 @@ def _csv_completa(db: Session) -> tuple[bytes, int]:
         celdas = [_celda_csv(k, v, k in enteras) for (k, _), v in zip(COLUMNAS_COMPLETA, fila)]
         d = _descuento_de(desc, fila[i_tipo], fila[i_proc])
         celdas += ["" if d is None else str(int(d)),
-                   "" if d is None else str(int(d) + 1 if d > 0 else 0)]
+                   "" if d is None else str(descuento_para_erp(d))]
         return celdas
 
     return _a_csv([t for _, t in COLUMNAS_COMPLETA] + CAB_DESCUENTO,
                   (_fila(f) for f in filas)), len(filas)
+
+
+def descuento_para_erp(descuento: float) -> int:
+    """El numero que recibe el ERP: el descuento mas uno, SALVO cuando es 0.
+
+    Aplicarle el +1 a todos dejaba 438 productos -neumaticos, baterias,
+    lubricantes- con "1% de descuento" que nadie decidio. Lo usan la lista
+    completa (columna Descuento+1) y el archivo para el ERP.
+    """
+    return int(descuento) + 1 if descuento > 0 else 0
 
 
 def _descuento_de(desc: dict, tipo, procedencia) -> float | None:
@@ -1080,9 +1090,9 @@ def _celda_csv(campo: str, valor, entera: bool) -> str:
 
 def exportar(db: Session, *, solo_diferencias: bool, registrar: bool, usuario: str | None,
              formato: str = "erp") -> tuple[bytes, str, int]:
-    """El archivo para bajar. `formato="erp"`: Excel SKU | Precio_Optimo | Costo,
-    igual que el .exe, que es lo que el ERP acepta. `formato="completa"`: la lista
-    con todas las columnas en CSV, para revisar.
+    """El archivo para bajar. `formato="erp"`: SKU | Precio_Optimo | Descuento, que
+    es lo que se sube al ERP. `formato="completa"`: la lista con todas las columnas
+    en CSV, para revisar.
     Con `registrar`, deja en `precio_envio` lo que salio, para que el proximo
     "solo diferencias" parta de aca."""
     if formato == "completa":
@@ -1097,14 +1107,24 @@ def exportar(db: Session, *, solo_diferencias: bool, registrar: bool, usuario: s
                  if p.precio_final is not None]
     filas.sort(key=lambda p: p.producto)
 
-    # Las mismas tres columnas de siempre, ahora en CSV: armar el .xlsx de 39 mil
-    # filas tardaba 35 s en Render y el navegador cortaba la descarga antes de
-    # recibir nada. No es openpyxl el culpable -se midio `write_only` y da igual-
-    # sino la CPU del plan gratis; lo que cambia el orden de magnitud es no
-    # construir un archivo comprimido con un objeto por celda.
+    # Tres columnas en CSV: armar el .xlsx de 39 mil filas tardaba 35 s en Render y
+    # el navegador cortaba la descarga antes de recibir nada. No es openpyxl el
+    # culpable -se midio `write_only` y da igual- sino la CPU del plan gratis; lo
+    # que cambia el orden de magnitud es no construir un archivo comprimido con un
+    # objeto por celda.
+    #
+    # La tercera es el DESCUENTO, no el costo (09-10-2026): es lo que se carga al
+    # ERP junto al precio. Es el mismo numero de la columna Descuento+1 de la lista
+    # completa, por (tipo, procedencia) segun la politica.
+    desc = politica.descuentos(db)
+
+    def _descuento(p) -> str | int:
+        d = _descuento_de(desc, p.tipo, p.procedencia_final)
+        return "" if d is None else descuento_para_erp(d)
+
     contenido = _a_csv(
-        ["SKU", "Precio_Optimo", "Costo"],
-        ([p.producto, int(redondear(p.precio_final)), int(redondear(p.costo or 0))] for p in filas),
+        ["SKU", "Precio_Optimo", "Descuento"],
+        ([p.producto, int(redondear(p.precio_final)), _descuento(p)] for p in filas),
     )
 
     if registrar and filas:

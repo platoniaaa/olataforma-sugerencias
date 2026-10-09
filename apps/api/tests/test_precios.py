@@ -384,23 +384,35 @@ def test_la_exportacion_completa_trae_el_descuento(client, lista_cargada):
 
 
 def test_el_archivo_del_erp_tambien_es_csv(client, lista_cargada):
-    """Las tres columnas de siempre, en CSV.
+    """Tres columnas en CSV: SKU, precio y descuento, enteros.
 
     Armar el .xlsx de 39 mil filas tardaba 35 s en Render y la descarga se
-    cortaba. El contenido no cambia: SKU, precio y costo, enteros.
+    cortaba. La tercera columna era el costo hasta el 09-10-2026; al ERP se le
+    carga el descuento.
     """
     import csv as csv_mod
 
-    svc.recalcular(lista_cargada)
+    from src.models import PoliticaPrecio
+
+    db = lista_cargada
+    for tipo, proc, desc in (("Liviano", "Nacional", 20), ("Liviano", "Importado", 20),
+                             ("Pesado", "Nacional", 0), ("Pesado", "Importado", 0)):
+        db.query(PoliticaPrecio).filter_by(tipo=tipo, procedencia=proc).one().descuento_max = desc
+    db.commit()
+    svc.recalcular(db)
     r = client.get("/api/precios/exportar", params={"formato": "erp"})
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/csv")
     assert ".csv" in r.headers["content-disposition"]
     filas = list(csv_mod.reader(io.StringIO(r.content.decode("utf-8-sig")), delimiter=";"))
-    assert filas[0] == ["SKU", "Precio_Optimo", "Costo"]
-    aaa1 = next(f for f in filas[1:] if f[0] == "71 AAA1")
-    # Sin decimales: es lo que el ERP recibe y lo que mostraba el Excel.
-    assert aaa1 == ["71 AAA1", "17800", "10000"]
+    assert filas[0] == ["SKU", "Precio_Optimo", "Descuento"]
+    por_producto = {f[0]: f for f in filas[1:]}
+    # Sin decimales: es lo que el ERP recibe. Descuento 20 -> 21, el +1 del ERP.
+    assert por_producto["71 AAA1"] == ["71 AAA1", "17800", "21"]
+    # Sin descuento NO pasa a 1: queda en 0, igual que en la lista completa.
+    assert por_producto["13 BBB2"][2] == "0"
+    # Y el costo ya no sale en el archivo del ERP.
+    assert "10000" not in {f[2] for f in filas[1:]}
     # Y sigue contando como envio: el delta se reinicia.
     assert client.get("/api/precios/resumen").json()["pendientes_envio"] == 0
 
@@ -470,7 +482,8 @@ def test_pendientes_de_envio_se_cuentan_en_sql_y_coinciden(client, lista_cargada
     # Cambia un precio: vuelve a haber uno solo.
     client.put("/api/precios/71 AAA1/override", json={"precio_fijo": 12345})
     assert svc.contar_diferencias(db) == len(svc._diferencias(db)) == 1
-    # Y si cambia solo el costo, tambien cuenta (el ERP recibe costo).
+    # Y si cambia solo el costo, tambien cuenta: el criterio de diferencias todavia
+    # compara precio y costo contra el ultimo envio, aunque el archivo ya no lleve costo.
     client.get("/api/precios/exportar")
     p = db.query(PrecioProducto).filter_by(producto="13 BBB2").one()
     p.costo = (p.costo or 0) + 500
@@ -801,3 +814,34 @@ def test_el_margen_fijo_sobrevive_a_sacar_el_producto(client, lista_cargada):
     assert client.put("/api/precios/71 AAA1/override", json={"margen_fijo": 35}).status_code == 200
     body = client.post("/api/admin/precios/eliminar", json={"productos": ["71 AAA1"]}).json()
     assert body["overrides_conservados"] == 1 and body["conservados"] == ["71 AAA1"]
+
+
+
+def test_el_descuento_del_erp_es_el_mismo_de_la_lista_completa(client, lista_cargada):
+    """Las dos descargas no pueden decir dos descuentos distintos para un producto."""
+    import csv as csv_mod
+
+    from src.models import PoliticaPrecio
+
+    db = lista_cargada
+    for fila in db.query(PoliticaPrecio).all():
+        fila.descuento_max = 34 if fila.tipo == "Liviano" else 0
+    db.commit()
+    svc.recalcular(db)
+
+    def _leer(formato):
+        r = client.get("/api/precios/exportar", params={"formato": formato, "registrar": False})
+        return list(csv_mod.reader(io.StringIO(r.content.decode("utf-8-sig")), delimiter=";"))
+
+    erp = {f[0]: f[2] for f in _leer("erp")[1:]}
+    completa = _leer("completa")
+    i = completa[0].index("Descuento+1")
+    lista = {f[0]: f[i] for f in completa[1:]}
+    assert erp and all(lista[sku] == d for sku, d in erp.items())
+    assert "35" in erp.values()
+
+
+def test_descuento_para_erp():
+    assert svc.descuento_para_erp(20) == 21
+    assert svc.descuento_para_erp(34.0) == 35
+    assert svc.descuento_para_erp(0) == 0

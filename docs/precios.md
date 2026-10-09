@@ -77,7 +77,9 @@ REVISION` (queda sin precio hasta que alguien decida).
 
 ## Exportar al ERP
 
-`GET /api/precios/exportar?formato=erp` genera `SKU | Precio_Optimo | Costo`,
-igual que el `.exe`. Con `solo_diferencias=true` salen solo los productos cuyo
+`GET /api/precios/exportar?formato=erp` genera `SKU | Precio_Optimo | Descuento`.
+El descuento es el mismo de la columna `Descuento+1` de la lista completa: el
+descuento maximo de la politica mas uno, salvo cuando es 0 (desde el 09-10-2026;
+antes la tercera columna era el costo). Con `solo_diferencias=true` salen solo los productos cuyo
 precio o costo difiere de lo ultimo enviado (o nunca enviados). Cada
 exportacion queda registrada en `precio_envio`.

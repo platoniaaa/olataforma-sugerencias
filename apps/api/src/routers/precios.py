@@ -106,7 +106,7 @@ def exportar(
     email: str = Depends(requiere_precios),
 ):
     """El archivo para bajar. `erp` es el Excel de 3 columnas que el ERP acepta
-    (SKU | Precio_Optimo | Costo); `completa` es la lista entera en CSV, para
+    (SKU | Precio_Optimo | Descuento); `completa` es la lista entera en CSV, para
     revisar: en Excel tardaba 83 s y el navegador cortaba la descarga."""
     contenido, nombre, n = precios_service.exportar(
         db, solo_diferencias=solo_diferencias, registrar=registrar and formato == "erp",

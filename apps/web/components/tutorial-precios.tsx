@@ -350,7 +350,7 @@ const PASOS: Paso[] = [
           </li>
           <li>
             <b>Solo diferencias</b>: lo que cambió desde el último envío, con las tres columnas
-            que acepta el ERP —código, precio y costo—. Es lo normal del día a día, y el número
+            que acepta el ERP —código, precio y descuento—. Es lo normal del día a día, y el número
             al lado dice cuántos van.
           </li>
         </ul>
