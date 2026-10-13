@@ -529,7 +529,10 @@ def sincronizar_precios_erp(
     cuando el archivo `lista_erp.xlsx` cambia. Admin.
 
     payload: {"filas": [{"producto", "glosa", "stock", "costo", "precio_erp",
-                          "tipo_erp", "procedencia"}, ...]}
+                          "tipo_erp", "procedencia", "codigo_erp"}, ...]}
+
+    `producto` viene sin espacios en los bordes; `codigo_erp` es el codigo tal
+    cual lo tiene el ERP cuando difiere (None si no).
 
     A los productos que ya estan les actualiza el precio ERP; crea los que no
     estan y pasan la regla de entrada (repuesto, con stock, rubro en la

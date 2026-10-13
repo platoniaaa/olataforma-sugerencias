@@ -187,6 +187,8 @@ def create_all() -> None:
         "ALTER TABLE sugerencia_manual ADD COLUMN IF NOT EXISTS cerrada_oc_fecha DATE",
         "ALTER TABLE sugerencia_manual ADD COLUMN IF NOT EXISTS cerrada_oc_unidades FLOAT",
         "ALTER TABLE sugerencia_manual ADD COLUMN IF NOT EXISTS cerrada_en TIMESTAMP WITH TIME ZONE",
+        # 2026-10: el codigo exacto del ERP (con su espacio al final) para las descargas.
+        "ALTER TABLE precio_producto ADD COLUMN IF NOT EXISTS codigo_erp VARCHAR",
     ]
     # SQLite NO soporta "ADD COLUMN IF NOT EXISTS" (error de sintaxis que se
     # tragaba el try, dejando bases locales viejas sin las columnas nuevas):

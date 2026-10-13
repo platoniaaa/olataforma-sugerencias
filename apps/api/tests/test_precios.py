@@ -905,6 +905,38 @@ def test_las_diferencias_son_las_mismas_que_cuenta_la_pantalla(client, lista_car
     assert {"tipo", "procedencia_final", "costo"} <= set(filas[0]._mapping)
 
 
+def test_las_descargas_llevan_el_codigo_exacto_del_erp(client, lista_cargada):
+    """En el ERP hay codigos con un espacio al final. La lista los guarda sin el
+    espacio, pero los dos archivos tienen que traerlo: el del ERP para que el ERP
+    encuentre el producto, y la lista completa para que cuadre con el stock real
+    (13-10-2026)."""
+    import csv as csv_mod
+    import uuid
+
+    db = lista_cargada
+    db.query(PrecioProducto).filter_by(producto="71 AAA1").one().codigo_erp = "71 AAA1 "
+    db.commit()
+    svc.recalcular(db)
+
+    def _leer(formato, **params):
+        r = client.get("/api/precios/exportar", params={"formato": formato, **params})
+        assert r.status_code == 200, r.text
+        return list(csv_mod.reader(io.StringIO(r.content.decode("utf-8-sig")), delimiter=";"))
+
+    completa = {f[0] for f in _leer("completa")[1:]}
+    assert "71 AAA1 " in completa and "71 AAA1" not in completa
+    assert "71 CCC3" in completa, "los codigos sin espacio salen como siempre"
+
+    lote = str(uuid.uuid4())
+    erp = _leer("erp", solo_diferencias=True, lote=lote)
+    skus = {f[0] for f in erp[1:]}
+    assert "71 AAA1 " in skus and "71 AAA1" not in skus
+    # El reintento de la misma descarga trae el mismo codigo.
+    assert _leer("erp", solo_diferencias=True, lote=lote) == erp
+    # Lo enviado se anota con el codigo de adentro: el proximo "solo diferencias" lo cruza.
+    assert svc.contar_diferencias(db) == 0
+
+
 def test_un_sku_empatado_en_dos_envios_sale_una_sola_vez(client, lista_cargada):
     """Dos envios del mismo producto con la misma fecha no pueden repetir el SKU."""
     from datetime import datetime, timezone

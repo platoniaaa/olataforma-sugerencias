@@ -948,7 +948,7 @@ def _consulta_contar_diferencias(tenant: str):
 # Lo unico que necesita el archivo del ERP de cada producto. Se piden estas
 # columnas y no el objeto entero: eran 40 mil objetos ORM por descarga.
 _COLUMNAS_ENVIO = (PrecioProducto.producto, PrecioProducto.precio_final, PrecioProducto.costo,
-                   PrecioProducto.tipo, PrecioProducto.procedencia_final)
+                   PrecioProducto.tipo, PrecioProducto.procedencia_final, PrecioProducto.codigo_erp)
 
 
 def _consulta_filas_diferencias(tenant: str):
@@ -1027,7 +1027,9 @@ def _csv_completa(db: Session) -> tuple[bytes, int]:
     # falta la procedencia, NO PRODUCTO porque no llevan- son justo los que hay
     # que revisar, y quedaban fuera. El del ERP si los deja fuera: alla una fila
     # sin precio no sirve de nada.
-    campos = [getattr(PrecioProducto, k) for k, _ in COLUMNAS_COMPLETA]
+    # `codigo_erp` va al final y no es una columna del archivo: reemplaza al
+    # Producto cuando el ERP tiene el codigo con espacios.
+    campos = [getattr(PrecioProducto, k) for k, _ in COLUMNAS_COMPLETA] + [PrecioProducto.codigo_erp]
     filas = db.execute(
         select(*campos)
         .where(PrecioProducto.tenant_id == settings.default_tenant_id)
@@ -1035,11 +1037,14 @@ def _csv_completa(db: Session) -> tuple[bytes, int]:
     ).all()
     enteras = {"costo", "precio_erp", "precio_calculado", "precio_final", "stock", "stock_transito"}
     desc = politica.descuentos(db)
+    i_prod = next(i for i, (k, _) in enumerate(COLUMNAS_COMPLETA) if k == "producto")
     i_tipo = next(i for i, (k, _) in enumerate(COLUMNAS_COMPLETA) if k == "tipo")
     i_proc = next(i for i, (k, _) in enumerate(COLUMNAS_COMPLETA) if k == "procedencia_final")
 
     def _fila(fila):
         celdas = [_celda_csv(k, v, k in enteras) for (k, _), v in zip(COLUMNAS_COMPLETA, fila)]
+        if fila[-1]:
+            celdas[i_prod] = fila[-1]
         d = _descuento_de(desc, fila[i_tipo], fila[i_proc])
         celdas += ["" if d is None else str(int(d)),
                    "" if d is None else str(descuento_para_erp(d))]
@@ -1161,7 +1166,11 @@ def exportar(db: Session, *, solo_diferencias: bool, registrar: bool, usuario: s
 
 def _csv_erp(filas, desc: dict) -> bytes:
     """El archivo del ERP: SKU | Precio_Optimo | Descuento. `filas` trae producto,
-    precio_final, tipo y procedencia_final (producto de la lista o fila de lote)."""
+    precio_final, tipo, procedencia_final y codigo_erp (producto de la lista o fila
+    de lote).
+
+    El SKU es el codigo exacto del ERP: con el espacio al final si lo tiene. Sin
+    el, el ERP no encuentra esos productos al subir el archivo (13-10-2026)."""
 
     def _descuento(p) -> str | int:
         d = _descuento_de(desc, p.tipo, p.procedencia_final)
@@ -1169,18 +1178,20 @@ def _csv_erp(filas, desc: dict) -> bytes:
 
     return _a_csv(
         ["SKU", "Precio_Optimo", "Descuento"],
-        ([p.producto, int(redondear(p.precio_final)), _descuento(p)] for p in filas),
+        ([p.codigo_erp or p.producto, int(redondear(p.precio_final)), _descuento(p)]
+         for p in filas),
     )
 
 
 def _filas_de_lote(db: Session, tenant: str, lote_id: str) -> list:
     """Lo que quedo registrado en un lote de envio, con el tipo y la procedencia
-    actuales de cada producto (para calcular su descuento)."""
+    actuales de cada producto (para calcular su descuento) y su codigo del ERP."""
     return sorted(
         db.execute(
             select(PrecioEnvio.producto.label("producto"), PrecioEnvio.precio.label("precio_final"),
                    PrecioProducto.tipo.label("tipo"),
-                   PrecioProducto.procedencia_final.label("procedencia_final"))
+                   PrecioProducto.procedencia_final.label("procedencia_final"),
+                   PrecioProducto.codigo_erp.label("codigo_erp"))
             .select_from(PrecioEnvio)
             .outerjoin(PrecioProducto, and_(PrecioProducto.producto == PrecioEnvio.producto,
                                             PrecioProducto.tenant_id == PrecioEnvio.tenant_id))
@@ -1575,14 +1586,27 @@ def _motivo_no_entra(fila: dict, rubros_politica: set[str], bajas: set[str]) -> 
     return None
 
 
+def _codigo_erp(valor, producto: str) -> str | None:
+    """El codigo como lo tiene el ERP, solo si difiere del que se usa por dentro.
+
+    Se acepta solo si, sin los espacios de los bordes, ES el producto: un valor
+    que no le corresponde no puede terminar en el archivo que se sube al ERP.
+    """
+    if not isinstance(valor, str) or valor == producto or valor.strip() != producto:
+        return None
+    return valor
+
+
 def sincronizar_erp(db: Session, filas: list[dict], usuario: str | None = None) -> dict:
     """Aplica un lote del export del ERP a la lista.
 
-    Cada fila: producto, glosa, stock, costo, precio_erp, tipo_erp, procedencia.
+    Cada fila: producto, glosa, stock, costo, precio_erp, tipo_erp, procedencia y
+    codigo_erp (el codigo exacto del ERP cuando trae espacios; None si no).
 
     - Producto que YA esta: se le actualiza `precio_erp` (y la glosa si estaba
-      vacia). Nada mas: el costo y el stock los trae el motor cada manana desde
-      fuentes mejores, y lo manual no se toca nunca.
+      vacia) y el `codigo_erp`. Nada mas: el costo y el stock los trae el motor
+      cada manana desde fuentes mejores, y lo manual no se toca nunca. Una fila
+      SIN la clave `codigo_erp` (un motor de antes del 13-10-2026) no lo toca.
     - Producto que NO esta: entra solo si pasa `_motivo_no_entra`. Nace con
       origen "erp" y sin precio; el recalculo que sigue a la carga se lo pone.
     """
@@ -1623,6 +1647,11 @@ def sincronizar_erp(db: Session, filas: list[dict], usuario: str | None = None) 
             if glosa and not p.glosa:
                 p.glosa = glosa
                 cambio = True
+            if "codigo_erp" in f:
+                codigo = _codigo_erp(f["codigo_erp"], prod)
+                if p.codigo_erp != codigo:
+                    p.codigo_erp = codigo
+                    cambio = True
             actualizados += int(cambio)
             continue
         motivo = _motivo_no_entra(f, rubros_politica, bajas)
@@ -1630,7 +1659,8 @@ def sincronizar_erp(db: Session, filas: list[dict], usuario: str | None = None) 
             no_entran[motivo] = no_entran.get(motivo, 0) + 1
             continue
         db.add(PrecioProducto(
-            tenant_id=tenant, producto=prod, glosa=(f.get("glosa") or "").strip() or None,
+            tenant_id=tenant, producto=prod, codigo_erp=_codigo_erp(f.get("codigo_erp"), prod),
+            glosa=(f.get("glosa") or "").strip() or None,
             rubro=rubro_de(prod), procedencia_maestro=_norm_proc(f.get("procedencia")),
             costo=_num(f.get("costo")), precio_erp=precio_erp,
             stock=_num(f.get("stock")) or 0.0, stock_transito=0.0,

@@ -91,3 +91,13 @@ archivo en vez de uno vacio. La pantalla reintenta sola los cortes de conexion y
 los 502, 503 y 504 (hasta 4 veces, unos 76 s), y si el servidor no vuelve dice que
 puede estar reiniciandose en vez de mostrar "Failed to fetch". Las filas de
 "solo diferencias" salen de SQL con la misma condicion que el numero del boton.
+
+**Codigos con espacio al final (13-10-2026).** En el ERP hay codigos creados con
+un espacio al final ("15 MXD1454M "): eran 82 en el stock del 09-10-2026. Por
+dentro la lista los guarda sin el espacio (`producto`), que es como cruzan con el
+stock, las ventas y el sugerido. El codigo exacto queda en
+`precio_producto.codigo_erp` -solo cuando difiere; None en el resto- y es el que
+sale en el SKU del archivo del ERP y en el Producto de la lista completa. Lo llena
+el feed del ERP (`POST /api/admin/precios/erp`) con el Excel de stock de cada dia;
+una fila sin la clave `codigo_erp` no lo toca, y una que la trae en None lo limpia
+(el ERP le saco el espacio).

@@ -38,6 +38,12 @@ class PrecioProducto(Base):
     # Codigo del ERP con rubro ("71 2720142"). Es la llave con la que se cruza
     # contra stock, ventas y compras.
     producto: Mapped[str] = mapped_column(String, nullable=False)
+    # El codigo TAL CUAL lo tiene el ERP, solo cuando difiere de `producto`. En el
+    # ERP hay codigos creados con un espacio al final ("15 MXD1454M "): por dentro
+    # se cruzan sin el espacio, pero el archivo que se sube al ERP tiene que
+    # llevarlo, o el ERP no encuentra el producto. Lo llena el feed del ERP; None
+    # en el resto.
+    codigo_erp: Mapped[str | None] = mapped_column(String, nullable=True)
     glosa: Mapped[str | None] = mapped_column(Text, nullable=True)
     # El prefijo del codigo, como texto ("71"). Se guarda aparte para filtrar y
     # para cruzar con `politica_rubro`.

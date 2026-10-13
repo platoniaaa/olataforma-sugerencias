@@ -146,6 +146,51 @@ def test_no_toca_lo_manual(db_session):
     assert ov.precio_fijo == 777.0
 
 
+# --- El codigo exacto del ERP ---------------------------------------------------
+
+
+def test_el_codigo_con_espacio_al_final_se_guarda_tal_cual(db_session):
+    """En el ERP hay codigos creados con un espacio al final. Por dentro se cruzan
+    sin el espacio; el archivo que se sube al ERP lo necesita (13-10-2026)."""
+    _politica(db_session)
+    db_session.commit()
+
+    svc.sincronizar_erp(db_session, [dict(_erp("17 MXD1774M"), codigo_erp="17 MXD1774M ")])
+
+    p = db_session.query(PrecioProducto).filter_by(producto="17 MXD1774M").one()
+    assert p.codigo_erp == "17 MXD1774M "
+
+
+def test_el_codigo_del_erp_se_actualiza_y_se_limpia(db_session):
+    _politica(db_session)
+    _en_lista(db_session, "17 A", precio_erp=900.0)
+    db_session.commit()
+
+    r = svc.sincronizar_erp(db_session, [dict(_erp("17 A", precio=900), codigo_erp="17 A ")])
+    p = db_session.query(PrecioProducto).filter_by(producto="17 A").one()
+    assert p.codigo_erp == "17 A "
+    assert r["actualizados"] == 1, "el precio no cambio, el codigo si"
+
+    # Un motor de antes no manda la clave: no se toca.
+    svc.sincronizar_erp(db_session, [_erp("17 A", precio=900)])
+    assert p.codigo_erp == "17 A "
+
+    # El ERP le saco el espacio: el feed manda None y se limpia.
+    svc.sincronizar_erp(db_session, [dict(_erp("17 A", precio=900), codigo_erp=None)])
+    assert p.codigo_erp is None
+
+
+def test_un_codigo_del_erp_que_no_corresponde_se_ignora(db_session):
+    """Tiene que ser el mismo producto con espacios en los bordes: otra cosa no
+    puede terminar en el archivo del ERP."""
+    _politica(db_session)
+    db_session.commit()
+
+    svc.sincronizar_erp(db_session, [dict(_erp("17 B"), codigo_erp="17 OTRO ")])
+
+    assert db_session.query(PrecioProducto).filter_by(producto="17 B").one().codigo_erp is None
+
+
 # --- Sacado a mano vs depuracion masiva -----------------------------------------
 
 
