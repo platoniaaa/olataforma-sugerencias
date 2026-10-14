@@ -263,7 +263,15 @@ def guardar_politica(
     Con los dos botones de antes, crear un tipo y asignarselo a un rubro eran dos
     recalculos de ~5 minutos, y si el segundo fallaba el tipo quedaba creado sin
     uso. Si algo no pasa la validacion, no se guarda nada.
+
+    Se recalculan SOLO los productos que el cambio puede mover, calculados antes
+    de guardar contra la politica de hoy: el rubro 35 son ~1.500 de ~40 mil. Un
+    tipo nuevo sin rubro o un descuento no mueven ningun precio y no recalculan.
     """
+    afectados = precios_service.productos_afectados(
+        db, [f.model_dump() for f in payload.factores], [r.model_dump() for r in payload.rubros],
+        payload.seguir_al_rubro,
+    )
     try:
         rf = politica.guardar_factores(db, [f.model_dump() for f in payload.factores], email,
                                        commit=False)
@@ -275,8 +283,7 @@ def guardar_politica(
         db.rollback()
         raise HTTPException(status_code=422, detail=str(e)) from e
     r = {"factores": rf["cambios"], "rubros": rr["cambios"], "seguir_al_rubro": rs}
-    # Un descuento no mueve precios: si solo cambio eso, no hay que esperar 5 minutos.
-    hubo_cambios = bool(rf["cambios"] or rr["cambios"] or rs["productos"])
-    r["recalculo"] = (precios_service.recalcular(db, usuario=email, refrescar_insumos=False)
-                      if hubo_cambios else None)
+    r["recalculo"] = (precios_service.recalcular(db, usuario=email, refrescar_insumos=False,
+                                                 productos=afectados)
+                      if afectados else None)
     return r

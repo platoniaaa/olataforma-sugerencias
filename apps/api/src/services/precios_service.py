@@ -432,20 +432,33 @@ def _txt(v) -> str | None:
     return str(v)
 
 
-def recalcular(db: Session, usuario: str | None = None, refrescar_insumos: bool = True) -> dict:
-    """Recalcula TODA la lista y anota que cambio. Es idempotente: correrlo dos
-    veces seguidas no genera cambios la segunda vez.
+def recalcular(db: Session, usuario: str | None = None, refrescar_insumos: bool = True,
+               productos: list[str] | None = None) -> dict:
+    """Recalcula la lista y anota que cambio. Es idempotente: correrlo dos veces
+    seguidas no genera cambios la segunda vez.
 
     `refrescar_insumos=False` recalcula solo con lo que la tabla ya tiene (util
-    tras editar una politica, sin volver a leer stock y costo)."""
+    tras editar una politica, sin volver a leer stock y costo).
+
+    `productos`: recalcula solo esos codigos. Lo usa el guardado de la politica:
+    la lista entera son ~40 mil productos y 4,5 minutos en Render, y un cambio de
+    rubro toca un par de miles (el 14-10-2026 crear un tipo sin rubro recalculo
+    los 39.830 para dar 0 cambios). Sin `productos`, la lista entera."""
     tenant = settings.default_tenant_id
-    filas = db.scalars(select(PrecioProducto).where(PrecioProducto.tenant_id == tenant)).all()
+    stmt = select(PrecioProducto).where(PrecioProducto.tenant_id == tenant)
+    if productos is None:
+        filas = db.scalars(stmt).all()
+    else:
+        filas = []
+        for lote in _en_lotes(sorted(set(productos))):
+            filas += db.scalars(stmt.where(PrecioProducto.producto.in_(lote))).all()
     if not filas:
-        return {"productos": 0, "cambios": 0, "corrida_id": None}
+        return {"productos": 0, "cambios": 0, "productos_con_cambios": 0,
+                "por_campo": {c: 0 for c in CAMPOS_CAMBIO}, "corrida_id": None}
     codigos = [f.producto for f in filas]
     fact = politica.factores(db)
     rub = politica.rubros(db)
-    ovs = _overrides(db)
+    ovs = _overrides(db) if productos is None else _overrides(db, codigos)
     if refrescar_insumos:
         stock, transito, hay_stock = _stock(db, codigos)
         costos = _costos(db, codigos)
@@ -538,7 +551,8 @@ def recalcular(db: Session, usuario: str | None = None, refrescar_insumos: bool 
         )
     auditoria_service.registrar(
         db, accion="precios_recalculados", entidad="precios", usuario_email=usuario,
-        detalle=f"{len(filas)} productos, {len(cambios)} cambios",
+        detalle=(f"{len(filas)} productos, {len(cambios)} cambios"
+                 + ("" if productos is None else " (solo los afectados por el cambio)")),
     )
     db.commit()
     return {
@@ -588,6 +602,29 @@ def _politica_propuesta(db: Session, factores_: list[dict], rubros_: list[dict])
     return fact, rub, fact_n, rub_n, tipos, rubros_c
 
 
+def _rubros_afectados(rub: dict, rub_n: dict, tipos: set[str], rubros_c: dict,
+                      seguir: set[str]) -> set[str]:
+    """Rubros cuyos productos pueden cambiar de precio: los que cambian de tipo o
+    procedencia, los de "seguir al rubro", y los que hoy o despues usan un tipo
+    cuyo factor cambia. Este ultimo grupo va por rubro y no solo por el tipo
+    guardado en el producto: un producto que el feed del ERP acaba de crear
+    todavia no tiene tipo, pero su rubro si."""
+    usan_tipo = {r for r, v in list(rub.items()) + list(rub_n.items())
+                 if politica.tipo_canonico(v.get("tipo")) in tipos}
+    return set(rubros_c) | set(seguir) | usan_tipo
+
+
+def productos_afectados(db: Session, factores_: list[dict], rubros_: list[dict],
+                        seguir_al_rubro: list[str] | None = None) -> list[str]:
+    """Los codigos que un cambio de politica puede mover. Se calcula ANTES de
+    guardar (compara contra la politica de hoy) y es lo unico que se recalcula
+    despues: el resto de la lista no depende de las filas que cambiaron."""
+    _, rub, _, rub_n, tipos, rubros_c = _politica_propuesta(db, factores_, rubros_)
+    seguir = {str(r).strip() for r in seguir_al_rubro or [] if str(r).strip()}
+    rubros = _rubros_afectados(rub, rub_n, tipos, rubros_c, seguir)
+    return [f.producto for f in _filas_afectadas(db, rubros, tipos)]
+
+
 def _filas_afectadas(db: Session, rubros: set[str], tipos: set[str]) -> list:
     """Los productos que un cambio de politica puede mover: los de esos rubros y
     los que hoy tienen uno de esos tipos (con sus alias: "Baterias" es "Bateria")."""
@@ -624,7 +661,8 @@ def vista_previa_politica(db: Session, factores_: list[dict], rubros_: list[dict
     seguir al rubro (ver `seguir_al_rubro`)."""
     fact, rub, fact_n, rub_n, tipos, rubros_c = _politica_propuesta(db, factores_, rubros_)
     seguir = {str(r).strip() for r in seguir_al_rubro or [] if str(r).strip()}
-    filas = _filas_afectadas(db, set(rubros_c) | seguir, tipos)
+    # Los mismos productos que se recalculan al guardar (`productos_afectados`).
+    filas = _filas_afectadas(db, _rubros_afectados(rub, rub_n, tipos, rubros_c, seguir), tipos)
     ovs = _overrides(db, [f.producto for f in filas]) if filas else {}
 
     cambian = suben = bajan = 0

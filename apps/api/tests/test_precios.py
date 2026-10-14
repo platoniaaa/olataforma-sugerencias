@@ -1088,3 +1088,73 @@ def test_la_politica_completa_pide_el_permiso_de_precios(client, lista_cargada):
             assert c.post("/api/precios/politica/vista-previa", json={}).status_code == 403
     finally:
         app.dependency_overrides[requiere_auth] = lambda: "test@curifor.com"
+
+
+# --- Recalcular solo lo afectado ------------------------------------------------
+#
+# El 14-10-2026 guardar solo el tipo nuevo (sin rubro) recalculo los 39.830
+# productos en 4 min 33 s para dar 0 cambios. Ahora se recalcula solo lo que el
+# cambio puede mover, y la prueba de que no se escapa nada es que un recalculo
+# COMPLETO despues no encuentre ningun cambio.
+
+
+def _recalculos(db):
+    from src.models import AuditoriaLog
+    return db.query(AuditoriaLog).filter_by(accion="precios_recalculados").count()
+
+
+def test_un_tipo_nuevo_sin_rubro_no_recalcula_nada(client, con_tipo_manual):
+    from src.models import PoliticaPrecio
+
+    antes = _recalculos(con_tipo_manual)
+    r = client.put("/api/precios/politica", json={"factores": TIPO_NUEVO})
+
+    assert r.status_code == 200, r.text
+    assert r.json()["recalculo"] is None
+    assert _recalculos(con_tipo_manual) == antes
+    assert con_tipo_manual.query(PoliticaPrecio).filter_by(tipo="Rubro 71").count() == 2
+
+
+def test_cambiar_un_rubro_recalcula_solo_sus_productos(client, con_tipo_manual):
+    r = client.put("/api/precios/politica",
+                   json={"factores": TIPO_NUEVO, "rubros": RUBRO_71_NUEVO, "seguir_al_rubro": ["71"]})
+
+    rec = r.json()["recalculo"]
+    # Los 3 del rubro 71; "13 BBB2" (rubro 13) no se toca.
+    assert rec["productos"] == 3
+    assert rec["por_campo"]["precio"] == 2       # 71 AAA1 y 71 MAN1; el congelado no
+    # Nada quedo afuera: el recalculo completo no encuentra cambios.
+    assert svc.recalcular(con_tipo_manual, refrescar_insumos=False)["cambios"] == 0
+
+
+def test_cambiar_el_factor_de_un_tipo_recalcula_los_rubros_que_lo_usan(client, con_tipo_manual):
+    r = client.put("/api/precios/politica",
+                   json={"factores": [{"tipo": "Liviano", "procedencia": "Nacional", "factor": 2.0,
+                                       "descuento_max": 20}]})
+
+    rec = r.json()["recalculo"]
+    assert rec["productos"] == 3                  # el rubro 71 usa Liviano
+    assert client.get("/api/precios/71 AAA1").json()["precio_final"] == 20000
+    assert svc.recalcular(con_tipo_manual, refrescar_insumos=False)["cambios"] == 0
+
+
+def test_un_producto_nuevo_sin_tipo_tambien_se_recalcula(client, con_tipo_manual):
+    """El feed del ERP crea productos sin tipo hasta el proximo recalculo: el
+    cambio de factor de su tipo los alcanza por el rubro, no por el tipo guardado."""
+    _producto(con_tipo_manual, "71 RECIEN", procedencia_maestro="NACIONAL")   # tipo None
+
+    client.put("/api/precios/politica",
+               json={"factores": [{"tipo": "Liviano", "procedencia": "Nacional", "factor": 2.0,
+                                   "descuento_max": 20}]})
+
+    p = client.get("/api/precios/71 RECIEN").json()
+    assert (p["tipo"], p["precio_final"]) == ("Liviano", 2000)
+
+
+def test_la_vista_previa_revisa_los_mismos_productos_que_se_recalculan(client, con_tipo_manual):
+    cambio = {"factores": TIPO_NUEVO, "rubros": RUBRO_71_NUEVO}
+    v = client.post("/api/precios/politica/vista-previa", json=cambio).json()
+
+    afectados = svc.productos_afectados(con_tipo_manual, TIPO_NUEVO, RUBRO_71_NUEVO)
+
+    assert v["productos_revisados"] == len(afectados) == 3

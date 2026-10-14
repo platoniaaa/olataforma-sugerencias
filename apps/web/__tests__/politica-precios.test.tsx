@@ -202,4 +202,41 @@ describe("Política de precios · tipo nuevo para un rubro", () => {
     expect(screen.queryByRole("region", { name: "Cambios sin guardar" })).not.toBeInTheDocument();
     expect(mocks.guardar).not.toHaveBeenCalled();
   });
+
+  it("mientras guarda no se puede editar: un cambio hecho a medio guardar se perdía al recargar", async () => {
+    // El 14-10-2026 el rubro 35 se eligió mientras corría un guardado; al terminar,
+    // la página recargó lo del servidor y el cambio desapareció sin aviso.
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    let terminar: (v: unknown) => void = () => {};
+    mocks.guardar.mockReturnValue(new Promise((r) => { terminar = r; }));
+    render(<PoliticasPreciosPage />);
+    fireEvent.change(await screen.findByLabelText("Tipo del rubro 34"), { target: { value: "Bateria" } });
+    await screen.findByText(/385 productos cambian de precio/);
+
+    fireEvent.click(screen.getByRole("button", { name: /Guardar cambios/ }));
+
+    await waitFor(() => expect(screen.getByLabelText("Tipo del rubro 35")).toBeDisabled());
+    expect(screen.getByLabelText("Factor Liviano Nacional")).toBeDisabled();
+    expect(screen.getByLabelText("Nombre del tipo")).toBeDisabled();
+    terminar({ factores: [], rubros: [], seguir_al_rubro: { productos: 0, por_tipo: {} }, recalculo: null });
+    await waitFor(() => expect(screen.getByLabelText("Tipo del rubro 35")).not.toBeDisabled());
+  });
+
+  it("un tipo nuevo que ningún rubro usa avisa que guardarlo no cambia precios", async () => {
+    mocks.vista.mockResolvedValue({ ...VISTA, productos_revisados: 0, cambian: 0, suben: 0,
+                                    variacion_mediana: null, rubros: [], ejemplos: [] });
+    const confirmar = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<PoliticasPreciosPage />);
+    await screen.findByLabelText("Tipo del rubro 35");
+    fireEvent.change(screen.getByLabelText("Nombre del tipo"), { target: { value: "Rubro 35" } });
+    fireEvent.change(screen.getByLabelText("Factor nacional"), { target: { value: "1,88" } });
+    fireEvent.change(screen.getByLabelText("Factor importado"), { target: { value: "1,88" } });
+    fireEvent.change(screen.getByLabelText("Descuento máx. %"), { target: { value: "20" } });
+    fireEvent.click(screen.getByRole("button", { name: /Agregar tipo/ }));
+
+    expect(await screen.findByText(/todavía no está en ningún rubro/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Guardar cambios/ }));
+    expect(confirmar).toHaveBeenCalledWith(expect.stringContaining('"Rubro 35" todavía no está en ningún rubro'));
+    expect(mocks.guardar).not.toHaveBeenCalled();
+  });
 });

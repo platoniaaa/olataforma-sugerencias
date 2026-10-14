@@ -142,6 +142,9 @@ export default function PoliticasPreciosPage() {
   );
   const hayCambios = cambio.factores.length > 0 || cambio.rubros.length > 0;
   const claveCambio = JSON.stringify(cambio);
+  // Un tipo creado que ningun rubro usa todavia: guardarlo no mueve precios. El
+  // 14-10-2026 se guardo asi y parecio que el cambio "no habia funcionado".
+  const tiposSinRubro = tiposNuevos.filter((t) => !(rubros ?? []).some((r) => r.tipo === t));
 
   // La vista previa se pide sola mientras se edita, con una pausa para no pedir
   // una por tecla. Corre la misma regla que el recalculo: lo que muestra es lo
@@ -213,10 +216,11 @@ export default function PoliticasPreciosPage() {
     setError(null);
   }
 
-  // Guardar recalcula los ~39 mil productos DENTRO de la peticion: medido en
-  // produccion, 4 min 39 s. Sin avisarlo, la persona cree que se colgo y aprieta
-  // de nuevo o recarga; dos recalculos encima del otro terminan en un 500
-  // (comprobado el 23-09-2026). Por eso se confirma antes y se bloquea mientras.
+  // Guardar recalcula DENTRO de la peticion solo los productos que el cambio
+  // puede mover (los que muestra la vista previa): un rubro son segundos; un
+  // factor de un tipo que usan muchos rubros puede llegar a los ~5 minutos de la
+  // lista entera. Mientras guarda la pantalla queda bloqueada: el 14-10-2026 un
+  // rubro elegido durante el guardado se perdio al recargar, sin aviso.
   async function guardar() {
     if (invalidos.length) {
       setError(`Corrige el factor de ${invalidos.map((f) => `${f.tipo} / ${f.procedencia}`).join(", ")}: tiene que ser mayor que 1 y hasta 10.`);
@@ -226,11 +230,15 @@ export default function PoliticasPreciosPage() {
       setAviso("No hay cambios para guardar.");
       return;
     }
-    const cuantos = vista ? `Cambian ${formatoNumero(vista.cambian)} precios. ` : "";
+    const sinRubro = tiposSinRubro.length
+      ? `${tiposSinRubro.map((t) => `"${t}"`).join(", ")} todavía no está en ningún rubro: guardarlo no cambia precios.\n\n`
+      : "";
+    const cuantos = vista && !calculando
+      ? `Cambian ${formatoNumero(vista.cambian)} precios. Se recalculan ${formatoNumero(vista.productos_revisados)} productos, no la lista entera.\n\n`
+      : "";
     const ok = confirm(
-      `${cuantos}Guardar recalcula la lista completa una sola vez.\n\n` +
-      "Demora unos 5 minutos y la pantalla queda esperando. No cierres la pestaña " +
-      "ni vuelvas a apretar Guardar: si se lanzan dos recálculos a la vez, fallan los dos.\n\n" +
+      `${sinRubro}${cuantos}` +
+      "Mientras guarda, la pantalla queda bloqueada. No cierres la pestaña ni vuelvas a apretar Guardar.\n\n" +
       "El cambio queda registrado en Auditoría con tu nombre."
     );
     if (!ok) return;
@@ -279,7 +287,7 @@ export default function PoliticasPreciosPage() {
       {guardando && (
         <p className="flex items-center gap-2 rounded-md border border-brand/30 bg-brand-50 px-3 py-2 text-sm text-ink-700">
           <Loader2 className="h-4 w-4 shrink-0 animate-spin text-brand" />
-          Recalculando los 39 mil precios. Demora unos 5 minutos; deja esta pestaña abierta.
+          Guardando y recalculando los productos afectados. Deja esta pestaña abierta.
         </p>
       )}
 
@@ -335,6 +343,7 @@ export default function PoliticasPreciosPage() {
                                 <button
                                   type="button"
                                   onClick={() => quitarTipoNuevo(tipo)}
+                                  disabled={guardando}
                                   aria-label={`Quitar el tipo nuevo ${tipo}`}
                                   className="rounded p-0.5 text-ink-400 hover:bg-ink-100 hover:text-ink-700"
                                 >
@@ -354,7 +363,7 @@ export default function PoliticasPreciosPage() {
                                   type="number" step="0.01" min="1.01" max="10"
                                   aria-label={`Factor ${tipo} ${p}`}
                                   className={`${campoCls} ${malo ? "border-rose-400" : ""}`}
-                                  disabled={!puedeEditar}
+                                  disabled={!puedeEditar || guardando}
                                   value={f === undefined || Number.isNaN(f.factor) ? "" : f.factor}
                                   onChange={(e) => setFactor(tipo, p, e.target.value)}
                                 />
@@ -386,28 +395,28 @@ export default function PoliticasPreciosPage() {
                     Nombre del tipo
                     <input
                       className={inputForm} value={form.nombre} placeholder="Rubro 35" maxLength={40}
-                      onChange={(e) => { setForm({ ...form, nombre: e.target.value }); setErrorNuevo(null); }}
+                      disabled={guardando} onChange={(e) => { setForm({ ...form, nombre: e.target.value }); setErrorNuevo(null); }}
                     />
                   </label>
                   <label className="text-[12px] text-ink-500">
                     Factor nacional
                     <input
                       className={`${inputForm} text-right tabular-nums`} inputMode="decimal" value={form.nacional} placeholder="1,88"
-                      onChange={(e) => { setForm({ ...form, nacional: e.target.value }); setErrorNuevo(null); }}
+                      disabled={guardando} onChange={(e) => { setForm({ ...form, nacional: e.target.value }); setErrorNuevo(null); }}
                     />
                   </label>
                   <label className="text-[12px] text-ink-500">
                     Factor importado
                     <input
                       className={`${inputForm} text-right tabular-nums`} inputMode="decimal" value={form.importado} placeholder="1,88"
-                      onChange={(e) => { setForm({ ...form, importado: e.target.value }); setErrorNuevo(null); }}
+                      disabled={guardando} onChange={(e) => { setForm({ ...form, importado: e.target.value }); setErrorNuevo(null); }}
                     />
                   </label>
                   <label className="text-[12px] text-ink-500">
                     Descuento máx. %
                     <input
                       className={`${inputForm} text-right tabular-nums`} inputMode="decimal" value={form.descuento} placeholder="20"
-                      onChange={(e) => { setForm({ ...form, descuento: e.target.value }); setErrorNuevo(null); }}
+                      disabled={guardando} onChange={(e) => { setForm({ ...form, descuento: e.target.value }); setErrorNuevo(null); }}
                     />
                   </label>
                   <button
@@ -444,7 +453,7 @@ export default function PoliticasPreciosPage() {
                         <select
                           aria-label={`Tipo del rubro ${r.rubro}`}
                           className="h-8 rounded-md border border-ink-200 px-2 text-sm outline-none focus:border-brand disabled:bg-ink-50 disabled:text-ink-500"
-                          disabled={!puedeEditar}
+                          disabled={!puedeEditar || guardando}
                           value={r.tipo ?? ""}
                           onChange={(e) => setRubro(r.rubro, "tipo", e.target.value)}
                         >
@@ -458,7 +467,7 @@ export default function PoliticasPreciosPage() {
                         <select
                           aria-label={`Procedencia forzada del rubro ${r.rubro}`}
                           className="h-8 rounded-md border border-ink-200 px-2 text-sm outline-none focus:border-brand disabled:bg-ink-50 disabled:text-ink-500"
-                          disabled={!puedeEditar}
+                          disabled={!puedeEditar || guardando}
                           value={r.procedencia_forzada ?? ""}
                           onChange={(e) => setRubro(r.rubro, "procedencia_forzada", e.target.value)}
                         >
@@ -486,6 +495,12 @@ export default function PoliticasPreciosPage() {
               {invalidos.length > 0 && (
                 <p className="text-sm text-rose-700">
                   Factor fuera de rango en {invalidos.map((f) => `${f.tipo} / ${f.procedencia}`).join(", ")}: tiene que ser mayor que 1 y hasta 10.
+                </p>
+              )}
+              {tiposSinRubro.length > 0 && (
+                <p className="text-sm text-amber-700">
+                  {tiposSinRubro.map((t) => `"${t}"`).join(", ")} todavía no está en ningún rubro. Elígelo en la
+                  tabla de Rubros antes de guardar: guardarlo solo no cambia ningún precio.
                 </p>
               )}
               {calculando && (
@@ -532,6 +547,7 @@ export default function PoliticasPreciosPage() {
                               type="checkbox"
                               className="mt-0.5"
                               checked={seguir.includes(r.rubro)}
+                              disabled={guardando}
                               onChange={(e) =>
                                 setSeguir(e.target.checked ? [...seguir, r.rubro] : seguir.filter((x) => x !== r.rubro))}
                             />
