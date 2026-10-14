@@ -1120,27 +1120,29 @@ export const api = {
     return getJSON("/api/precios/politica/rubros");
   },
 
-  async guardarPoliticaFactores(
-    filas: import("./types").PoliticaFactor[]
-  ): Promise<{ guardados: number; cambios: string[] }> {
-    const res = await req("/api/precios/politica/factores", {
-      method: "PUT",
+  /** Qué precios cambiarían con este cambio de política. No guarda nada. */
+  async vistaPreviaPolitica(
+    cambio: import("./types").CambioPolitica
+  ): Promise<import("./types").VistaPreviaPolitica> {
+    const res = await req("/api/precios/politica/vista-previa", {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ filas }),
+      body: JSON.stringify(cambio),
     });
-    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo guardar la politica"));
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo calcular qué cambia"));
     return res.json();
   },
 
-  async guardarPoliticaRubros(
-    filas: import("./types").PoliticaRubro[]
-  ): Promise<{ guardados: number; cambios: string[] }> {
-    const res = await req("/api/precios/politica/rubros", {
+  /** Guarda factores, tipos nuevos y rubros juntos, y recalcula la lista una vez. */
+  async guardarPolitica(
+    cambio: import("./types").CambioPolitica
+  ): Promise<import("./types").ResultadoPolitica> {
+    const res = await req("/api/precios/politica", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ filas }),
+      body: JSON.stringify(cambio),
     });
-    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo guardar los rubros"));
+    if (!res.ok) throw new Error(await mensajeError(res, "No se pudo guardar la politica"));
     return res.json();
   },
 };

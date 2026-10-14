@@ -30,7 +30,9 @@ import math
 import re
 import unicodedata
 import uuid
+from collections import Counter
 from datetime import date, datetime, timezone
+from statistics import median
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -544,6 +546,191 @@ def recalcular(db: Session, usuario: str | None = None, refrescar_insumos: bool 
         "productos_con_cambios": len(pendientes), "por_campo": por_campo,
         "corrida_id": corrida,
     }
+
+
+# ------------------------------------------------------ cambios de politica
+# Las columnas que necesita `calcular`, mas el tipo actual para contar de donde
+# sale. Se piden columnas y no el objeto: un cambio de factor de "Liviano" toca
+# decenas de miles de productos.
+_COLUMNAS_REGLA = (
+    PrecioProducto.producto, PrecioProducto.glosa, PrecioProducto.rubro,
+    PrecioProducto.procedencia_maestro, PrecioProducto.costo, PrecioProducto.stock,
+    PrecioProducto.stock_transito, PrecioProducto.ult_recep_importado,
+    PrecioProducto.ult_pe_nacional, PrecioProducto.precio_sugerido,
+)
+
+
+def _politica_propuesta(db: Session, factores_: list[dict], rubros_: list[dict]):
+    """La politica de hoy y la que quedaria con estos cambios encima.
+
+    Devuelve (factores, rubros, factores_nuevos, rubros_nuevos, tipos con factor
+    distinto, {rubro: (antes, despues)} de los rubros que cambian)."""
+    fact = politica.factores(db)
+    rub = politica.rubros(db)
+    fact_n = dict(fact)
+    tipos: set[str] = set()
+    for f in factores_ or []:
+        clave = politica._clave(f.get("tipo"), f.get("procedencia"))
+        valor = float(f.get("factor") or 0)
+        if fact.get(clave) != valor:
+            tipos.add(clave[0])
+        fact_n[clave] = valor
+    rub_n = {k: dict(v) for k, v in rub.items()}
+    rubros_c: dict[str, tuple[dict, dict]] = {}
+    for r in rubros_ or []:
+        rubro = str(r.get("rubro") or "").strip()
+        nuevo = {"tipo": (r.get("tipo") or "").strip() or None,
+                 "procedencia_forzada": (r.get("procedencia_forzada") or "").strip() or None}
+        antes = rub.get(rubro, {"tipo": None, "procedencia_forzada": None})
+        if rubro and antes != nuevo:
+            rubros_c[rubro] = (antes, nuevo)
+        rub_n[rubro] = nuevo
+    return fact, rub, fact_n, rub_n, tipos, rubros_c
+
+
+def _filas_afectadas(db: Session, rubros: set[str], tipos: set[str]) -> list:
+    """Los productos que un cambio de politica puede mover: los de esos rubros y
+    los que hoy tienen uno de esos tipos (con sus alias: "Baterias" es "Bateria")."""
+    condiciones = []
+    if rubros:
+        condiciones.append(PrecioProducto.rubro.in_(sorted(rubros)))
+    if tipos:
+        variantes = set(tipos) | {a for a, c in politica._ALIAS.items() if c in tipos}
+        condiciones.append(func.lower(PrecioProducto.tipo).in_(sorted(variantes)))
+    if not condiciones:
+        return []
+    return db.execute(
+        select(*_COLUMNAS_REGLA, PrecioProducto.tipo_origen)
+        .where(PrecioProducto.tenant_id == settings.default_tenant_id, or_(*condiciones))
+        .order_by(PrecioProducto.producto)
+    ).all()
+
+
+def _decision_de_precio(ov: dict | None) -> bool:
+    """El precio lo decidio una persona y la politica no lo mueve."""
+    return bool(ov) and (ov.get("precio_fijo") is not None or bool(ov.get("congelar"))
+                         or ov.get("margen_fijo") is not None)
+
+
+def vista_previa_politica(db: Session, factores_: list[dict], rubros_: list[dict],
+                          seguir_al_rubro: list[str] | None = None) -> dict:
+    """Que precios cambiarian con estos cambios de politica, sin guardar nada.
+
+    Corre la misma regla (`calcular`) con la politica de hoy y con la propuesta
+    sobre los insumos que la lista ya tiene, que es lo mismo que hace el recalculo
+    al guardar. Asi el numero que se ve antes de guardar es el que va a pasar.
+
+    `seguir_al_rubro`: rubros cuyos productos con tipo escrito a mano pasarian a
+    seguir al rubro (ver `seguir_al_rubro`)."""
+    fact, rub, fact_n, rub_n, tipos, rubros_c = _politica_propuesta(db, factores_, rubros_)
+    seguir = {str(r).strip() for r in seguir_al_rubro or [] if str(r).strip()}
+    filas = _filas_afectadas(db, set(rubros_c) | seguir, tipos)
+    ovs = _overrides(db, [f.producto for f in filas]) if filas else {}
+
+    cambian = suben = bajan = 0
+    variaciones: list[float] = []
+    ejemplos: list[dict] = []
+    por_rubro = {
+        r: {"rubro": r, "tipo_antes": a.get("tipo"), "tipo_despues": d.get("tipo"),
+            "procedencia_antes": a.get("procedencia_forzada"),
+            "procedencia_despues": d.get("procedencia_forzada"),
+            "productos": 0, "siguen_al_rubro": 0, "por_glosa": 0, "decididos": 0,
+            "cambian": 0, "manuales": Counter(), "manuales_con_precio": 0,
+            "procedencias": Counter()}
+        for r, (a, d) in rubros_c.items()
+    }
+    for f in filas:
+        datos = {k: getattr(f, k) for k in (
+            "glosa", "rubro", "procedencia_maestro", "costo", "stock", "stock_transito",
+            "ult_recep_importado", "ult_pe_nacional", "precio_sugerido")}
+        ov = ovs.get(f.producto)
+        antes = calcular(datos, ov, fact, rub)
+        ov_n = ov
+        if f.rubro in seguir and ov and ov.get("tipo_manual"):
+            ov_n = {**ov, "tipo_manual": None}
+        despues = calcular(datos, ov_n, fact_n, rub_n)
+
+        pa, pd = antes["precio_final"], despues["precio_final"]
+        distinto = (pa is None) != (pd is None) or (pa is not None and abs(pa - pd) >= 0.5)
+        if distinto:
+            cambian += 1
+            if pa and pd:
+                if pd > pa:
+                    suben += 1
+                else:
+                    bajan += 1
+                variaciones.append(pd / pa - 1)
+                if len(ejemplos) < 3:
+                    ejemplos.append({"producto": f.producto, "glosa": f.glosa,
+                                     "precio_antes": pa, "precio_despues": pd})
+
+        info = por_rubro.get(f.rubro)
+        if info is None:
+            continue
+        info["productos"] += 1
+        info["cambian"] += int(distinto)
+        info["procedencias"][antes["procedencia_final"]] += 1
+        if _decision_de_precio(ov):
+            info["decididos"] += 1
+        if antes["tipo_origen"] == "rubro":
+            info["siguen_al_rubro"] += 1
+        elif antes["tipo_origen"] == "glosa":
+            info["por_glosa"] += 1
+        elif antes["tipo_origen"] == "manual":
+            info["manuales"][antes["tipo"]] += 1
+            info["manuales_con_precio"] += int(bool(pa))
+
+    rubros_out = []
+    for info in por_rubro.values():
+        ta, td = info["tipo_antes"], info["tipo_despues"]
+        info["factor_antes"] = {p: fact.get(politica._clave(ta, p)) for p in politica.PROCEDENCIAS}
+        info["factor_despues"] = {p: fact_n.get(politica._clave(td, p)) for p in politica.PROCEDENCIAS}
+        info["manuales"] = [{"tipo": t, "productos": n} for t, n in info["manuales"].most_common()]
+        info["procedencias"] = dict(info["procedencias"])
+        info["seguir_al_rubro"] = info["rubro"] in seguir
+        rubros_out.append(info)
+    return {
+        "productos_revisados": len(filas),
+        "cambian": cambian, "suben": suben, "bajan": bajan,
+        "variacion_mediana": round(median(variaciones), 4) if variaciones else None,
+        "rubros": sorted(rubros_out, key=lambda i: (len(i["rubro"]), i["rubro"])),
+        "ejemplos": ejemplos,
+    }
+
+
+def seguir_al_rubro(db: Session, rubros: list[str], usuario: str | None) -> dict:
+    """Saca el tipo escrito a mano de los productos de estos rubros: desde ahi
+    toman el tipo de su rubro, y con el su factor.
+
+    Es lo que hace falta cuando un rubro cambia de tipo: lo escrito a mano le gana
+    al rubro, asi que esos productos se quedaban con el factor viejo (en el rubro
+    35 eran 93 "Filtro Liviano" del Excel original). No confirma: lo hace quien
+    llama, junto con el resto de la politica."""
+    rubros = sorted({str(r).strip() for r in rubros or [] if str(r).strip()})
+    if not rubros:
+        return {"productos": 0, "por_tipo": {}}
+    tenant = settings.default_tenant_id
+    codigos = [p for (p,) in db.execute(select(PrecioProducto.producto).where(
+        PrecioProducto.tenant_id == tenant, PrecioProducto.rubro.in_(rubros))).all()]
+    ovs: list[PrecioOverride] = []
+    for lote in _en_lotes(codigos):
+        ovs += db.scalars(select(PrecioOverride).where(
+            PrecioOverride.tenant_id == tenant, PrecioOverride.producto.in_(lote),
+            PrecioOverride.tipo_manual.isnot(None))).all()
+    por_tipo = Counter(o.tipo_manual for o in ovs)
+    ahora = _now()
+    for o in ovs:
+        o.tipo_manual = None
+        o.editado_por = usuario
+        o.editado_en = ahora
+    if ovs:
+        detalle = ", ".join(f"{t}: {n}" for t, n in por_tipo.most_common())
+        auditoria_service.registrar(
+            db, accion="precios_tipo_manual_quitado", entidad="precios", usuario_email=usuario,
+            detalle=(f"Rubro(s) {', '.join(rubros)}: {len(ovs)} productos dejaron su tipo "
+                     f"escrito a mano ({detalle}) y siguen al rubro")[:2000],
+        )
+    return {"productos": len(ovs), "por_tipo": dict(por_tipo)}
 
 
 # ----------------------------------------------------------------- consultas

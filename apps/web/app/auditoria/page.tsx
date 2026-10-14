@@ -37,6 +37,8 @@ const ACCIONES: Record<
   // nombre propio y no con el codigo crudo de la accion.
   politica_precio_editada: { label: "Factor de precio", color: "text-amber-700 bg-amber-50", icon: Sigma },
   politica_rubro_editada: { label: "Rubro de precio", color: "text-amber-700 bg-amber-50", icon: Tag },
+  // Sale junto con un cambio de rubro: productos que dejaron su tipo escrito a mano.
+  precios_tipo_manual_quitado: { label: "Tipo a mano → rubro", color: "text-amber-700 bg-amber-50", icon: Tag },
 };
 
 type Tab = "actividad" | "accesos";

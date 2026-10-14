@@ -1431,6 +1431,58 @@ export interface PoliticaRubro {
   actualizado_en?: string | null;
 }
 
+/** Lo que cambió en la pantalla de política: se manda junto y se recalcula una vez. */
+export interface CambioPolitica {
+  factores: Pick<PoliticaFactor, "tipo" | "procedencia" | "factor" | "descuento_max" | "margen_post">[];
+  rubros: Pick<PoliticaRubro, "rubro" | "tipo" | "procedencia_forzada">[];
+  /** Rubros cuyos productos con tipo escrito a mano pasan a seguir al rubro. */
+  seguir_al_rubro: string[];
+}
+
+export interface VistaPreviaRubro {
+  rubro: string;
+  tipo_antes: string | null;
+  tipo_despues: string | null;
+  procedencia_antes: string | null;
+  procedencia_despues: string | null;
+  productos: number;
+  /** Los que toman el tipo del rubro: son los que se mueven con el cambio. */
+  siguen_al_rubro: number;
+  por_glosa: number;
+  /** Precio fijo, congelado o margen fijo: la política no los mueve. */
+  decididos: number;
+  cambian: number;
+  manuales: { tipo: string; productos: number }[];
+  manuales_con_precio: number;
+  procedencias: Record<string, number>;
+  factor_antes: Record<string, number | null>;
+  factor_despues: Record<string, number | null>;
+  seguir_al_rubro: boolean;
+}
+
+export interface VistaPreviaPolitica {
+  productos_revisados: number;
+  cambian: number;
+  suben: number;
+  bajan: number;
+  variacion_mediana: number | null;
+  rubros: VistaPreviaRubro[];
+  ejemplos: { producto: string; glosa: string | null; precio_antes: number; precio_despues: number }[];
+}
+
+export interface ResultadoPolitica {
+  factores: string[];
+  rubros: string[];
+  seguir_al_rubro: { productos: number; por_tipo: Record<string, number> };
+  recalculo: {
+    productos: number;
+    cambios: number;
+    productos_con_cambios: number;
+    /** Cambios por campo: "precio" es el número que se compara con la vista previa. */
+    por_campo: Record<string, number>;
+  } | null;
+}
+
 /** Submódulo del tablero: ABC por sucursal de lo que hay en stock. */
 export interface AbcStockSucursal {
   sucursal: string;

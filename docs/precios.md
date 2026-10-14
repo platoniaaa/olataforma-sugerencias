@@ -28,6 +28,20 @@ El **factor** sale de la politica por (tipo, procedencia).
 El **tipo** se decide: escrito a mano > la glosa empieza con `NEU` (neumatico) >
 el tipo del rubro (`politica_rubro`).
 
+**Un factor propio para un rubro (14-10-2026).** El factor es por tipo, asi que
+un rubro que comparte tipo con otros no puede moverse solo. En
+`/precios/politicas` se crea un tipo nuevo ("Agregar tipo": nombre, factor
+nacional e importado, descuento) y se le asigna al rubro en la tabla de Rubros.
+Antes de guardar, `POST /api/precios/politica/vista-previa` corre la misma regla
+con la politica propuesta y dice cuantos precios cambian, cuantos productos del
+rubro tienen el tipo escrito a mano (esos no siguen al rubro) y da ejemplos.
+`PUT /api/precios/politica` guarda factores, rubros y `seguir_al_rubro` juntos
+(si algo no valida, no se guarda nada) y recalcula UNA vez. `seguir_al_rubro`
+borra el tipo escrito a mano de los productos de esos rubros, para que tomen el
+tipo del rubro; queda en auditoria como `precios_tipo_manual_quitado`. Un tipo
+nuevo escrito con otra mayuscula o con el alias ("liviano", "Baterias") actualiza
+el que existe en vez de duplicarlo.
+
 La **procedencia**: escrita a mano > procedencia forzada del rubro > ultima
 compra (si la mas reciente esta en el seguimiento de importacion es Importado;
 si esta en el nacional, Nacional) > lo que dice el maestro del ERP > `SIN

@@ -25,6 +25,7 @@ from ..db import get_db
 from ..schemas.precios import (
     FactoresIn,
     OverrideIn,
+    PoliticaIn,
     PrecioDetalleOut,
     PrecioFiltros,
     PrecioPage,
@@ -238,4 +239,44 @@ def guardar_rubros(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     r["recalculo"] = precios_service.recalcular(db, usuario=email, refrescar_insumos=False)
+    return r
+
+
+@router.post("/politica/vista-previa")
+def vista_previa_politica(
+    payload: PoliticaIn, db: Session = Depends(get_db), email: str = Depends(requiere_precios),
+) -> dict:
+    """Cuantos precios cambiarian con este cambio de politica. No guarda nada."""
+    return precios_service.vista_previa_politica(
+        db, [f.model_dump() for f in payload.factores], [r.model_dump() for r in payload.rubros],
+        payload.seguir_al_rubro,
+    )
+
+
+@router.put("/politica")
+def guardar_politica(
+    payload: PoliticaIn, db: Session = Depends(get_db), email: str = Depends(requiere_precios),
+) -> dict:
+    """Guarda factores (incluidos tipos nuevos), rubros y "seguir al rubro" JUNTOS
+    y recalcula una sola vez.
+
+    Con los dos botones de antes, crear un tipo y asignarselo a un rubro eran dos
+    recalculos de ~5 minutos, y si el segundo fallaba el tipo quedaba creado sin
+    uso. Si algo no pasa la validacion, no se guarda nada.
+    """
+    try:
+        rf = politica.guardar_factores(db, [f.model_dump() for f in payload.factores], email,
+                                       commit=False)
+        rr = politica.guardar_rubros(db, [r.model_dump() for r in payload.rubros], email,
+                                     commit=False)
+        rs = precios_service.seguir_al_rubro(db, payload.seguir_al_rubro, email)
+        db.commit()
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    r = {"factores": rf["cambios"], "rubros": rr["cambios"], "seguir_al_rubro": rs}
+    # Un descuento no mueve precios: si solo cambio eso, no hay que esperar 5 minutos.
+    hubo_cambios = bool(rf["cambios"] or rr["cambios"] or rs["productos"])
+    r["recalculo"] = (precios_service.recalcular(db, usuario=email, refrescar_insumos=False)
+                      if hubo_cambios else None)
     return r

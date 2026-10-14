@@ -137,5 +137,14 @@ class RubrosIn(BaseModel):
     filas: list[RubroIn]
 
 
+class PoliticaIn(BaseModel):
+    """Un cambio de politica completo: factores (incluidos tipos nuevos), rubros, y
+    los rubros cuyos productos con tipo escrito a mano pasan a seguir al rubro.
+    Se manda solo lo que cambio; se guarda junto y se recalcula una vez."""
+    factores: list[FactorIn] = Field(default_factory=list)
+    rubros: list[RubroIn] = Field(default_factory=list)
+    seguir_al_rubro: list[str] = Field(default_factory=list, max_length=200)
+
+
 class VistosIn(BaseModel):
     productos: list[str] | None = None

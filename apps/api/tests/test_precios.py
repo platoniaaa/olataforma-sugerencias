@@ -953,3 +953,138 @@ def test_un_sku_empatado_en_dos_envios_sale_una_sola_vez(client, lista_cargada):
 
     skus = [f.producto for f in svc._diferencias(db)]
     assert skus.count("71 AAA1") == 1
+
+
+# --- Cambiar la politica de una vez: tipo nuevo + rubro --------------------------
+#
+# El 14-10-2026 la politica dijo "el rubro 35 va con factor 1,88" y la pantalla no
+# podia: el factor es por tipo, el rubro 35 compartia "Liviano" con otros 30
+# rubros y no habia como crear un tipo. Ahora se crea el tipo, se le asigna al
+# rubro, se ve que cambia ANTES de guardar y se guarda todo junto con un solo
+# recalculo.
+
+TIPO_NUEVO = [{"tipo": "Rubro 71", "procedencia": "Nacional", "factor": 1.88, "descuento_max": 20},
+              {"tipo": "Rubro 71", "procedencia": "Importado", "factor": 1.88, "descuento_max": 20}]
+RUBRO_71_NUEVO = [{"rubro": "71", "tipo": "Rubro 71", "procedencia_forzada": None}]
+
+
+@pytest.fixture()
+def con_tipo_manual(lista_cargada):
+    """La lista de prueba mas un producto del rubro 71 con el tipo escrito a mano,
+    como los 93 "Filtro Liviano" del rubro 35."""
+    from src.models import PrecioOverride
+
+    db = lista_cargada
+    _producto(db, "71 MAN1", procedencia_maestro="NACIONAL")
+    db.add(PrecioOverride(tenant_id="curifor", producto="71 MAN1", tipo_manual="Pesado"))
+    db.commit()
+    svc.recalcular(db)
+    return db
+
+
+def test_la_vista_previa_dice_que_cambia_sin_guardar_nada(client, con_tipo_manual):
+    from src.models import PoliticaPrecio
+
+    r = client.post("/api/precios/politica/vista-previa",
+                    json={"factores": TIPO_NUEVO, "rubros": RUBRO_71_NUEVO})
+
+    assert r.status_code == 200, r.text
+    v = r.json()
+    # Solo cambia el que toma el tipo del rubro: 10.000 x 1,78 -> x 1,88.
+    assert (v["cambian"], v["suben"], v["bajan"]) == (1, 1, 0)
+    assert v["ejemplos"] == [{"producto": "71 AAA1", "glosa": "AMORT DEL",
+                              "precio_antes": 17800.0, "precio_despues": 18800.0}]
+    assert v["variacion_mediana"] == pytest.approx(0.0562, abs=1e-4)
+    (rubro,) = v["rubros"]
+    assert (rubro["rubro"], rubro["tipo_antes"], rubro["tipo_despues"]) == ("71", "Liviano", "Rubro 71")
+    assert rubro["factor_antes"]["Nacional"] == 1.78 and rubro["factor_despues"]["Nacional"] == 1.88
+    assert rubro["productos"] == 3 and rubro["siguen_al_rubro"] == 1
+    # Los de tipo escrito a mano no siguen al rubro, y se dice cuantos son.
+    assert rubro["manuales"] == [{"tipo": "Pesado", "productos": 2}]
+    assert rubro["decididos"] == 1           # 71 CCC3 esta congelado
+    # Nada quedo guardado.
+    assert con_tipo_manual.query(PoliticaPrecio).filter_by(tipo="Rubro 71").count() == 0
+    assert client.get("/api/precios/71 AAA1").json()["precio_final"] == 17800
+
+
+def test_la_vista_previa_con_seguir_al_rubro_suma_los_de_tipo_a_mano(client, con_tipo_manual):
+    r = client.post("/api/precios/politica/vista-previa",
+                    json={"factores": TIPO_NUEVO, "rubros": RUBRO_71_NUEVO,
+                          "seguir_al_rubro": ["71"]})
+
+    v = r.json()
+    # 71 MAN1 deja "Pesado" (2,16) y toma el tipo del rubro (1,88): baja. El
+    # congelado sigue con su precio aunque cambie de tipo.
+    assert (v["cambian"], v["suben"], v["bajan"]) == (2, 1, 1)
+    assert v["rubros"][0]["seguir_al_rubro"] is True
+
+
+def test_guardar_crea_el_tipo_asigna_el_rubro_y_recalcula_una_vez(client, con_tipo_manual):
+    from src.models import AuditoriaLog, PrecioOverride
+
+    db = con_tipo_manual
+    recalculos = db.query(AuditoriaLog).filter_by(accion="precios_recalculados").count()
+
+    r = client.put("/api/precios/politica",
+                   json={"factores": TIPO_NUEVO, "rubros": RUBRO_71_NUEVO, "seguir_al_rubro": ["71"]})
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "Rubro 71/Nacional: nuevo 1.88" in body["factores"]
+    assert body["rubros"] == ["rubro 71: (Liviano, None) -> (Rubro 71, None)"]
+    assert body["seguir_al_rubro"] == {"productos": 2, "por_tipo": {"Pesado": 2}}
+    # Un solo recalculo para todo: antes eran dos de ~5 minutos.
+    assert db.query(AuditoriaLog).filter_by(accion="precios_recalculados").count() == recalculos + 1
+    aaa1 = client.get("/api/precios/71 AAA1").json()
+    assert (aaa1["tipo"], aaa1["factor"], aaa1["precio_final"]) == ("Rubro 71", 1.88, 18800)
+    man1 = client.get("/api/precios/71 MAN1").json()
+    assert (man1["tipo"], man1["tipo_origen"], man1["precio_final"]) == ("Rubro 71", "rubro", 1880)
+    assert db.query(PrecioOverride).filter_by(producto="71 MAN1").one().tipo_manual is None
+    # El congelado no se mueve.
+    assert client.get("/api/precios/71 CCC3").json()["estado"] == "CONGELADO"
+    log = db.query(AuditoriaLog).filter_by(accion="precios_tipo_manual_quitado").one()
+    assert "71" in log.detalle and "Pesado: 2" in log.detalle and log.usuario_email == "test@curifor.com"
+
+
+def test_si_algo_no_valida_no_se_guarda_nada(client, con_tipo_manual):
+    from src.models import PoliticaPrecio, PoliticaRubro
+
+    db = con_tipo_manual
+    r = client.put("/api/precios/politica",
+                   json={"factores": TIPO_NUEVO,
+                         "rubros": [{"rubro": "71", "tipo": "Rubro 71", "procedencia_forzada": "Marte"}]})
+
+    assert r.status_code == 422
+    assert db.query(PoliticaPrecio).filter_by(tipo="Rubro 71").count() == 0
+    assert db.query(PoliticaRubro).filter_by(rubro="71").one().tipo == "Liviano"
+
+
+def test_un_tipo_escrito_con_otra_mayuscula_no_se_duplica(lista_cargada):
+    """Dos filas para la misma clave y el factor dependeria del orden de la base."""
+    from src.models import PoliticaPrecio
+    from src.services import politica_precio_service as pol
+
+    pol.guardar_factores(lista_cargada, [{"tipo": "liviano", "procedencia": "Nacional", "factor": 2.0}], "x")
+
+    filas = [p for p in lista_cargada.query(PoliticaPrecio).all()
+             if p.tipo.lower() == "liviano" and p.procedencia == "Nacional"]
+    assert [(p.tipo, p.factor) for p in filas] == [("Liviano", 2.0)]
+
+
+def test_cambiar_solo_un_descuento_no_recalcula(client, lista_cargada):
+    svc.recalcular(lista_cargada)
+    r = client.put("/api/precios/politica",
+                   json={"factores": [{"tipo": "Liviano", "procedencia": "Nacional",
+                                       "factor": 1.78, "descuento_max": 25}]})
+    assert r.status_code == 200, r.text
+    assert r.json()["recalculo"] is None
+
+
+def test_la_politica_completa_pide_el_permiso_de_precios(client, lista_cargada):
+    app.dependency_overrides[requiere_auth] = lambda: "noadmin@curifor.com"
+    try:
+        with TestClient(app) as c:
+            assert c.put("/api/precios/politica", json={}).status_code == 403
+            assert c.post("/api/precios/politica/vista-previa", json={}).status_code == 403
+    finally:
+        app.dependency_overrides[requiere_auth] = lambda: "test@curifor.com"

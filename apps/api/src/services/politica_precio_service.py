@@ -133,9 +133,22 @@ def listar_rubros(db: Session) -> list[dict]:
     ]
 
 
-def guardar_factores(db: Session, filas: list[dict], usuario: str | None) -> dict:
-    """Upsert por (tipo, procedencia). Un factor <= 1 vende bajo el costo: se rechaza."""
+def guardar_factores(db: Session, filas: list[dict], usuario: str | None, commit: bool = True) -> dict:
+    """Upsert por (tipo, procedencia). Un factor <= 1 vende bajo el costo: se rechaza.
+
+    La fila se busca por el tipo canonico: "liviano" o "Livianos" escritos al
+    crear un tipo nuevo actualizan "Liviano" en vez de crear un duplicado. Con
+    dos filas para la misma clave, `factores()` se quedaba con cualquiera de las
+    dos y el precio dependia del orden en que las devolvia la base.
+
+    `commit=False` deja los cambios en la sesion: lo usa `PUT /politica`, que
+    guarda factores y rubros juntos y confirma una sola vez.
+    """
     tenant = settings.default_tenant_id
+    existentes = {
+        _clave(p.tipo, p.procedencia): p
+        for p in db.scalars(select(PoliticaPrecio).where(PoliticaPrecio.tenant_id == tenant)).all()
+    }
     cambios: list[str] = []
     for f in filas:
         tipo = (f.get("tipo") or "").strip()
@@ -145,16 +158,11 @@ def guardar_factores(db: Session, filas: list[dict], usuario: str | None) -> dic
         factor = float(f.get("factor") or 0)
         if not (1.0 < factor <= 10.0):
             raise ValueError(f"Factor fuera de rango para {tipo}/{proc}: {factor}")
-        actual = db.scalars(
-            select(PoliticaPrecio).where(
-                PoliticaPrecio.tenant_id == tenant,
-                PoliticaPrecio.tipo == tipo,
-                PoliticaPrecio.procedencia == proc,
-            )
-        ).first()
+        actual = existentes.get(_clave(tipo, proc))
         if actual is None:
             actual = PoliticaPrecio(tenant_id=tenant, tipo=tipo, procedencia=proc, factor=factor)
             db.add(actual)
+            existentes[_clave(tipo, proc)] = actual
             cambios.append(f"{tipo}/{proc}: nuevo {factor}")
         elif abs((actual.factor or 0) - factor) > 1e-9:
             cambios.append(f"{tipo}/{proc}: {actual.factor} -> {factor}")
@@ -168,11 +176,12 @@ def guardar_factores(db: Session, filas: list[dict], usuario: str | None) -> dic
             db, accion="politica_precio_editada", entidad="politica_precio",
             usuario_email=usuario, detalle="; ".join(cambios)[:2000],
         )
-    db.commit()
+    if commit:
+        db.commit()
     return {"guardados": len(filas), "cambios": cambios}
 
 
-def guardar_rubros(db: Session, filas: list[dict], usuario: str | None) -> dict:
+def guardar_rubros(db: Session, filas: list[dict], usuario: str | None, commit: bool = True) -> dict:
     tenant = settings.default_tenant_id
     cambios: list[str] = []
     for f in filas:
@@ -203,7 +212,8 @@ def guardar_rubros(db: Session, filas: list[dict], usuario: str | None) -> dict:
             db, accion="politica_rubro_editada", entidad="politica_rubro",
             usuario_email=usuario, detalle="; ".join(cambios)[:2000],
         )
-    db.commit()
+    if commit:
+        db.commit()
     return {"guardados": len(filas), "cambios": cambios}
 
 
