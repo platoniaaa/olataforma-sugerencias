@@ -266,24 +266,32 @@ def guardar_politica(
 
     Se recalculan SOLO los productos que el cambio puede mover, calculados antes
     de guardar contra la politica de hoy: el rubro 35 son ~1.500 de ~40 mil. Un
-    tipo nuevo sin rubro o un descuento no mueven ningun precio y no recalculan.
+    tipo que ningun producto usa o un descuento no mueven precios y no recalculan.
+
+    La politica y los precios recalculados se confirman JUNTOS. Antes la politica
+    se confirmaba y despues se recalculaba: si el recalculo fallaba (corte de
+    Render), la politica quedaba guardada con los precios viejos, y el reintento
+    ya no encontraba nada que recalcular porque comparaba contra la politica
+    guardada. Hasta el recalculo completo del motor, al dia siguiente.
     """
-    afectados = precios_service.productos_afectados(
-        db, [f.model_dump() for f in payload.factores], [r.model_dump() for r in payload.rubros],
-        payload.seguir_al_rubro,
-    )
+    factores = [f.model_dump() for f in payload.factores]
+    rubros = [r.model_dump() for r in payload.rubros]
+    afectados = precios_service.productos_afectados(db, factores, rubros, payload.seguir_al_rubro)
     try:
-        rf = politica.guardar_factores(db, [f.model_dump() for f in payload.factores], email,
-                                       commit=False)
-        rr = politica.guardar_rubros(db, [r.model_dump() for r in payload.rubros], email,
-                                     commit=False)
+        rf = politica.guardar_factores(db, factores, email, commit=False)
+        rr = politica.guardar_rubros(db, rubros, email, commit=False)
         rs = precios_service.seguir_al_rubro(db, payload.seguir_al_rubro, email)
+        # La sesion no hace autoflush: sin esto el recalculo leeria la politica vieja.
+        db.flush()
+        recalculo = (precios_service.recalcular(db, usuario=email, refrescar_insumos=False,
+                                                productos=afectados)
+                     if afectados else None)
         db.commit()
     except ValueError as e:
         db.rollback()
         raise HTTPException(status_code=422, detail=str(e)) from e
-    r = {"factores": rf["cambios"], "rubros": rr["cambios"], "seguir_al_rubro": rs}
-    r["recalculo"] = (precios_service.recalcular(db, usuario=email, refrescar_insumos=False,
-                                                 productos=afectados)
-                      if afectados else None)
-    return r
+    except Exception:
+        db.rollback()
+        raise
+    return {"factores": rf["cambios"], "rubros": rr["cambios"], "seguir_al_rubro": rs,
+            "recalculo": recalculo}

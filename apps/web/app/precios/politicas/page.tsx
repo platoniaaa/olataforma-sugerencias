@@ -44,7 +44,7 @@ function resumenGuardado(r: ResultadoPolitica): string {
   if (!r.recalculo) return "Guardado. Ningún precio cambia con esto.";
   // Los precios, no "productos con cambios": el recalculo cuenta tambien el cambio
   // de tipo, y el numero no cuadraba con el que mostro la vista previa.
-  const precios = r.recalculo.por_campo?.precio ?? 0;
+  const precios = r.recalculo.precios_distintos ?? r.recalculo.por_campo?.precio ?? 0;
   const partes = [`Guardado. Cambiaron ${formatoNumero(precios)} precios`];
   if (r.seguir_al_rubro.productos) {
     partes.push(`${formatoNumero(r.seguir_al_rubro.productos)} productos dejaron su tipo escrito a mano y siguen al rubro`);
@@ -111,8 +111,10 @@ export default function PoliticasPreciosPage() {
     const estaba = original.factores.some((f) => f.tipo === tipo && f.procedencia === proc);
     if (existe) {
       // Una celda que no existia y se vuelve a vaciar desaparece; una que existia
-      // queda vacia y marcada como error hasta que se corrija.
-      if (Number.isNaN(num) && !estaba) {
+      // -o la de un tipo nuevo, que necesita las dos procedencias- queda vacia y
+      // marcada como error hasta que se corrija. Borrarla dejaba guardar el tipo
+      // con una sola procedencia y los productos de la otra sin precio.
+      if (Number.isNaN(num) && !estaba && !tiposNuevos.includes(tipo)) {
         setFactores(factores.filter((f) => !(f.tipo === tipo && f.procedencia === proc)));
         return;
       }
@@ -144,7 +146,11 @@ export default function PoliticasPreciosPage() {
   const claveCambio = JSON.stringify(cambio);
   // Un tipo creado que ningun rubro usa todavia: guardarlo no mueve precios. El
   // 14-10-2026 se guardo asi y parecio que el cambio "no habia funcionado".
-  const tiposSinRubro = tiposNuevos.filter((t) => !(rubros ?? []).some((r) => r.tipo === t));
+  // Solo cuando la vista previa confirma que no cambia ningun precio: un producto
+  // puede tener ese tipo escrito a mano y si cambiar, aunque ningun rubro lo use.
+  const tiposSinRubro = vista && !calculando && vista.cambian === 0
+    ? tiposNuevos.filter((t) => !(rubros ?? []).some((r) => r.tipo === t))
+    : [];
 
   // La vista previa se pide sola mientras se edita, con una pausa para no pedir
   // una por tecla. Corre la misma regla que el recalculo: lo que muestra es lo
@@ -250,6 +256,21 @@ export default function PoliticasPreciosPage() {
       await cargar();
       setAviso(resumenGuardado(r));
     } catch (e) {
+      // La respuesta pudo perderse con el servidor ya guardado (corte de red o de
+      // Render): si lo que hay en el servidor ya es lo que se queria guardar, se
+      // dice eso. El servidor guarda la politica y los precios juntos, asi que si
+      // la politica esta, los precios tambien.
+      try {
+        const [f, r] = await Promise.all([api.politicaFactores(), api.politicaRubros()]);
+        const pendiente = cambioPolitica(factores ?? [], f, rubros ?? [], r, []);
+        if (!pendiente.factores.length && !pendiente.rubros.length) {
+          await cargar();
+          setAviso("El cambio quedó guardado, aunque la respuesta del servidor no llegó. Revisa los precios en la lista.");
+          return;
+        }
+      } catch {
+        // Sin servidor no hay como saberlo: queda el error de abajo.
+      }
       setError(e instanceof Error ? e.message : "No se pudo guardar.");
     } finally {
       setGuardando(false);

@@ -239,4 +239,61 @@ describe("Política de precios · tipo nuevo para un rubro", () => {
     expect(confirmar).toHaveBeenCalledWith(expect.stringContaining('"Rubro 35" todavía no está en ningún rubro'));
     expect(mocks.guardar).not.toHaveBeenCalled();
   });
+
+  async function agregarTipoRubro35() {
+    render(<PoliticasPreciosPage />);
+    await screen.findByLabelText("Tipo del rubro 35");
+    fireEvent.change(screen.getByLabelText("Nombre del tipo"), { target: { value: "Rubro 35" } });
+    fireEvent.change(screen.getByLabelText("Factor nacional"), { target: { value: "1,88" } });
+    fireEvent.change(screen.getByLabelText("Factor importado"), { target: { value: "1,88" } });
+    fireEvent.change(screen.getByLabelText("Descuento máx. %"), { target: { value: "20" } });
+    fireEvent.click(screen.getByRole("button", { name: /Agregar tipo/ }));
+  }
+
+  it("si un tipo sin rubro igual mueve precios (alguien lo tiene escrito a mano), no dice que no cambia nada", async () => {
+    mocks.vista.mockResolvedValue({ ...VISTA, productos_revisados: 1, cambian: 1, suben: 1, rubros: [] });
+    await agregarTipoRubro35();
+
+    expect(await screen.findByText(/1 productos cambian de precio/)).toBeInTheDocument();
+    expect(screen.queryByText(/todavía no está en ningún rubro/)).not.toBeInTheDocument();
+  });
+
+  it("vaciar un factor de un tipo nuevo lo marca como error en vez de borrarlo", async () => {
+    // Borrarlo dejaba guardar el tipo con una sola procedencia: los productos de la
+    // otra quedaban sin precio.
+    await agregarTipoRubro35();
+    fireEvent.change(screen.getByLabelText("Factor Rubro 35 Importado"), { target: { value: "" } });
+
+    expect(await screen.findByText(/Factor fuera de rango en Rubro 35 \/ Importado/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Guardar cambios/ }));
+    expect(mocks.guardar).not.toHaveBeenCalled();
+  });
+
+  it("si la respuesta se pierde pero el servidor ya lo guardó, lo dice en vez de mostrar el error", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    mocks.guardar.mockRejectedValue(new Error("No se pudo conectar con el servidor."));
+    render(<PoliticasPreciosPage />);
+    fireEvent.change(await screen.findByLabelText("Tipo del rubro 34"), { target: { value: "Bateria" } });
+    await screen.findByText(/385 productos cambian de precio/);
+    // Lo que devuelve el servidor despues del corte: el cambio ya esta.
+    mocks.rubros.mockResolvedValue(RUBROS.map((r) => (r.rubro === "34" ? { ...r, tipo: "Bateria" } : r)));
+
+    fireEvent.click(screen.getByRole("button", { name: /Guardar cambios/ }));
+
+    expect(await screen.findByText(/quedó guardado, aunque la respuesta del servidor no llegó/)).toBeInTheDocument();
+    expect(screen.queryByText("No se pudo conectar con el servidor.")).not.toBeInTheDocument();
+  });
+
+  it("si de verdad no se guardó, muestra el error y deja los cambios para reintentar", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    mocks.guardar.mockRejectedValue(new Error("No se pudo conectar con el servidor."));
+    render(<PoliticasPreciosPage />);
+    fireEvent.change(await screen.findByLabelText("Tipo del rubro 34"), { target: { value: "Bateria" } });
+    await screen.findByText(/385 productos cambian de precio/);
+
+    fireEvent.click(screen.getByRole("button", { name: /Guardar cambios/ }));
+
+    expect(await screen.findByText("No se pudo conectar con el servidor.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Tipo del rubro 34")).toHaveValue("Bateria");
+  });
 });

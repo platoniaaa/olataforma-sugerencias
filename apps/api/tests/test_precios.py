@@ -1124,7 +1124,7 @@ def test_cambiar_un_rubro_recalcula_solo_sus_productos(client, con_tipo_manual):
     assert rec["productos"] == 3
     assert rec["por_campo"]["precio"] == 2       # 71 AAA1 y 71 MAN1; el congelado no
     # Nada quedo afuera: el recalculo completo no encuentra cambios.
-    assert svc.recalcular(con_tipo_manual, refrescar_insumos=False)["cambios"] == 0
+    assert _sin_pendientes(con_tipo_manual)
 
 
 def test_cambiar_el_factor_de_un_tipo_recalcula_los_rubros_que_lo_usan(client, con_tipo_manual):
@@ -1135,7 +1135,7 @@ def test_cambiar_el_factor_de_un_tipo_recalcula_los_rubros_que_lo_usan(client, c
     rec = r.json()["recalculo"]
     assert rec["productos"] == 3                  # el rubro 71 usa Liviano
     assert client.get("/api/precios/71 AAA1").json()["precio_final"] == 20000
-    assert svc.recalcular(con_tipo_manual, refrescar_insumos=False)["cambios"] == 0
+    assert _sin_pendientes(con_tipo_manual)
 
 
 def test_un_producto_nuevo_sin_tipo_tambien_se_recalcula(client, con_tipo_manual):
@@ -1158,3 +1158,91 @@ def test_la_vista_previa_revisa_los_mismos_productos_que_se_recalculan(client, c
     afectados = svc.productos_afectados(con_tipo_manual, TIPO_NUEVO, RUBRO_71_NUEVO)
 
     assert v["productos_revisados"] == len(afectados) == 3
+
+
+# --- Lo que encontro la revision del 14-10-2026 ---------------------------------
+
+
+def _precios(db):
+    from src.models import PrecioProducto
+    db.expire_all()
+    return {p.producto: (p.tipo, p.precio_final) for p in db.query(PrecioProducto).all()}
+
+
+def _sin_pendientes(db):
+    """La prueba de oro: lo que dejo el guardado es lo mismo que daria un recalculo
+    completo. Compara precios, no la cuenta de cambios: un producto que pasa de
+    no tener precio a tenerlo no cuenta como cambio en `recalcular`."""
+    antes = _precios(db)
+    svc.recalcular(db, refrescar_insumos=False)
+    return antes == _precios(db)
+
+
+def test_un_neumatico_recien_creado_se_recalcula_al_cambiar_su_factor(client, con_tipo_manual):
+    """El feed del ERP crea el producto sin tipo; su tipo sale de la glosa (NEU),
+    no del rubro 71 (Liviano)."""
+    _producto(con_tipo_manual, "71 NEU-NUEVO", glosa="NEUMATICO 175/70 R13",
+              procedencia_maestro="NACIONAL")
+
+    r = client.put("/api/precios/politica",
+                   json={"factores": [{"tipo": "Neumatico", "procedencia": "Nacional", "factor": 1.5,
+                                       "descuento_max": 0}]})
+
+    assert r.status_code == 200, r.text
+    p = client.get("/api/precios/71 NEU-NUEVO").json()
+    assert (p["tipo"], p["precio_final"]) == ("Neumatico", 1500)
+    assert _sin_pendientes(con_tipo_manual)
+
+
+def test_una_glosa_completada_despues_tambien_entra(client, con_tipo_manual):
+    """El producto quedo como Liviano y despues el feed le completo una glosa NEU."""
+    from src.models import PrecioProducto
+
+    p = con_tipo_manual.query(PrecioProducto).filter_by(producto="71 AAA1").one()
+    p.glosa = "NEUMATICO 185/65 R14"
+    con_tipo_manual.commit()
+
+    client.put("/api/precios/politica",
+               json={"factores": [{"tipo": "Neumatico", "procedencia": "Nacional", "factor": 1.5,
+                                   "descuento_max": 0}]})
+
+    assert client.get("/api/precios/71 AAA1").json()["tipo"] == "Neumatico"
+    assert _sin_pendientes(con_tipo_manual)
+
+
+def test_un_tipo_escrito_a_mano_sin_factor_toma_el_factor_nuevo(client, con_tipo_manual):
+    """Un tipo que ningun RUBRO usa igual puede mover precios: los de los productos
+    que lo tienen escrito a mano."""
+    from src.models import PrecioOverride
+
+    _producto(con_tipo_manual, "71 FIL1", procedencia_maestro="NACIONAL")
+    con_tipo_manual.add(PrecioOverride(tenant_id="curifor", producto="71 FIL1", tipo_manual="Rubro 99"))
+    con_tipo_manual.commit()
+    svc.recalcular(con_tipo_manual)
+
+    fact = [{"tipo": "Rubro 99", "procedencia": p, "factor": 1.95, "descuento_max": 20}
+            for p in ("Nacional", "Importado")]
+    v = client.post("/api/precios/politica/vista-previa", json={"factores": fact}).json()
+    r = client.put("/api/precios/politica", json={"factores": fact}).json()
+
+    assert v["cambian"] == 1
+    assert r["recalculo"]["precios_distintos"] == 1          # de sin precio a 1.950
+    assert client.get("/api/precios/71 FIL1").json()["precio_final"] == 1950
+    assert _sin_pendientes(con_tipo_manual)
+
+
+def test_si_el_recalculo_falla_no_queda_la_politica_a_medias(client, con_tipo_manual, monkeypatch):
+    """Antes la politica se confirmaba y despues se recalculaba: si el recalculo
+    fallaba, el reintento ya no encontraba nada que recalcular."""
+    from src.models import PoliticaPrecio, PoliticaRubro
+
+    def falla(*a, **k):
+        raise RuntimeError("corte de Render")
+
+    monkeypatch.setattr(svc, "recalcular", falla)
+    with TestClient(app, raise_server_exceptions=False) as c:
+        r = c.put("/api/precios/politica", json={"factores": TIPO_NUEVO, "rubros": RUBRO_71_NUEVO})
+
+    assert r.status_code == 500
+    assert con_tipo_manual.query(PoliticaPrecio).filter_by(tipo="Rubro 71").count() == 0
+    assert con_tipo_manual.query(PoliticaRubro).filter_by(rubro="71").one().tipo == "Liviano"

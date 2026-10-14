@@ -1478,8 +1478,11 @@ export interface ResultadoPolitica {
     productos: number;
     cambios: number;
     productos_con_cambios: number;
-    /** Cambios por campo: "precio" es el número que se compara con la vista previa. */
+    /** Cambios por campo (no cuenta los productos que no tenían precio). */
     por_campo: Record<string, number>;
+    /** Precios distintos de los de antes, incluidos los que no tenían: el mismo
+     *  número que la vista previa. */
+    precios_distintos?: number;
   } | null;
 }
 

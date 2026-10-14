@@ -446,6 +446,13 @@ def recalcular(db: Session, usuario: str | None = None, refrescar_insumos: bool 
     los 39.830 para dar 0 cambios). Sin `productos`, la lista entera."""
     tenant = settings.default_tenant_id
     stmt = select(PrecioProducto).where(PrecioProducto.tenant_id == tenant)
+    if productos is not None and len(set(productos)) > 5000:
+        # Pedir mas de media lista por lotes de IN es mas lento que leerla entera
+        # (medido en una copia de 60 mil: 48 mil afectados, 19,8 s contra 12,7 s).
+        total = db.scalar(select(func.count()).select_from(PrecioProducto)
+                          .where(PrecioProducto.tenant_id == tenant)) or 0
+        if len(set(productos)) * 2 > total:
+            productos = None
     if productos is None:
         filas = db.scalars(stmt).all()
     else:
@@ -454,7 +461,8 @@ def recalcular(db: Session, usuario: str | None = None, refrescar_insumos: bool 
             filas += db.scalars(stmt.where(PrecioProducto.producto.in_(lote))).all()
     if not filas:
         return {"productos": 0, "cambios": 0, "productos_con_cambios": 0,
-                "por_campo": {c: 0 for c in CAMPOS_CAMBIO}, "corrida_id": None}
+                "por_campo": {c: 0 for c in CAMPOS_CAMBIO}, "precios_distintos": 0,
+                "corrida_id": None}
     codigos = [f.producto for f in filas]
     fact = politica.factores(db)
     rub = politica.rubros(db)
@@ -473,6 +481,10 @@ def recalcular(db: Session, usuario: str | None = None, refrescar_insumos: bool 
     cambios: list[dict] = []
     por_campo = {c: 0 for c in CAMPOS_CAMBIO}
     pendientes: dict[str, int] = {}
+    # Precios distintos de los de antes, CONTANDO los que no tenian precio: es el
+    # numero que muestra la vista previa. `por_campo` no los cuenta (un producto
+    # que nace no es un cambio que revisar) y la pantalla decia "0 precios".
+    precios_distintos = 0
 
     for f in filas:
         # La foto ANTES de tocar nada: contra esto se miden los cambios. Si se
@@ -521,6 +533,7 @@ def recalcular(db: Session, usuario: str | None = None, refrescar_insumos: bool 
             "procedencia": f.procedencia_final, "costo": f.costo, "stock": f.stock,
             "precio": f.precio_final, "tipo": f.tipo,
         }
+        precios_distintos += int(_txt(antes["precio"]) != _txt(despues["precio"]))
         # Solo cuenta como cambio lo que YA tenia un valor y ahora tiene otro. En la
         # primera corrida todo pasa de vacio a algo y eso no es un cambio que
         # alguien tenga que revisar.
@@ -558,7 +571,7 @@ def recalcular(db: Session, usuario: str | None = None, refrescar_insumos: bool 
     return {
         "productos": len(filas), "cambios": len(cambios),
         "productos_con_cambios": len(pendientes), "por_campo": por_campo,
-        "corrida_id": corrida,
+        "precios_distintos": precios_distintos, "corrida_id": corrida,
     }
 
 
@@ -626,19 +639,34 @@ def productos_afectados(db: Session, factores_: list[dict], rubros_: list[dict],
 
 
 def _filas_afectadas(db: Session, rubros: set[str], tipos: set[str]) -> list:
-    """Los productos que un cambio de politica puede mover: los de esos rubros y
-    los que hoy tienen uno de esos tipos (con sus alias: "Baterias" es "Bateria")."""
+    """Los productos que un cambio de politica puede mover, por cada camino por el
+    que `_tipo` le da un tipo a un producto:
+
+    - el rubro: los de esos rubros;
+    - el tipo que ya tienen guardado (con sus alias: "Baterias" es "Bateria");
+    - el tipo escrito a mano, aunque el guardado este atrasado;
+    - la glosa que empieza con NEU, si cambia el factor de Neumatico: el feed del
+      ERP crea productos sin tipo, o les completa la glosa, sin recalcular.
+    """
+    tenant = settings.default_tenant_id
     condiciones = []
     if rubros:
         condiciones.append(PrecioProducto.rubro.in_(sorted(rubros)))
     if tipos:
-        variantes = set(tipos) | {a for a, c in politica._ALIAS.items() if c in tipos}
-        condiciones.append(func.lower(PrecioProducto.tipo).in_(sorted(variantes)))
+        variantes = sorted(set(tipos) | {a for a, c in politica._ALIAS.items() if c in tipos})
+        condiciones.append(func.lower(PrecioProducto.tipo).in_(variantes))
+        condiciones.append(PrecioProducto.producto.in_(
+            select(PrecioOverride.producto).where(
+                PrecioOverride.tenant_id == tenant,
+                func.lower(PrecioOverride.tipo_manual).in_(variantes))))
+        if "neumatico" in tipos:
+            condiciones.append(
+                func.upper(func.ltrim(func.coalesce(PrecioProducto.glosa, ""))).like("NEU%"))
     if not condiciones:
         return []
     return db.execute(
         select(*_COLUMNAS_REGLA, PrecioProducto.tipo_origen)
-        .where(PrecioProducto.tenant_id == settings.default_tenant_id, or_(*condiciones))
+        .where(PrecioProducto.tenant_id == tenant, or_(*condiciones))
         .order_by(PrecioProducto.producto)
     ).all()
 
