@@ -126,12 +126,16 @@ por producto.
     sin que nada avisara. Ahora es un error;
   - la de la **obs** evita que una nota con cualquier carácter parezca una edición, y
     la segunda (cp1252) que no lo parezca cuando Excel guarda como "CSV" y cambia por
-    `?` lo que no cabe (emojis, flechas).
+    `?` lo que no cabe (flechas, espacio fino). Excel escribe un `?` por unidad UTF-16:
+    un emoji queda como `??`. El `?` se calcula ANTES de colapsar los espacios, porque
+    el espacio fino (U+2009) no cabe en cp1252 y Excel lo escribe como `?`.
 
   Sin `Referencia` el archivo no se carga. Excel con "disminuir decimales" guarda
-  1,1429 como 1,14 o 1,143: si solo cambió ese redondeo (mitad hacia arriba, como
-  Excel), no cuenta como edición del factor. Costo conocido: escribir a propósito el
-  valor redondeado tampoco se distingue.
+  1,1429 como 1,14 o 1,143: si el factor del archivo es el de la referencia redondeado
+  a 2 o a 3 decimales (mitad hacia arriba, como Excel), no cuenta como edición. Se
+  compara con el valor ya canónico, sin ceros finales: 1,4993 mostrado como `1,50`
+  llega como `1.5`. Costo conocido: escribir a propósito el valor redondeado tampoco
+  se distingue.
 - **Carga**: `POST /api/precios/carga/vista-previa` lee y compara sin guardar;
   `POST /api/precios/carga` vuelve a leer el archivo y aplica. **Todo o nada**: un
   error de validación (factor fuera de rango, tipo que no existe en la política,
@@ -148,6 +152,12 @@ por producto.
   quita 10 decisiones o más (`UMBRAL_QUITAS`), la pantalla pide marcar una
   confirmación y el servidor exige `confirmar_quitas=true`: un BUSCARV roto no puede
   borrar precios fijos en silencio.
+- **Poner muchos a la vez**: si una carga deja más de 200 precios fijos o factores
+  propios nuevos (`UMBRAL_MASIVA`), la pantalla pide otra confirmación y el servidor
+  exige `confirmar_masiva=true`. Ordenar una sola columna (Precio final, Factor) deja
+  cada valor en la fila de otro producto, y cada fila parece una edición válida: la
+  Referencia detecta el código, pero no que un valor cambió de dueño. La vista previa
+  trae `fijan_total`, `fijan` y `umbral_masiva`.
 - **Qué deja**: una fila de auditoría `precio_override` por producto ("(carga desde
   Excel)") y una de resumen `precios_carga_excel`, más una notificación. Recalcula SOLO
   los productos editados, con la política cargada una vez y leída ANTES de escribir
@@ -180,7 +190,15 @@ por producto.
 - **Revisión**: se hicieron tres pasadas de revisión adversarial antes de publicar. Las
   dos primeras encontraron 25 y 29 defectos reales (varios de pérdida silenciosa de
   datos: una Referencia desalineada convertía precios en precio fijo; un `.xlsx` de
-  26 KB tumbaba la API; las notas con emojis se sobrescribían con `?`).
+  26 KB tumbaba la API; las notas con emojis se sobrescribían con `?`). La tercera
+  encontró 25 hallazgos (16 distintos); se corrigieron los 3 más serios (emoji,
+  redondeo del factor que termina en 0, y el diálogo que se cerraba al tocar la barra
+  de desplazamiento) y se agregó el freno de 200. **Pendientes menores** (ninguno
+  afecta datos reales hoy): notas con `€ – “ ” •` en "CSV MS-DOS" o "Macintosh"; el
+  escaneo de `.xlsx` con etiquetas con prefijo (`<x:c`), comillas simples u otro orden
+  de atributos; un CSV con filas vacías al final cuenta contra el tope de celdas; el
+  tope de celdas (3 millones) es alto para 512 MB; un factor redondeado a 0 o 1
+  decimal sí cuenta como edición; la vista previa no se enfoca al terminar de leer.
 
 ## Exportar al ERP
 

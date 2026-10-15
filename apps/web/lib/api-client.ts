@@ -1192,12 +1192,14 @@ export const api = {
    *  la respuesta se pierde, volver a subir el archivo dice 0 cambios. */
   async cargarPrecios(
     archivo: File,
-    opts: { confirmarQuitas?: boolean } = {}
+    opts: { confirmarQuitas?: boolean; confirmarMasiva?: boolean } = {}
   ): Promise<import("./types").CargaPreciosResultado> {
     const fd = new FormData();
     fd.append("archivo", archivo);
-    // La carga que quita muchas decisiones (celdas vacias) pide confirmacion al servidor.
+    // La carga que quita muchas decisiones (celdas vacias), o que pone muchos precios
+    // fijos o factores propios, pide confirmacion al servidor.
     if (opts.confirmarQuitas) fd.append("confirmar_quitas", "true");
+    if (opts.confirmarMasiva) fd.append("confirmar_masiva", "true");
     let res: Response;
     try {
       res = await req("/api/precios/carga", { method: "POST", body: fd });

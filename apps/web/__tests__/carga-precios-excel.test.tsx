@@ -39,6 +39,7 @@ const BASE: CargaPreciosVistaPrevia = {
   archivo: "lista.csv", filas: 39830, sin_cambios: 39826, a_cambiar: 2, por_campo: { tipo: 1, precio_fijo: 1 },
   efecto: { suben: 1, bajan: 0, sin_cambio_de_precio: 1, con_precio_nuevo: 0 },
   quitan_total: 0, quitan: {}, quitan_ejemplos: [], umbral_quitas: 10,
+  fijan_total: 0, fijan: {}, umbral_masiva: 200,
   errores: [], errores_total: 0, conflictos: [], conflictos_total: 0,
   desconocidos: [], desconocidos_total: 0, sin_referencia: [], sin_referencia_total: 0,
   cambios: [
@@ -259,7 +260,7 @@ describe("quitar decisiones", () => {
     fireEvent.click(cargarBtn);
 
     await waitFor(() => expect(mocks.cargar).toHaveBeenCalledTimes(1));
-    expect(mocks.cargar).toHaveBeenCalledWith(ARCHIVO, { confirmarQuitas: true });
+    expect(mocks.cargar).toHaveBeenCalledWith(ARCHIVO, { confirmarQuitas: true, confirmarMasiva: false });
   });
 
   it("elegir otro archivo vuelve a pedir la confirmacion", async () => {
@@ -275,6 +276,67 @@ describe("quitar decisiones", () => {
   });
 });
 
+describe("poner muchos precios fijos o factores", () => {
+  const MUCHOS = { ...BASE, a_cambiar: 250, fijan_total: 250, fijan: { precio_fijo: 190, factor: 60 } };
+
+  it("avisa cuantos son y por que puede ser una columna ordenada sola", async () => {
+    mocks.previa.mockResolvedValue(MUCHOS);
+    abrir();
+
+    await subir();
+
+    expect(screen.getByText(/Esta carga deja 250 precios fijos o factores propios nuevos: 190 precios fijos, 60 factores propios\./))
+      .toBeInTheDocument();
+    expect(screen.getByText(/ordenaste una sola columna/)).toBeInTheDocument();
+  });
+
+  it("no deja cargar hasta confirmar, y manda la confirmacion", async () => {
+    mocks.previa.mockResolvedValue(MUCHOS);
+    abrir();
+    await subir();
+
+    const cargarBtn = screen.getByRole("button", { name: "Cargar 250 productos" });
+    expect(cargarBtn).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Entiendo que se fijan 250 valores/ }));
+    expect(cargarBtn).toBeEnabled();
+    fireEvent.click(cargarBtn);
+
+    await waitFor(() => expect(mocks.cargar).toHaveBeenCalledTimes(1));
+    expect(mocks.cargar).toHaveBeenCalledWith(ARCHIVO, { confirmarQuitas: false, confirmarMasiva: true });
+  });
+
+  it("hasta el umbral no pide nada", async () => {
+    mocks.previa.mockResolvedValue({ ...BASE, fijan_total: 200, fijan: { precio_fijo: 200 } });
+    abrir();
+
+    await subir();
+
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cargar 2 productos" })).toBeEnabled();
+  });
+
+  it("con un solo valor el texto va en singular", async () => {
+    mocks.previa.mockResolvedValue({ ...BASE, umbral_masiva: 0, fijan_total: 1, fijan: { precio_fijo: 1 } });
+    abrir();
+
+    await subir();
+
+    expect(screen.getByText(/nuevos: 1 precio fijo\./)).toBeInTheDocument();
+  });
+
+  it("elegir otro archivo vuelve a pedir la confirmacion", async () => {
+    mocks.previa.mockResolvedValue(MUCHOS);
+    abrir();
+    await subir();
+    fireEvent.click(screen.getByRole("checkbox"));
+
+    await subir(new File(["x"], "otro.csv"));
+
+    expect(screen.getByRole("checkbox")).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "Cargar 250 productos" })).toBeDisabled();
+  });
+});
+
 describe("cargar", () => {
   it("sube el mismo archivo que se miro, avisa el resultado y refresca la lista", async () => {
     const onCargado = vi.fn();
@@ -284,7 +346,7 @@ describe("cargar", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cargar 2 productos" }));
 
     await waitFor(() => expect(mocks.cargar).toHaveBeenCalledTimes(1));
-    expect(mocks.cargar).toHaveBeenCalledWith(ARCHIVO, { confirmarQuitas: false });
+    expect(mocks.cargar).toHaveBeenCalledWith(ARCHIVO, { confirmarQuitas: false, confirmarMasiva: false });
     const resultado = await screen.findByText(/Listo: 2 productos actualizados, 1 cambió de precio/);
     expect(resultado).toBeInTheDocument();
     expect(resultado).toHaveTextContent('Los precios nuevos salen en el próximo "Solo diferencias"');
@@ -609,7 +671,7 @@ describe("lecturas lentas y cierre", () => {
     expect(screen.queryByText("PROD-DEL-UNO")).not.toBeInTheDocument();
     expect(screen.getByText("dos.csv")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cargar 2 productos" }));
-    await waitFor(() => expect(mocks.cargar).toHaveBeenCalledWith(dos, { confirmarQuitas: false }));
+    await waitFor(() => expect(mocks.cargar).toHaveBeenCalledWith(dos, { confirmarQuitas: false, confirmarMasiva: false }));
   });
 
   it("se puede cerrar mientras lee, y al reabrir no queda la lectura vieja", async () => {

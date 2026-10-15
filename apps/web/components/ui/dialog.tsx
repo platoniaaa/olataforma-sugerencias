@@ -19,6 +19,18 @@ interface DialogProps {
 // usuario perdería el formulario que estaba llenando. Solo responde el de más arriba.
 const abiertos: string[] = [];
 
+/** El clic cayo sobre la barra de desplazamiento del overlay, no sobre el fondo: la barra
+ *  ocupa espacio dentro del overlay (offsetWidth > clientWidth) y el clic llega con el
+ *  overlay como destino. Cerrar ahi hacia perder una vista previa por tocar el scroll. */
+function enBarraDeDesplazamiento(e: React.MouseEvent<HTMLElement>): boolean {
+  const el = e.currentTarget;
+  const caja = el.getBoundingClientRect();
+  return (
+    (el.offsetWidth > el.clientWidth && e.clientX - caja.left >= el.clientWidth) ||
+    (el.offsetHeight > el.clientHeight && e.clientY - caja.top >= el.clientHeight)
+  );
+}
+
 /** Modal accesible minimo: overlay + panel centrado, cierra con Escape o backdrop. */
 export function Dialog({
   open,
@@ -49,7 +61,7 @@ export function Dialog({
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4 pt-[8vh]"
-      onMouseDown={onClose}
+      onMouseDown={(e) => { if (!enBarraDeDesplazamiento(e)) onClose(); }}
       role="dialog"
       aria-modal="true"
       aria-label={title}

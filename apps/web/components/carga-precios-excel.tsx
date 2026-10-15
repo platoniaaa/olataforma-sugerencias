@@ -37,6 +37,12 @@ const DECISION: Record<string, string> = {
   no_producto: "«no es producto»",
 };
 
+/** Las decisiones que una carga puede PONER en bloque, en singular y plural. */
+const FIJAN: Record<string, [string, string]> = {
+  precio_fijo: ["precio fijo", "precios fijos"],
+  factor: ["factor propio", "factores propios"],
+};
+
 type Fase = "inicio" | "leyendo" | "previa" | "cargando" | "listo";
 
 // Nombre con que el cliente marca la carga cuya respuesta se perdio (ver api-client).
@@ -54,6 +60,11 @@ const pesos = (n: number | null) => (n == null ? "sin precio" : `$${formatoNumer
 
 /** "1 producto", "2 productos". */
 const cantidad = (n: number, uno: string, varios: string) => `${formatoNumero(n)} ${n === 1 ? uno : varios}`;
+
+function textoFijan(clave: string, n: number): string {
+  const [uno, varios] = FIJAN[clave] ?? [clave, clave];
+  return cantidad(n, uno, varios);
+}
 
 /** "1 sube, 0 bajan, ...": el verbo concuerda con la cantidad. */
 function efectoTexto(e: CargaPreciosVistaPrevia["efecto"]): string {
@@ -109,6 +120,7 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
   const [aviso, setAviso] = useState<string | null>(null);
   const [descargando, setDescargando] = useState(false);
   const [confirmaQuitas, setConfirmaQuitas] = useState(false);
+  const [confirmaMasiva, setConfirmaMasiva] = useState(false);
   const entrada = useRef<HTMLInputElement>(null);
   const botonElegir = useRef<HTMLButtonElement>(null);
   const botonDescargar = useRef<HTMLButtonElement>(null);
@@ -145,6 +157,7 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
     setError(null);
     setAviso(null);
     setConfirmaQuitas(false);
+    setConfirmaMasiva(false);
   }, [open]);
 
   // Un error que queda arriba del dialogo mientras el boton esta abajo parece "no paso
@@ -197,6 +210,7 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
     setError(null);
     setAviso(null);
     setConfirmaQuitas(false);
+    setConfirmaMasiva(false);
     setArchivo(f);
     if (!f) {
       setFase("inicio");
@@ -229,7 +243,7 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
     setFase("cargando");
     setError(null);
     try {
-      const r = await api.cargarPrecios(archivo, { confirmarQuitas: confirmaQuitas });
+      const r = await api.cargarPrecios(archivo, { confirmarQuitas: confirmaQuitas, confirmarMasiva: confirmaMasiva });
       setResultado(r);
       setFase("listo");
       onCargado?.();
@@ -249,8 +263,10 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
   const hayErrores = (previa?.errores_total ?? 0) > 0;
   const quitan = previa?.quitan_total ?? 0;
   const pideConfirmar = previa !== null && quitan >= previa.umbral_quitas;
+  const fijan = previa?.fijan_total ?? 0;
+  const pideConfirmarMasiva = previa !== null && fijan > previa.umbral_masiva;
   const puedeCargar = fase === "previa" && previa !== null && previa.a_cambiar > 0 && !hayErrores
-    && (!pideConfirmar || confirmaQuitas);
+    && (!pideConfirmar || confirmaQuitas) && (!pideConfirmarMasiva || confirmaMasiva);
   const omitidos = previa
     ? previa.conflictos_total + previa.desconocidos_total + previa.sin_referencia_total
     : 0;
@@ -444,6 +460,30 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
                         <span>Entiendo que se quitan {formatoNumero(quitan)} decisiones y quiero cargarlas.</span>
                       </label>
                     )}
+                  </div>
+                )}
+
+                {pideConfirmarMasiva && !hayErrores && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+                    <p className="font-medium">
+                      Esta carga deja {formatoNumero(fijan)} precios fijos o factores propios nuevos:{" "}
+                      {Object.entries(previa.fijan).map(([k, n]) => textoFijan(k, n)).join(", ")}.
+                    </p>
+                    <p className="mt-0.5 text-[12px]">
+                      Son muchos para una edición a mano. Si ordenaste una sola columna del Excel (por ejemplo Precio final
+                      o Factor), cada valor quedó en la fila de otro producto: descarga el archivo de nuevo y edítalo sin
+                      ordenar columnas sueltas.
+                    </p>
+                    <label className="mt-2 flex items-start gap-2 text-[13px]">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={confirmaMasiva}
+                        disabled={cargando}
+                        onChange={(e) => setConfirmaMasiva(e.target.checked)}
+                      />
+                      <span>Entiendo que se fijan {formatoNumero(fijan)} valores y quiero cargarlos.</span>
+                    </label>
                   </div>
                 )}
 

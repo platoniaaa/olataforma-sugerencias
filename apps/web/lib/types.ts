@@ -1552,6 +1552,10 @@ export interface CargaPreciosVistaPrevia {
   quitan: Record<string, number>;
   quitan_ejemplos: { producto: string; campo: string }[];
   umbral_quitas: number;
+  /** Precios fijos y factores propios que la carga PONE, y desde cuántos pide confirmación. */
+  fijan_total: number;
+  fijan: Record<string, number>;
+  umbral_masiva: number;
   errores: CargaPreciosError[];
   errores_total: number;
   conflictos: CargaPreciosError[];

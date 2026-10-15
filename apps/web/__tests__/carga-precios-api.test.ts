@@ -50,17 +50,22 @@ describe("cargarPrecios", () => {
     await expect(api.cargarPrecios(ARCHIVO)).rejects.toThrow("El archivo tiene 2 error(es). No se cargó nada.");
   });
 
-  it("manda la confirmacion de quitas solo cuando se pide", async () => {
+  it("manda las confirmaciones solo cuando se piden", async () => {
     const { api } = await cargar();
     fetchMock.mockImplementation(async () => new Response(JSON.stringify({ aplicados: 0 }), { status: 200 }));
 
     await api.cargarPrecios(ARCHIVO);
     await api.cargarPrecios(ARCHIVO, { confirmarQuitas: true });
+    await api.cargarPrecios(ARCHIVO, { confirmarMasiva: true });
 
     const cuerpo = (i: number) => (fetchMock.mock.calls[i][1].body as FormData);
     expect(cuerpo(0).get("confirmar_quitas")).toBeNull();
+    expect(cuerpo(0).get("confirmar_masiva")).toBeNull();
     expect(cuerpo(1).get("confirmar_quitas")).toBe("true");
+    expect(cuerpo(1).get("confirmar_masiva")).toBeNull();
     expect(cuerpo(1).get("archivo")).toBeInstanceOf(File);
+    expect(cuerpo(2).get("confirmar_masiva")).toBe("true");
+    expect(cuerpo(2).get("confirmar_quitas")).toBeNull();
   });
   it("un 200 con el cuerpo cortado tambien dice que no se pudo confirmar", async () => {
     const { api, MENSAJE_CARGA_SIN_CONFIRMAR } = await cargar();

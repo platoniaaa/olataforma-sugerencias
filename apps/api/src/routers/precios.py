@@ -323,6 +323,7 @@ def carga_vista_previa(
 @router.post("/carga")
 def carga_aplicar(
     archivo: UploadFile = File(...), confirmar_quitas: bool = Form(False),
+    confirmar_masiva: bool = Form(False),
     db: Session = Depends(get_db), email: str = Depends(requiere_precios),
 ) -> dict:
     """Carga los cambios del archivo editado: todos o ninguno. Vuelve a leer el
@@ -330,7 +331,7 @@ def carga_aplicar(
     dice el archivo y no una vista previa vieja."""
     try:
         return carga.aplicar(db, archivo.filename or "", _leer_subida(archivo), email,
-                            confirmar_quitas=confirmar_quitas)
+                            confirmar_quitas=confirmar_quitas, confirmar_masiva=confirmar_masiva)
     except carga.ErrorCarga as e:
         db.rollback()
         raise HTTPException(status_code=422, detail=str(e)) from e

@@ -101,17 +101,44 @@ def test_la_referencia_no_empieza_nunca_con_un_caracter_de_formula(client, lista
 
 
 # -------------------------------------------------------- notas y Excel
-@pytest.mark.parametrize("obs", ["ok 😀 listo", "A → B ≥ 3", "Привет", "mix é → ñ"])
+def _como_excel(texto: str, pagina: str = "cp1252") -> bytes:
+    """Lo que Excel escribe al guardar como CSV: un "?" por cada unidad UTF-16 que no
+    cabe en la pagina de codigos (un emoji ocupa dos, y queda como "??")."""
+    salida = []
+    for c in texto:
+        try:
+            c.encode(pagina)
+            salida.append(c)
+        except UnicodeEncodeError:
+            salida.append("?" * (len(c.encode("utf-16-le")) // 2))
+    return "".join(salida).encode(pagina)
+
+
+@pytest.mark.parametrize("obs", [
+    "ok 😀 listo", "A → B ≥ 3", "Привет", "mix é → ñ",
+    "🔥 oferta 😀 de verano", "dos 😀🚀 y más",           # emoji: dos "?" cada uno
+    "con fino y nbsp",                          # el espacio fino no cabe; el nbsp si
+])
 def test_una_nota_con_caracteres_fuera_de_cp1252_no_se_sobrescribe_con_signos_de_pregunta(client, lista, obs):
     """Al abrir el CSV en Excel y guardarlo como "CSV" (cp1252), lo que no cabe pasa a "?"
     y la nota se tomaba como editada y se reemplazaba."""
     client.put("/api/precios/71 AAA1/override", json={"obs": obs})
     texto = _a_csv(_bajar(client)).decode("utf-8-sig")
-    como_excel = texto.encode("cp1252", errors="replace")
 
-    v = _subir(client, como_excel).json()
+    v = _subir(client, _como_excel(texto)).json()
 
     assert v["a_cambiar"] == 0 and v["errores_total"] == 0
+
+
+def test_cambiar_una_nota_que_tenia_emoji_si_se_carga(client, lista):
+    """La tolerancia es solo para lo que Excel estropea: una nota cambiada de verdad se carga."""
+    client.put("/api/precios/71 AAA1/override", json={"obs": "ok 😀 listo"})
+    filas = _editar(_bajar(client), "71 AAA1", Obs="revisada")
+
+    r = _subir(client, _como_excel(_a_csv(filas).decode("utf-8-sig")), aplicar=True)
+
+    assert r.status_code == 200 and r.json()["aplicados"] == 1
+    assert _override(lista, "71 AAA1").obs == "revisada"
 
 
 @pytest.mark.parametrize("pagina", ["cp850", "mac_roman"])
@@ -145,6 +172,14 @@ def test_el_utf16_sin_bom_se_lee(client, lista, codificacion):
     (9.5, "1,11", False),        # 1,105 -> 1,11
     (35, "1,54", False),
     (35, "1,6", True),
+    # El redondeo termina en 0: Excel muestra "1,50" y el valor canonico queda "1.5".
+    (33.3, "1,50", False),       # 1,4993
+    (33.3, "1,5", False),
+    (33.3, "1,499", False),
+    (33.3, "1,51", True),
+    (9, "1,1", False),           # 1,0989 -> "1,10" -> canonico "1.1"
+    (9, "1,10", False),
+    (0.4876, "1,00", False),     # 1,0049: "1,00" daba 'Factor: 1 no vale' y frenaba todo el archivo
 ])
 def test_el_factor_redondeado_por_excel_no_es_una_edicion(client, lista, margen, celda, cambia):
     client.put("/api/precios/71 AAA1/override", json={"margen_fijo": margen})

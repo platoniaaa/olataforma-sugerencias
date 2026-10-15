@@ -92,6 +92,12 @@ MARCA_CODIFICACION = "Descuento máximo"
 # celda vacia quita la decision, y un .xlsx con celdas de error (#N/D, #REF!) las
 # entrega vacias: sin este freno, un BUSCARV roto borraria precios fijos en silencio.
 UMBRAL_QUITAS = 10
+# Cuantos precios fijos o factores propios NUEVOS puede poner una carga antes de pedir
+# confirmacion. Ordenar una sola columna (Precio final, Factor) deja cada precio en la fila
+# de otro producto, y cada fila parece una edicion valida: son decenas de miles de precios
+# fijos, y ninguna validacion por fila lo ve. Una carga de verdad no suele pasar de unos
+# cientos.
+UMBRAL_MASIVA = 200
 TOPE_LISTA = 200            # errores o conflictos que se devuelven (el total va aparte)
 TOPE_CODIGOS = 100
 TOPE_CAMBIOS = 300
@@ -150,11 +156,21 @@ def _c_obs(v) -> str:
     return _sin_guarda(_c_texto(v))
 
 
+_FUERA_BMP = re.compile("[\U00010000-\U0010ffff]")
+
+
 def _ansi(t: str) -> str:
     """El texto como queda al guardar como "CSV" de Excel (cp1252): lo que no cabe
     pasa a "?". Un emoji o una flecha en una nota se sobrescribian con "?" al abrir el
-    archivo y guardarlo sin editar nada."""
-    return t.encode("cp1252", errors="replace").decode("cp1252")
+    archivo y guardarlo sin editar nada. Excel escribe un "?" por unidad UTF-16, asi que
+    un emoji (fuera del plano basico, dos unidades) queda como "??"."""
+    return _FUERA_BMP.sub("??", t).encode("cp1252", errors="replace").decode("cp1252")
+
+
+def _c_obs_ansi(v) -> str:
+    """La observacion como la deja Excel: el "?" entra ANTES de colapsar los espacios,
+    porque un espacio fino (U+2009) no cabe en cp1252 y Excel lo escribe como "?"."""
+    return _c_obs(_ansi(_texto(v)))
 
 
 def leer_numero(valor, entero: bool = False) -> float | None:
@@ -260,10 +276,6 @@ def _canon_rapido(campo: str, valor, base: str) -> str:
     return _canon(campo, valor)
 
 
-def _decimales(t: str) -> int:
-    return len(t.split(".")[1]) if "." in t else 0
-
-
 def _igual(campo: str, valor: str, base: str, base_ansi: str = "") -> bool:
     """La celda de la persona (ya canonica) contra lo que traia la referencia.
 
@@ -275,14 +287,15 @@ def _igual(campo: str, valor: str, base: str, base_ansi: str = "") -> bool:
         return valor.casefold() == base.casefold()
     if valor == base:
         return True
-    if campo == "factor" and valor and base and _decimales(base) > _decimales(valor) in (2, 3):
+    if campo == "factor" and valor and base:
         # Excel con "disminuir decimales" guarda 1,1429 como 1,14 o 1,143: si lo unico
         # que cambio es ese redondeo (mitad hacia arriba, como Excel y no como el
-        # round de Python), nadie edito el factor. Costo conocido: escribir a
-        # proposito el valor redondeado tampoco se distingue de ese redondeo.
+        # round de Python), nadie edito el factor. Se compara con el valor ya canonico,
+        # sin ceros finales: 1,4993 mostrado como "1,50" llega como "1.5". Costo
+        # conocido: escribir a proposito el valor redondeado tampoco se distingue.
         try:
-            q = Decimal(base).quantize(Decimal(1).scaleb(-_decimales(valor)), rounding=ROUND_HALF_UP)
-            return Decimal(valor) == q
+            v, b = Decimal(valor), Decimal(base)
+            return any(v == b.quantize(Decimal(1).scaleb(-k), rounding=ROUND_HALF_UP) for k in (2, 3))
         except (ArithmeticError, ValueError):
             return False
     return False
@@ -327,9 +340,8 @@ def referencia(codigo: str, p, ov: dict | None) -> str:
     sin que nada avisara. Va PRIMERA, y es un hash: la celda no empieza nunca con un
     caracter que Excel lea como formula (el tipo, que es texto libre, podia)."""
     base = _valores_base(p, ov)
-    obs = _c_obs((ov or {}).get("obs"))
     partes = [base[c] for c, _ in CAMPOS]
-    partes.insert(5, _h(_ansi(obs)))                     # justo despues de la huella de la obs
+    partes.insert(5, _h(_c_obs_ansi((ov or {}).get("obs"))))   # justo despues de la huella de la obs
     return SEP.join([_h(codigo)] + partes + [huella_decisiones(ov)])
 
 
@@ -495,7 +507,9 @@ def _primera_hoja(z: zipfile.ZipFile) -> str | None:
 
 
 _BLOQUE_XML = 1 << 20          # lo que se lee de la hoja por vez
-_CELDA = re.compile(r'<c r="([A-Z]{1,3})(\d{1,7})"[^>/]*>')       # con contenido: no se cierra sola
+# Con contenido: no se cierra sola (`<c r="E2" s="1"/>`) ni se abre y se cierra de inmediato
+# (`<c r="E2" s="1"></c>`, como la escribe openpyxl).
+_CELDA = re.compile(r'<c r="([A-Z]{1,3})(\d{1,7})"[^>/]*>(?!</c>)')
 _CELDA_RARA = re.compile(r'<c r="(?![A-Z]{1,3}\d{1,7}")')
 
 
@@ -843,6 +857,7 @@ def planificar(db, nombre: str, contenido: bytes) -> _Plan:
     desconocidos: list[str] = []
     n_cambios: Counter = Counter()
     n_quitan: Counter = Counter()
+    n_fijan: Counter = Counter()
     ejemplos_quitan: list[dict] = []
     suben = bajan = igual = nuevos = 0
     if candidatos:
@@ -903,6 +918,8 @@ def planificar(db, nombre: str, contenido: bytes) -> _Plan:
                     n_quitan[_CLAVE_POR_CAMPO_OV[k]] += 1
                     if len(ejemplos_quitan) < 20:
                         ejemplos_quitan.append({"producto": codigo, "campo": _ETIQUETA_CAMPO[k]})
+                elif k in ("precio_fijo", "margen_fijo"):
+                    n_fijan[_CLAVE_POR_CAMPO_OV[k]] += 1
             plan.cambios.append({
                 "producto": codigo, "fila": n, "glosa": p.glosa, "datos": datos, "h2": h2, "ed": ed,
                 "campos": _describir(datos, ov, p), "precio_antes": antes, "precio_despues": pd,
@@ -916,6 +933,7 @@ def planificar(db, nombre: str, contenido: bytes) -> _Plan:
                    "con_precio_nuevo": nuevos},
         "quitan_total": sum(n_quitan.values()), "quitan": dict(n_quitan),
         "quitan_ejemplos": ejemplos_quitan, "umbral_quitas": UMBRAL_QUITAS,
+        "fijan_total": sum(n_fijan.values()), "fijan": dict(n_fijan), "umbral_masiva": UMBRAL_MASIVA,
         "errores": errores[:TOPE_LISTA], "errores_total": len(errores),
         "conflictos": conflictos[:TOPE_LISTA], "conflictos_total": len(conflictos),
         "desconocidos": desconocidos[:TOPE_CODIGOS], "desconocidos_total": len(desconocidos),
@@ -933,14 +951,15 @@ def vista_previa(db, nombre: str, contenido: bytes) -> dict:
 
 # ------------------------------------------------------------------ aplicar
 def aplicar(db, nombre: str, contenido: bytes, usuario: str | None,
-            confirmar_quitas: bool = False) -> dict:
+            confirmar_quitas: bool = False, confirmar_masiva: bool = False) -> dict:
     """Carga los cambios del archivo, todos o ninguno. Si el archivo tiene errores
     no se carga nada. Recalcula SOLO los productos tocados, con la politica cargada
     una vez, y no genera "cambios sin revisar": son decisiones de una persona.
 
     Una celda vacia quita la decision, y un .xlsx con celdas de error (#N/D, #REF!)
     las entrega vacias: si la carga quita `UMBRAL_QUITAS` decisiones o mas, hace falta
-    `confirmar_quitas`."""
+    `confirmar_quitas`. Si pone mas de `UMBRAL_MASIVA` precios fijos o factores propios
+    nuevos, hace falta `confirmar_masiva`."""
     plan = planificar(db, nombre, contenido)
     if plan.errores_total:
         raise ErrorCarga(
@@ -951,6 +970,11 @@ def aplicar(db, nombre: str, contenido: bytes, usuario: str | None,
             f"Esta carga quita {r['quitan_total']} decisiones (precios fijos, factores propios, tipos...). "
             "Confírmalo en la pantalla antes de cargar: si no era lo que querías, puede haber celdas con "
             "error (#N/D, #REF!) en el Excel.")
+    if r["fijan_total"] > UMBRAL_MASIVA and not confirmar_masiva:
+        raise ErrorCarga(
+            f"Esta carga deja {_miles(r['fijan_total'])} precios fijos o factores propios nuevos. "
+            "Confírmalo en la pantalla antes de cargar: si no era lo que querías, puede que se haya "
+            "ordenado una sola columna del Excel y los valores quedaron en la fila de otro producto.")
     omitidos = {"conflictos": r["conflictos_total"], "desconocidos": r["desconocidos_total"],
                 "sin_referencia": r["sin_referencia_total"]}
     if not plan.cambios:
