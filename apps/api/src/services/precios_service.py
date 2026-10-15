@@ -958,6 +958,59 @@ def detalle(db: Session, producto: str) -> dict | None:
 
 
 # ------------------------------------------------------------------ escritura
+def _aplicar_override(o: PrecioOverride, precio_vigente: float | None, datos: dict,
+                      usuario: str | None) -> list[str]:
+    """Aplica los campos de `datos` a la decision humana `o` y devuelve el detalle
+    de lo que cambio. No valida combinaciones ni toca la base: lo usan
+    `guardar_override` (un producto, desde la ficha) y la carga desde Excel (miles,
+    en una sola transaccion), para que las dos apliquen exactamente la misma regla.
+
+    `precio_vigente` es el precio del producto hoy: es el que queda congelado."""
+    detalle_ = []
+    if "precio_fijo" in datos:
+        v = datos["precio_fijo"]
+        if v is not None and float(v) < 0:
+            raise ValueError("El precio fijo no puede ser negativo")
+        if (o.precio_fijo or None) != (v if v is None else float(v)):
+            detalle_.append(f"precio fijo {o.precio_fijo} -> {v}")
+        o.precio_fijo = None if v is None else float(v)
+    if "margen_fijo" in datos:
+        v = None if datos["margen_fijo"] is None else float(datos["margen_fijo"])
+        if (o.margen_fijo or None) != v:
+            detalle_.append(f"margen fijo {o.margen_fijo} -> {v}")
+        o.margen_fijo = v
+    if "congelar" in datos:
+        nuevo = bool(datos["congelar"])
+        if nuevo and not o.congelar:
+            # Se congela con el precio VIGENTE. Es la foto que despues se respeta.
+            o.congelado_precio = precio_vigente
+            o.congelado_en = _now()
+            detalle_.append(f"congelado en {precio_vigente}")
+        elif not nuevo and o.congelar:
+            o.congelado_precio = None
+            o.congelado_en = None
+            detalle_.append("descongelado")
+        o.congelar = nuevo
+    for campo in ("tipo_manual", "procedencia_manual"):
+        if campo in datos:
+            v = (datos[campo] or "").strip() or None
+            if campo == "procedencia_manual" and v and v not in (NACIONAL, IMPORTADO):
+                raise ValueError("La procedencia manual debe ser Nacional o Importado")
+            if getattr(o, campo) != v:
+                detalle_.append(f"{campo} {getattr(o, campo)} -> {v}")
+            setattr(o, campo, v)
+    if "no_producto" in datos:
+        v = bool(datos["no_producto"])
+        if o.no_producto != v:
+            detalle_.append("no es producto" if v else "vuelve a ser producto")
+        o.no_producto = v
+    if "obs" in datos:
+        o.obs = (datos["obs"] or "").strip() or None
+    o.editado_por = usuario
+    o.editado_en = _now()
+    return detalle_
+
+
 def guardar_override(db: Session, producto: str, datos: dict, usuario: str | None) -> dict:
     """Crea o actualiza la decision humana sobre un producto y recalcula SOLO esa fila."""
     tenant = settings.default_tenant_id
@@ -982,48 +1035,7 @@ def guardar_override(db: Session, producto: str, datos: dict, usuario: str | Non
     if margen_nuevo is not None and factor_desde_margen(margen_nuevo) is None:
         raise ValueError("El margen es % sobre la venta: tiene que estar entre 0 y 100")
 
-    detalle_ = []
-    if "precio_fijo" in datos:
-        v = datos["precio_fijo"]
-        if v is not None and float(v) < 0:
-            raise ValueError("El precio fijo no puede ser negativo")
-        if (o.precio_fijo or None) != (v if v is None else float(v)):
-            detalle_.append(f"precio fijo {o.precio_fijo} -> {v}")
-        o.precio_fijo = None if v is None else float(v)
-    if "margen_fijo" in datos:
-        v = None if datos["margen_fijo"] is None else float(datos["margen_fijo"])
-        if (o.margen_fijo or None) != v:
-            detalle_.append(f"margen fijo {o.margen_fijo} -> {v}")
-        o.margen_fijo = v
-    if "congelar" in datos:
-        nuevo = bool(datos["congelar"])
-        if nuevo and not o.congelar:
-            # Se congela con el precio VIGENTE. Es la foto que despues se respeta.
-            o.congelado_precio = p.precio_final
-            o.congelado_en = _now()
-            detalle_.append(f"congelado en {p.precio_final}")
-        elif not nuevo and o.congelar:
-            o.congelado_precio = None
-            o.congelado_en = None
-            detalle_.append("descongelado")
-        o.congelar = nuevo
-    for campo in ("tipo_manual", "procedencia_manual"):
-        if campo in datos:
-            v = (datos[campo] or "").strip() or None
-            if campo == "procedencia_manual" and v and v not in (NACIONAL, IMPORTADO):
-                raise ValueError("La procedencia manual debe ser Nacional o Importado")
-            if getattr(o, campo) != v:
-                detalle_.append(f"{campo} {getattr(o, campo)} -> {v}")
-            setattr(o, campo, v)
-    if "no_producto" in datos:
-        v = bool(datos["no_producto"])
-        if o.no_producto != v:
-            detalle_.append("no es producto" if v else "vuelve a ser producto")
-        o.no_producto = v
-    if "obs" in datos:
-        o.obs = (datos["obs"] or "").strip() or None
-    o.editado_por = usuario
-    o.editado_en = _now()
+    detalle_ = _aplicar_override(o, p.precio_final, datos, usuario)
     db.flush()
 
     _recalcular_una(db, p, _override_dict(o))
@@ -1054,7 +1066,10 @@ def quitar_override(db: Session, producto: str, usuario: str | None) -> dict:
     return _fila_dict(p, None)
 
 
-def _recalcular_una(db: Session, p: PrecioProducto, ov: dict | None) -> None:
+def _recalcular_una(db: Session, p: PrecioProducto, ov: dict | None,
+                    fact: dict | None = None, rub: dict | None = None) -> None:
+    """Recalcula UNA fila. `fact` y `rub` permiten pasar la politica ya cargada: sin
+    eso son 2 consultas por producto, y la carga desde Excel recalcula miles."""
     r = calcular(
         {
             "glosa": p.glosa, "rubro": p.rubro or rubro_de(p.producto),
@@ -1062,7 +1077,8 @@ def _recalcular_una(db: Session, p: PrecioProducto, ov: dict | None) -> None:
             "stock_transito": p.stock_transito, "ult_recep_importado": p.ult_recep_importado,
             "ult_pe_nacional": p.ult_pe_nacional, "precio_sugerido": p.precio_sugerido,
         },
-        ov, politica.factores(db), politica.rubros(db),
+        ov, fact if fact is not None else politica.factores(db),
+        rub if rub is not None else politica.rubros(db),
     )
     for k, v in r.items():
         setattr(p, k, v)
@@ -1369,6 +1385,12 @@ def exportar(db: Session, *, solo_diferencias: bool, registrar: bool, usuario: s
     if formato == "completa":
         contenido, n = _csv_completa(db)
         return contenido, f"lista_precios_completa_{date.today():%Y-%m-%d}.csv", n
+    if formato == "editable":
+        # La lista completa mas lo que hace falta para editarla y volver a cargarla.
+        from . import precios_carga_service
+
+        contenido, n = precios_carga_service.csv_editable(db)
+        return contenido, f"lista_precios_para_editar_{date.today():%Y-%m-%d}.csv", n
 
     tenant = settings.default_tenant_id
     nombre = f"precios_{'diferencias' if solo_diferencias else 'completa'}_{date.today():%Y%m%d}.csv"

@@ -17,7 +17,7 @@ Abastecimiento, asi que el vendedor de sucursal no entra a nada de esto):
 No va bajo /api/admin por la misma razon tecnica que Calibracion: las
 dependencias del include se ejecutan siempre y no se pueden excluir por endpoint.
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -35,6 +35,7 @@ from ..schemas.precios import (
     VistosIn,
 )
 from ..services import politica_precio_service as politica
+from ..services import precios_carga_service as carga
 from ..services import precios_service
 from ..services.auth import requiere_precios
 
@@ -101,7 +102,7 @@ def rubros(db: Session = Depends(get_db)) -> list[dict]:
 @router.get("/exportar")
 def exportar(
     solo_diferencias: bool = Query(False, description="Solo lo que cambio desde el ultimo envio"),
-    formato: str = Query("erp", pattern="^(erp|completa)$"),
+    formato: str = Query("erp", pattern="^(erp|completa|editable)$"),
     registrar: bool = Query(True, description="Anotar este envio para el proximo delta"),
     lote: str | None = Query(
         None, pattern=r"^[0-9a-fA-F-]{8,64}$",
@@ -295,3 +296,44 @@ def guardar_politica(
         raise
     return {"factores": rf["cambios"], "rubros": rr["cambios"], "seguir_al_rubro": rs,
             "recalculo": recalculo}
+
+
+# --------------------------------------------------- editar la lista en Excel
+def _leer_subida(archivo: UploadFile) -> bytes:
+    """El archivo subido, con tope: un cuerpo sin limite agotaria la memoria de Render."""
+    contenido = archivo.file.read(carga.MAX_BYTES + 1)
+    return contenido
+
+
+@router.post("/carga/vista-previa")
+def carga_vista_previa(
+    archivo: UploadFile = File(...), db: Session = Depends(get_db),
+    email: str = Depends(requiere_precios),
+) -> dict:
+    """Lee el archivo editado y dice que cambiaria, sin guardar nada.
+
+    Es `def` y no `async def`: leer 40 mil filas es trabajo de CPU, y en una
+    corrutina bloquearia a todos los demas mientras tanto."""
+    try:
+        return carga.vista_previa(db, archivo.filename or "", _leer_subida(archivo))
+    except carga.ErrorCarga as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+
+@router.post("/carga")
+def carga_aplicar(
+    archivo: UploadFile = File(...), confirmar_quitas: bool = Form(False),
+    db: Session = Depends(get_db), email: str = Depends(requiere_precios),
+) -> dict:
+    """Carga los cambios del archivo editado: todos o ninguno. Vuelve a leer el
+    archivo y a compararlo contra lo que hay AHORA, asi lo que se aplica es lo que
+    dice el archivo y no una vista previa vieja."""
+    try:
+        return carga.aplicar(db, archivo.filename or "", _leer_subida(archivo), email,
+                            confirmar_quitas=confirmar_quitas)
+    except carga.ErrorCarga as e:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except Exception:
+        db.rollback()
+        raise

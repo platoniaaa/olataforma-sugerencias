@@ -1524,3 +1524,50 @@ export interface AbcStockFila {
   empresa: string;
   aviso: string;
 }
+
+/** Carga de la lista de precios editada en Excel. */
+export interface CargaPreciosError {
+  fila: number;
+  producto: string;
+  mensaje: string;
+}
+
+export interface CargaPreciosCambio {
+  producto: string;
+  glosa: string | null;
+  campos: { campo: string; antes: string; despues: string }[];
+  precio_antes: number | null;
+  precio_despues: number | null;
+}
+
+export interface CargaPreciosVistaPrevia {
+  archivo: string;
+  filas: number;
+  sin_cambios: number;
+  a_cambiar: number;
+  por_campo: Record<string, number>;
+  efecto: { suben: number; bajan: number; sin_cambio_de_precio: number; con_precio_nuevo: number };
+  /** Decisiones que la carga QUITA (celdas vacías), por campo, y desde cuántas pide confirmación. */
+  quitan_total: number;
+  quitan: Record<string, number>;
+  quitan_ejemplos: { producto: string; campo: string }[];
+  umbral_quitas: number;
+  errores: CargaPreciosError[];
+  errores_total: number;
+  conflictos: CargaPreciosError[];
+  conflictos_total: number;
+  desconocidos: string[];
+  desconocidos_total: number;
+  sin_referencia: string[];
+  sin_referencia_total: number;
+  cambios: CargaPreciosCambio[];
+  cambios_total: number;
+}
+
+export interface CargaPreciosResultado {
+  aplicados: number;
+  por_campo: Record<string, number>;
+  precios_distintos: number;
+  sin_cambios: number;
+  omitidos: { conflictos: number; desconocidos: number; sin_referencia: number };
+}

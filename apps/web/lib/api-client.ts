@@ -63,6 +63,19 @@ export async function req(path: string, init: RequestInit = {}): Promise<Respons
   return res;
 }
 
+/** La carga de precios escribe: si la respuesta se pierde no se sabe si quedo cargada. */
+export const MENSAJE_CARGA_SIN_CONFIRMAR =
+  "No se pudo confirmar la carga: se cortó la conexión. Vuelve a subir el archivo: si ya se cargó, dirá que no hay cambios.";
+
+/** Nombre del error de una carga cuya respuesta se perdio: puede haber quedado cargada. */
+export const NOMBRE_CARGA_SIN_CONFIRMAR = "CargaSinConfirmar";
+
+function errorCargaSinConfirmar(): Error {
+  const e = new Error(MENSAJE_CARGA_SIN_CONFIRMAR);
+  e.name = NOMBRE_CARGA_SIN_CONFIRMAR;
+  return e;
+}
+
 /** Lo que se le dice a la persona cuando el servidor no contesta. */
 export const MENSAJE_SIN_SERVIDOR =
   "No se pudo conectar con el servidor. Puede estar reiniciándose: espera un minuto y vuelve a intentar.";
@@ -82,20 +95,46 @@ const ESPERAS_REINTENTO_MS = [3_000, 8_000, 20_000, 45_000];
 export async function reqConReintentos(
   path: string,
   init: RequestInit = {},
-  opciones: { esperasMs?: number[]; alReintentar?: (intento: number, total: number) => void } = {}
+  opciones: {
+    esperasMs?: number[];
+    alReintentar?: (intento: number, total: number) => void;
+    /** Cancela el pedido y los reintentos que faltan (la lectura ya no interesa). */
+    signal?: AbortSignal;
+  } = {}
 ): Promise<Response> {
   const esperas = opciones.esperasMs ?? ESPERAS_REINTENTO_MS;
+  const { signal } = opciones;
   for (let intento = 0; ; intento++) {
     const ultimo = intento >= esperas.length;
     try {
-      const res = await req(path, init);
+      const res = await req(path, signal ? { ...init, signal } : init);
       if (ultimo || ![502, 503, 504].includes(res.status)) return res;
     } catch (e) {
-      if (ultimo || !(e instanceof TypeError)) throw e;
+      if (signal?.aborted || ultimo || !(e instanceof TypeError)) throw e;
     }
     opciones.alReintentar?.(intento + 1, esperas.length);
-    await new Promise((r) => setTimeout(r, esperas[intento]));
+    await esperar(esperas[intento], signal);
   }
+}
+
+/** Espera `ms`, pero se corta de inmediato si se cancela: el temporizador no queda vivo. */
+function esperar(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cancelado = () => signal?.reason ?? new DOMException("Cancelado", "AbortError");
+    if (signal?.aborted) {
+      reject(cancelado());
+      return;
+    }
+    const alCancelar = () => {
+      clearTimeout(t);
+      reject(cancelado());
+    };
+    const t = setTimeout(() => {
+      signal?.removeEventListener("abort", alCancelar);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", alCancelar, { once: true });
+  });
 }
 
 /** Identificador de una descarga. `randomUUID` solo existe en contextos seguros. */
@@ -1064,7 +1103,7 @@ export const api = {
 
   /** Descarga el Excel para el ERP. Devuelve cuantas filas salieron. */
   async exportarPrecios(
-    opts: { soloDiferencias: boolean; formato: "erp" | "completa" },
+    opts: { soloDiferencias: boolean; formato: "erp" | "completa" | "editable" },
     alReintentar?: (intento: number, total: number) => void
   ): Promise<number> {
     const p = new URLSearchParams();
@@ -1118,6 +1157,66 @@ export const api = {
 
   async politicaRubros(): Promise<import("./types").PoliticaRubro[]> {
     return getJSON("/api/precios/politica/rubros");
+  },
+
+  /** Lee el archivo de la lista editado en Excel y dice qué cambiaría. No guarda nada. */
+  async vistaPreviaCargaPrecios(
+    archivo: File,
+    alReintentar?: (intento: number, total: number) => void,
+    signal?: AbortSignal
+  ): Promise<import("./types").CargaPreciosVistaPrevia> {
+    const fd = new FormData();
+    fd.append("archivo", archivo);
+    let res: Response;
+    try {
+      // Leer el archivo no escribe nada: se puede repetir si el servidor se reinicia.
+      res = await reqConReintentos("/api/precios/carga/vista-previa", { method: "POST", body: fd }, { alReintentar, signal });
+    } catch (e) {
+      if (e instanceof TypeError) throw new Error(MENSAJE_SIN_SERVIDOR);
+      throw e;
+    }
+    if (!res.ok) {
+      if ([502, 503, 504].includes(res.status)) throw new Error(MENSAJE_SIN_SERVIDOR);
+      throw new Error(await mensajeError(res, "No se pudo leer el archivo"));
+    }
+    try {
+      return await res.json();
+    } catch (e) {
+      // Un 200 con el cuerpo cortado (o una pagina del proxy) no es un resultado.
+      if (e instanceof Error && e.name === "AbortError") throw e;
+      throw new Error(MENSAJE_SIN_SERVIDOR);
+    }
+  },
+
+  /** Carga los cambios del archivo, todos o ninguno. Sin reintentos automáticos: si
+   *  la respuesta se pierde, volver a subir el archivo dice 0 cambios. */
+  async cargarPrecios(
+    archivo: File,
+    opts: { confirmarQuitas?: boolean } = {}
+  ): Promise<import("./types").CargaPreciosResultado> {
+    const fd = new FormData();
+    fd.append("archivo", archivo);
+    // La carga que quita muchas decisiones (celdas vacias) pide confirmacion al servidor.
+    if (opts.confirmarQuitas) fd.append("confirmar_quitas", "true");
+    let res: Response;
+    try {
+      res = await req("/api/precios/carga", { method: "POST", body: fd });
+    } catch (e) {
+      if (e instanceof TypeError) throw errorCargaSinConfirmar();
+      throw e;
+    }
+    if (!res.ok) {
+      // El servidor sigue procesando aunque el proxy corte la respuesta (el endpoint es
+      // sincrono y hace commit): un 502/503/504 es lo mismo que una conexion cortada.
+      if ([502, 503, 504].includes(res.status)) throw errorCargaSinConfirmar();
+      throw new Error(await mensajeError(res, "No se pudo cargar el archivo"));
+    }
+    try {
+      return await res.json();
+    } catch {
+      // El servidor ya hizo commit: un cuerpo cortado o ilegible tampoco confirma nada.
+      throw errorCargaSinConfirmar();
+    }
   },
 
   /** Qué precios cambiarían con este cambio de política. No guarda nada. */

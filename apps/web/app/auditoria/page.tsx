@@ -39,6 +39,10 @@ const ACCIONES: Record<
   politica_rubro_editada: { label: "Rubro de precio", color: "text-amber-700 bg-amber-50", icon: Tag },
   // Sale junto con un cambio de rubro: productos que dejaron su tipo escrito a mano.
   precios_tipo_manual_quitado: { label: "Tipo a mano → rubro", color: "text-amber-700 bg-amber-50", icon: Tag },
+  // Edicion de la ficha de un producto (precio fijo, congelar, tipo...), y la carga
+  // masiva desde Excel, que deja una fila por producto y una de resumen.
+  precio_override: { label: "Precio de producto", color: "text-amber-700 bg-amber-50", icon: Tag },
+  precios_carga_excel: { label: "Carga de precios (Excel)", color: "text-amber-700 bg-amber-50", icon: Tag },
 };
 
 type Tab = "actividad" | "accesos";

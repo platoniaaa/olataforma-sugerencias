@@ -12,6 +12,8 @@ pydantic>=2.11
 pydantic-settings>=2.7
 python-multipart>=0.0.20
 openpyxl>=3.1.5
+# Lee los .xlsx de la carga de precios: openpyxl tardaba 36 s en 40 mil filas.
+python-calamine>=0.3.0
 httpx>=0.28
 # Driver PostgreSQL para produccion (Supabase). pg8000 es Python puro: sin compilar,
 # funciona en cualquier version de Python (incluida 3.14) y en la nube.

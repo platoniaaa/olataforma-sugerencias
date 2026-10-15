@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  AlertCircle, Bell, Columns3, Download, Loader2, Plus, RefreshCw, Search, Sigma, Tag, Trash2,
+  AlertCircle, Bell, Columns3, Download, FileSpreadsheet, Loader2, Plus, RefreshCw, Search, Sigma, Tag, Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { MultiSelect } from "@/components/ui/multiselect";
 import { TablaPrecios } from "@/components/tabla-precios";
 import { ConfigurarColumnasPrecios } from "@/components/configurar-columnas-precios";
+import { CargaPreciosExcel } from "@/components/carga-precios-excel";
 import { ResumenDiferencias } from "@/components/resumen-diferencias";
 import { TutorialPrecios } from "@/components/tutorial-precios";
 import { api } from "@/lib/api-client";
@@ -47,6 +48,7 @@ export default function PreciosPage() {
   const [modalCols, setModalCols] = useState(false);
   const [seleccion, setSeleccion] = useState<PrecioRow | null>(null);
   const [modalNuevo, setModalNuevo] = useState(false);
+  const [modalExcel, setModalExcel] = useState(false);
 
   useEffect(() => {
     setPuedeEditar(getPuedePrecios());
@@ -184,6 +186,11 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
           <Button variant="outline" size="sm" onClick={() => setModalCols(true)} data-tour="columnas">
             <Columns3 size={15} /> Columnas
           </Button>
+          {puedeEditar && (
+            <Button variant="outline" size="sm" onClick={() => setModalExcel(true)}>
+              <FileSpreadsheet size={15} /> Editar con Excel
+            </Button>
+          )}
           <span className="flex items-center gap-2" data-tour="exportar">
           <Button
             variant="outline" size="sm" disabled={ocupado !== null}
@@ -342,6 +349,12 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
 
       <ConfigurarColumnasPrecios open={modalCols} onClose={() => setModalCols(false)}
                                  visibles={colsVisibles} onChange={setColsVisibles} />
+
+      <CargaPreciosExcel
+        open={modalExcel}
+        onClose={() => setModalExcel(false)}
+        onCargado={() => { void cargar(); void cargarAuxiliares(); }}
+      />
 
       {seleccion && (
         <ModalProducto

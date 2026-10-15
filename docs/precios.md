@@ -89,6 +89,99 @@ REVISION` (queda sin precio hasta que alguien decida).
   bodegas reales: `stock_unificado` trae tambien Frontera porque el sugerido la
   usa (decision del 07-10-2026). El transito igual: solo las OC de Curifor.
 
+## Editar la lista con Excel (14-10-2026)
+
+Botón "Editar con Excel" en `/precios` (solo quien puede editar precios). Se baja el
+archivo, se edita y se vuelve a cargar; antes de guardar se ve que cambia, producto
+por producto.
+
+- **Descarga**: `GET /api/precios/exportar?formato=editable` es la lista completa (CSV,
+  `;`, BOM) más las columnas `Obs`, `Congelar`, `No es producto` y `Referencia`. El
+  factor sale con hasta 4 decimales (un margen fijo da 1,5385). `Obs`, `Glosa`,
+  `Rubro` y `Tipo` que empiezan con `=`, `+`, `-` o `@` salen con un apóstrofe delante
+  (Excel las abriría como fórmula: "-5% convenio" salía `#NOMBRE?` y un
+  `=HYPERLINK(...)` se ejecutaba); al leer, se quita.
+- **Lo que se edita** (cada columna hace lo mismo que su equivalente en la ficha; vacío
+  quita la decisión): `Tipo` y `Procedencia` (escritos a mano; el tipo se acepta con o
+  sin tildes y con los alias de la política), `Factor` (factor propio = margen fijo
+  `(1 - 1/f) x 100`), `Precio final` (precio fijo), `Obs`, `Congelar` y `No es
+  producto` (Sí/No). Lo demás (costo, stock, precio ERP, estado, descuento) viene del
+  ERP y del motor, y si se edita, no se carga. Precio fijo y factor propio no
+  conviven: la fila con los dos es un error.
+- **La columna `Referencia`** guarda, por producto, lo que mostraba el archivo al
+  bajarlo, en 10 partes ASCII (sobreviven a cualquier página de códigos):
+  `huella del código|tipo|procedencia|factor|precio|huella de la obs|la misma como la
+  deja Excel (cp1252)|congelar|no es producto|huella de las decisiones`. Empieza con un
+  hash para que Excel nunca la lea como fórmula. Se carga SOLO lo que la persona cambió respecto de esa
+  referencia, no lo que difiere de lo que hay hoy: el motor recalcula los precios cada
+  noche y eso no es una edición (compararlo contra hoy habría vuelto precio fijo cada
+  precio que se movió). Tres huellas la protegen:
+  - la de las **decisiones** resume `precio_override`: si cambió desde la descarga y
+    el archivo edita ese producto, es **conflicto** y se omite, porque cargarlo
+    desharía en silencio lo que otra persona hizo en la ficha. Si lo que dice el
+    archivo ya es lo que hay (el mismo archivo subido dos veces, o una carga cuya
+    respuesta se perdió), es "sin cambios", no conflicto;
+  - la del **código** ata la referencia a su producto: ordenar o pegar solo esa
+    columna la dejaba en otra fila, y los precios de esa fila se volvían precio fijo
+    sin que nada avisara. Ahora es un error;
+  - la de la **obs** evita que una nota con cualquier carácter parezca una edición, y
+    la segunda (cp1252) que no lo parezca cuando Excel guarda como "CSV" y cambia por
+    `?` lo que no cabe (emojis, flechas).
+
+  Sin `Referencia` el archivo no se carga. Excel con "disminuir decimales" guarda
+  1,1429 como 1,14 o 1,143: si solo cambió ese redondeo (mitad hacia arriba, como
+  Excel), no cuenta como edición del factor. Costo conocido: escribir a propósito el
+  valor redondeado tampoco se distingue.
+- **Carga**: `POST /api/precios/carga/vista-previa` lee y compara sin guardar;
+  `POST /api/precios/carga` vuelve a leer el archivo y aplica. **Todo o nada**: un
+  error de validación (factor fuera de rango, tipo que no existe en la política,
+  código repetido, Referencia de otro producto, precio fijo y factor a la vez...)
+  bloquea la carga entera. Se omiten y se listan los conflictos, los códigos que no
+  están en la lista y las filas sin `Referencia`. Si el producto cambió en la ficha
+  después de bajar el archivo y el archivo lo edita, es conflicto aunque la combinación
+  sea inválida (precio fijo y factor puestos por el otro): solo se omite esa fila. Al
+  aplicar, las filas se bloquean (`FOR UPDATE`) y se vuelve a calcular contra lo que
+  hay AHORA: otra persona que edite justo entre comparar y escribir no se pisa, y el
+  reintento de una respuesta perdida da "sin cambios".
+- **Quitar decisiones**: una celda vacía quita la decisión, y un `.xlsx` con celdas de
+  error (`#N/D`, `#REF!`) las entrega vacías (calamine no distingue). Si una carga
+  quita 10 decisiones o más (`UMBRAL_QUITAS`), la pantalla pide marcar una
+  confirmación y el servidor exige `confirmar_quitas=true`: un BUSCARV roto no puede
+  borrar precios fijos en silencio.
+- **Qué deja**: una fila de auditoría `precio_override` por producto ("(carga desde
+  Excel)") y una de resumen `precios_carga_excel`, más una notificación. Recalcula SOLO
+  los productos editados, con la política cargada una vez y leída ANTES de escribir
+  (`politica.factores` se traga los errores y hace rollback: leída después se llevaba
+  lo escrito), y no crea "cambios sin revisar": son decisiones de una persona.
+- **Formatos**: `.csv` (UTF-8; UTF-16 de "Texto Unicode", con o sin BOM; o la página
+  de códigos de Windows: cp1252 de "CSV", cp850 de "CSV MS-DOS" y mac_roman de "CSV
+  Macintosh", que se distinguen porque el encabezado `Descuento máximo` solo se lee
+  entero con la correcta; separador `;`, `,` o tabulación; fin de línea CRLF, LF o CR)
+  y `.xlsx`. El `.xlsx` se lee con `python-calamine`: `openpyxl` tardaba 36 s en 40 mil
+  filas en un PC y mucho más en el plan gratis de Render. Calamine arma la hoja entera
+  en memoria y `ABORTA el proceso` con una referencia de celda absurda, así que antes
+  de abrirlo se escanea el XML de la PRIMERA hoja por bloques: última fila y columna
+  con contenido (no cuentan las celdas vacías con formato), referencias dañadas y
+  tamaño descomprimido. No se confía en la `<dimension>` declarada (falta en los
+  archivos en streaming y una celda de más la hace mentir). Topes: 30 MB, 150 MB
+  descomprimido, 250.000 filas y 3 millones de celdas (también en CSV). Cualquier
+  archivo que no sirve da un 422 con un mensaje, nunca un 500. Los códigos se recortan
+  solo en los bordes: `19  FB5Z15201H` (dos espacios) y `19 FB5Z15201H` son productos
+  distintos.
+- **Limitación conocida**: Excel reinterpreta al abrir un CSV las notas que parecen
+  fecha o número (`31/12` pasa a `31-dic`, `0045` a `45`, `1e3` a `1,00E+03`); al
+  volver, parecen una edición de la nota. La vista previa muestra el "antes → después".
+  Un `.xlsx` generado por la plataforma evitaría esto, pero tardaba 83 s.
+- **Medido** con la copia local de 60 mil productos: bajar el archivo 3,2 s (11 MB);
+  leer y comparar sin ediciones 1,5 a 1,9 s (CSV) o 7,7 s (.xlsx, de los cuales ~2 s
+  son el escaneo previo); aplicar 1.500 ediciones 2,0 s en total; subir el mismo
+  archivo otra vez 1,4 s y "sin cambios"; un recálculo completo después no cambia
+  ningún precio.
+- **Revisión**: se hicieron tres pasadas de revisión adversarial antes de publicar. Las
+  dos primeras encontraron 25 y 29 defectos reales (varios de pérdida silenciosa de
+  datos: una Referencia desalineada convertía precios en precio fijo; un `.xlsx` de
+  26 KB tumbaba la API; las notas con emojis se sobrescribían con `?`).
+
 ## Exportar al ERP
 
 `GET /api/precios/exportar?formato=erp` genera `SKU | Precio_Optimo | Descuento`.
