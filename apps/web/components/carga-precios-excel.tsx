@@ -310,11 +310,8 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
         ) : (
           <>
             <section className="space-y-2">
-              <h3 className="text-[13px] font-semibold text-slate-900">1. Descarga el archivo</h3>
-              <p>
-                Es la lista completa con tres columnas más (Obs, Congelar, No es producto) y una
-                columna <b>Referencia</b>. Ábrelo con Excel; sirve guardarlo como CSV o como libro de Excel.
-              </p>
+              <h3 className="text-[13px] font-semibold text-slate-900">1. Descarga la lista</h3>
+              <p>Baja un archivo con todos los productos y sus precios de hoy.</p>
               <Button ref={botonDescargar} variant="outline" size="sm" onClick={() => void descargar()} disabled={descargando || leyendo || cargando}>
                 {descargando ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
                 Descargar para editar
@@ -322,7 +319,8 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
             </section>
 
             <section className="space-y-2">
-              <h3 className="text-[13px] font-semibold text-slate-900">Qué puedes editar</h3>
+              <h3 className="text-[13px] font-semibold text-slate-900">2. Edítala en Excel</h3>
+              <p>Cambia solo las columnas de esta tabla:</p>
               <div className="overflow-x-auto rounded-md border border-slate-200">
                 <table className="w-full text-[12px]">
                   <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
@@ -344,15 +342,17 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
                 </table>
               </div>
               <ul className="list-disc space-y-0.5 pl-5 text-[12px] text-slate-600">
+                <li>No toques la última columna, <b>Referencia</b>, ni ordenes columnas sueltas: con ella la plataforma sabe qué cambiaste.</li>
+                <li>Guarda el archivo en el formato que quieras: CSV o libro de Excel (.xlsx). Los dos sirven.</li>
                 <li>Solo se carga lo que cambies. Lo demás (costo, stock, precio ERP, estado, descuento) viene del ERP y se recalcula cada día.</li>
                 <li>Un producto no puede tener precio fijo y factor propio a la vez: cambia uno, o deja vacía la celda del otro.</li>
                 <li>Un factor para todo un rubro conviene cambiarlo en <b>Política</b>: es un solo cambio y alcanza a los productos nuevos.</li>
-                <li>No borres columnas ni toques <b>Referencia</b>, y no ordenes columnas sueltas: con ella se sabe qué cambiaste, a qué producto pertenece cada fila y si otra persona editó el producto mientras tanto.</li>
               </ul>
             </section>
 
             <section className="space-y-2">
-              <h3 className="text-[13px] font-semibold text-slate-900">2. Sube el archivo editado</h3>
+              <h3 className="text-[13px] font-semibold text-slate-900">3. Súbelo</h3>
+              <p>Antes de guardar verás qué cambia en cada producto.</p>
               <input
                 ref={entrada}
                 type="file"

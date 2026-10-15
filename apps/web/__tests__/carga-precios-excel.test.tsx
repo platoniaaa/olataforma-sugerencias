@@ -90,7 +90,12 @@ describe("el formato, a la vista antes de subir", () => {
     expect(COLUMNAS_EDITABLES.map((c) => c.columna)).toEqual([
       "Tipo", "Procedencia", "Factor", "Precio final", "Obs", "Congelar", "No es producto"]);
     expect(screen.getByText(/Solo se carga lo que cambies/)).toBeInTheDocument();
-    expect(screen.getByText(/no ordenes columnas sueltas/i)).toBeInTheDocument();
+    expect(screen.getByText(/ordenes columnas sueltas/i)).toBeInTheDocument();
+    // Tres pasos numerados: descargar, editar, subir.
+    for (const paso of ["1. Descarga la lista", "2. Edítala en Excel", "3. Súbelo"]) {
+      expect(screen.getByRole("heading", { name: paso })).toBeInTheDocument();
+    }
+    expect(screen.getByText(/No toques la última columna/)).toBeInTheDocument();
   });
 
   it("descargar pide el archivo para editar, que no es la lista completa de siempre", async () => {
