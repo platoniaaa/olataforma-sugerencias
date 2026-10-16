@@ -161,6 +161,40 @@ Una corrida `no_titular`, `probar` o `comparacion` no avisa. "El PC titular no c
 hoy" queda solo en el panel: si no corre nada, no hay quién lo revise. Si algo falla
 al avisar, el reporte igual queda guardado.
 
+## La pantalla
+
+`/cargar/fuentes` (`app/cargar/fuentes/page.tsx`, componentes en `components/fuentes/`,
+cliente en `lib/fuentes-datos.ts`). Si quien entra no es admin vuelve al inicio; un 403
+del servidor se muestra como falta de permiso. Arriba va "← Cargar datos". En orden:
+
+1. **Franja**: modo, PC titular, última corrida (resultado, cuándo, cuánto duró y qué
+   configuración usó) y las alertas globales. Según el modo, el botón para sembrar
+   ("Usar la configuración del PC … como punto de partida"), "Activar" (apagado hasta
+   tener las corridas en verde, con el motivo a la vista) o "Volver a prueba".
+2. **Fuentes**: las `lee`, de la peor a la mejor, con su semáforo (icono y etiqueta,
+   nunca solo el color), archivo, carpeta, fecha relativa y absoluta en hora de Chile,
+   filas, el texto del servidor y, en prueba, lo que tomaría la configuración de la
+   plataforma. Un clic abre el detalle.
+3. **Carpetas por PC**: si existe cada carpeta, cuántos archivos tiene, la ruta
+   portable y el método. "Ponerle nombre" y "Hacer titular" por PC.
+4. **Detalle de una fuente** (diálogo): cómo elige el archivo, los archivos que calzan
+   en cada carpeta (aquí sí la ruta absoluta), descartados, últimas 20 corridas y las
+   versiones que la cambiaron, con "Volver a esta versión".
+5. **Avanzado** (plegado): las `reconoce`, los patrones de cada fuente, las carpetas
+   configuradas (alta y edición), el listado completo de una carpeta y las últimas 30
+   corridas.
+
+El **editor** arma las listas de carpeta, subcarpeta y archivos con el último listado
+del titular, propone el patrón a partir de un archivo y pide la vista previa sola
+mientras se edita. Manda solo los campos que cambiaron, con la nota y `base_version`;
+en prueba ofrece la casilla "Es una diferencia esperada (ensayo)". Los controles que
+fija el catálogo quedan bloqueados con su explicación, y hoja y fila se ven en solo
+lectura. El 409 se muestra con el texto del servidor y un botón para recargar.
+
+**Guía para el día a día** (`/cargar/fuentes/guia`, solo admin): qué mirar cada
+mañana, qué hacer en los casos más comunes, cómo dejar el PC listo ("Mantener siempre
+en este dispositivo") y el paso mensual del respaldo de ventas.
+
 ## Lo que el equipo no ve
 
 - Todo es solo admin. Nada pasa por `auditoria_log` (lo ve todo el que no es
