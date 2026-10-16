@@ -7,7 +7,7 @@
 // para que cualquier admin pueda crear, editar, desactivar y cambiar claves
 // sola. El gate real es el 403 del servidor (el router entero exige admin); la
 // redireccion de abajo es para quien llega escribiendo la URL.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertCircle, Bot, CheckCircle2, KeyRound, Loader2, Pencil, Search, ShieldCheck, UserPlus, Users,
@@ -17,7 +17,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DialogoClave } from "@/components/usuarios/dialogo-clave";
 import { FormularioUsuario } from "@/components/usuarios/formulario-usuario";
-import { api } from "@/lib/api-client";
 import { getEmail, getEsAdmin } from "@/lib/auth";
 import type { Sucursal } from "@/lib/types";
 import { NOTA_PERMISOS_ESPECIALES, type UsuarioAdmin, etiquetaPermiso, usuariosApi } from "@/lib/usuarios";
@@ -27,15 +26,20 @@ export default function UsuariosPage() {
   const [permitido, setPermitido] = useState(false);
   const [emailPropio, setEmailPropio] = useState<string | null>(null);
   const [usuarios, setUsuarios] = useState<UsuarioAdmin[] | null>(null);
-  const [sucursales, setSucursales] = useState<Sucursal[]>([]);
+  // null = todavia no llega (o fallo): el formulario no marca nada como "ya no esta".
+  const [sucursales, setSucursales] = useState<Sucursal[] | null>(null);
   const [errorSucursales, setErrorSucursales] = useState<string | null>(null);
   const [minimoClave, setMinimoClave] = useState<number | null>(null);
+  const [horasSesion, setHorasSesion] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [busqueda, setBusqueda] = useState("");
   // null = cerrado; { usuario: null } = crear; { usuario } = editar.
   const [formulario, setFormulario] = useState<{ usuario: UsuarioAdmin | null } | null>(null);
   const [cambiarClave, setCambiarClave] = useState<UsuarioAdmin | null>(null);
+  // El boton que abrio el dialogo: al cerrarlo el foco vuelve ahi, y quien usa
+  // teclado no tiene que recorrer la lista entera de nuevo.
+  const abridor = useRef<HTMLElement | null>(null);
 
   // Si alguien sin permisos cae aca por URL, lo mandamos al inicio (como Cargar datos).
   useEffect(() => {
@@ -59,16 +63,30 @@ export default function UsuariosPage() {
   useEffect(() => {
     if (!permitido) return;
     void cargar();
-    api.sucursales()
+    usuariosApi.sucursales()
       .then((s) => { setSucursales(s); setErrorSucursales(null); })
       .catch(() => setErrorSucursales("No se pudo cargar la lista de sucursales. Recarga la página para reintentar."));
     // Sin la regla igual se puede guardar: el servidor valida el largo y su
     // mensaje se muestra tal cual.
-    usuariosApi.reglas().then((r) => setMinimoClave(r.largo_minimo_clave)).catch(() => setMinimoClave(null));
+    usuariosApi.reglas()
+      .then((r) => { setMinimoClave(r.largo_minimo_clave); setHorasSesion(r.horas_sesion ?? null); })
+      .catch(() => { setMinimoClave(null); setHorasSesion(null); });
   }, [permitido, cargar]);
 
+  useEffect(() => {
+    if (formulario !== null || cambiarClave !== null || !abridor.current) return;
+    abridor.current.focus();
+    abridor.current = null;
+  }, [formulario, cambiarClave]);
+
+  const abrirDesde = (e: React.MouseEvent<HTMLElement>, abrir: () => void) => {
+    abridor.current = e.currentTarget;
+    setAviso(null);
+    abrir();
+  };
+
   const nombreSucursal = useCallback(
-    (id: string) => sucursales.find((s) => s.sucursal_id === id)?.nombre ?? id,
+    (id: string) => sucursales?.find((s) => s.sucursal_id === id)?.nombre ?? id,
     [sucursales],
   );
 
@@ -80,6 +98,7 @@ export default function UsuariosPage() {
       .sort((a, b) => Number(b.activo) - Number(a.activo));
   }, [usuarios, busqueda]);
 
+  const correos = useMemo(() => (usuarios ?? []).map((u) => u.email), [usuarios]);
   const activos = (usuarios ?? []).filter((u) => u.activo).length;
   const desactivados = (usuarios ?? []).length - activos;
 
@@ -104,7 +123,7 @@ export default function UsuariosPage() {
             se desactiva, y lo que hizo sigue en Auditoría.
           </p>
         </div>
-        <Button onClick={() => { setAviso(null); setFormulario({ usuario: null }); }}>
+        <Button onClick={(e) => abrirDesde(e, () => setFormulario({ usuario: null }))}>
           <UserPlus size={15} /> Crear usuario
         </Button>
       </header>
@@ -212,7 +231,7 @@ export default function UsuariosPage() {
                       size="sm"
                       variant="outline"
                       aria-label={`Editar a ${u.email}`}
-                      onClick={() => { setAviso(null); setFormulario({ usuario: u }); }}
+                      onClick={(e) => abrirDesde(e, () => setFormulario({ usuario: u }))}
                     >
                       <Pencil size={14} aria-hidden="true" /> Editar
                     </Button>
@@ -220,7 +239,7 @@ export default function UsuariosPage() {
                       size="sm"
                       variant="outline"
                       aria-label={`Cambiar la clave de ${u.email}`}
-                      onClick={() => { setAviso(null); setCambiarClave(u); }}
+                      onClick={(e) => abrirDesde(e, () => setCambiarClave(u))}
                     >
                       <KeyRound size={14} aria-hidden="true" /> Cambiar clave
                     </Button>
@@ -242,6 +261,7 @@ export default function UsuariosPage() {
         usuario={formulario?.usuario ?? null}
         sucursales={sucursales}
         errorSucursales={errorSucursales}
+        correosExistentes={correos}
         minimoClave={minimoClave}
         emailPropio={emailPropio}
         onClose={() => setFormulario(null)}
@@ -251,6 +271,7 @@ export default function UsuariosPage() {
         open={cambiarClave !== null}
         usuario={cambiarClave}
         minimoClave={minimoClave}
+        horasSesion={horasSesion}
         onClose={() => setCambiarClave(null)}
         onGuardado={alGuardar}
       />

@@ -8,7 +8,8 @@
 // El POST es idempotente por correo y cambia SOLO los campos que llegan: por eso
 // al editar se manda unicamente lo que cambio (`cambiosUsuario`), y editar el
 // nombre de alguien no puede quitarle el admin de rebote.
-import { MENSAJE_SIN_SERVIDOR, mensajeError, req, reqConReintentos } from "./api-client";
+import { MENSAJE_SIN_SERVIDOR, api, mensajeError, req, reqConReintentos } from "./api-client";
+import type { Sucursal } from "./types";
 
 const RUTA = "/api/admin/usuarios";
 
@@ -39,6 +40,8 @@ export interface UsuarioGuardar {
   es_vendedor?: boolean;
   activo?: boolean;
   sucursales?: string[];
+  /** Alta estricta: el servidor responde 409 si el correo ya tiene cuenta, en vez de pisarla. */
+  solo_crear?: boolean;
 }
 
 /** Los campos que se editan en la pantalla (sin correo ni clave). */
@@ -62,6 +65,15 @@ export const NOTA_PERMISOS_ESPECIALES = "Se definen en la configuración del ser
 
 export const AVISO_MOTOR =
   "Si cambias esto, el motor deja de publicar hasta que se actualice la clave en el PC donde corre.";
+
+/** El alta no pisa una cuenta que ya existe: se edita o se le cambia la clave. */
+export const MENSAJE_CORREO_EXISTE =
+  "Ya existe un usuario con ese correo. Búscalo en la lista y usa Editar o Cambiar clave.";
+
+/** El correo como lo guarda el servidor: sin espacios y en minusculas. */
+export function normalizarCorreo(email: string): string {
+  return email.trim().toLowerCase();
+}
 
 export function etiquetaPermiso(clave: string): string {
   return PERMISOS_ESPECIALES.find((p) => p.clave === clave)?.etiqueta ?? clave;
@@ -116,10 +128,15 @@ export function hayCambios(c: UsuarioGuardar): boolean {
   return Object.keys(c).some((k) => k !== "email");
 }
 
-/** El cambio deja al motor sin publicar: clave nueva, sin admin o desactivada. */
+/**
+ * El cambio deja al motor sin publicar: clave nueva, sin admin, desactivada o
+ * vendedor (como vendedor, `requiere_comprador` le responde 403 en ventas,
+ * equivalencias y precios, y publica a medias). Solo lectura y sucursales no lo
+ * afectan: el motor no usa rutas que miren esos campos.
+ */
 export function tocaAlMotor(u: UsuarioAdmin | null, c: UsuarioGuardar): boolean {
   if (!u?.es_cuenta_motor) return false;
-  return Boolean(c.password) || c.es_admin === false || c.activo === false;
+  return Boolean(c.password) || c.es_admin === false || c.activo === false || c.es_vendedor === true;
 }
 
 /** Que tiene de malo la clave, o null si sirve. `minimo` null = la regla no llego. */
@@ -172,12 +189,26 @@ export const usuariosApi = {
     });
   },
 
-  /** El largo minimo de la clave, para avisar antes de mandar. */
-  async reglas(): Promise<{ largo_minimo_clave: number }> {
+  /** El largo minimo de la clave y cuanto dura una sesion, para avisar antes de mandar. */
+  async reglas(): Promise<{ largo_minimo_clave: number; horas_sesion?: number }> {
     return conMensaje(async () => {
       const res = await reqConReintentos(`${RUTA}/reglas`);
       if (!res.ok) throw new Error(await mensajeError(res, `Error ${res.status}`));
-      return res.json() as Promise<{ largo_minimo_clave: number }>;
+      return res.json() as Promise<{ largo_minimo_clave: number; horas_sesion?: number }>;
+    });
+  },
+
+  /**
+   * Todas las sucursales que se pueden asignar. `/api/sucursales` filtra por las
+   * de quien mira, y un admin restringido no podria asignar las demas. Una API
+   * anterior a esta ruta responde 404: ahi se usa la lista general.
+   */
+  async sucursales(): Promise<Sucursal[]> {
+    return conMensaje(async () => {
+      const res = await reqConReintentos(`${RUTA}/sucursales`);
+      if (res.status === 404) return api.sucursales();
+      if (!res.ok) throw new Error(await mensajeError(res, `Error ${res.status}`));
+      return res.json() as Promise<Sucursal[]>;
     });
   },
 

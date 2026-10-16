@@ -16,6 +16,10 @@ Que NO hace, a proposito:
   trazabilidad de todo lo que creo (sugerencias, requerimientos, auditoria).
 - No deja que un admin se quite a si mismo el admin ni se desactive: es la forma
   clasica de quedarse sin ningun administrador y sin manera de volver a entrar.
+  Tampoco que se marque vendedor, que es la misma trampa por otro camino.
+- No deja marcar como vendedor la cuenta del motor (`EMAILS_MOTOR`).
+- Con `solo_crear` no pisa una cuenta que ya existe: responde 409. Sin el campo
+  el POST sigue siendo idempotente (lo usa scripts/clave_usuario.py).
 
 Desde el 16-10-2026 hay pantalla (`/usuarios` en la web, solo admin), para que
 la administracion no dependa de quien conoce el endpoint. La respuesta suma dos
@@ -30,9 +34,11 @@ from ..config import get_settings
 from ..db import get_db
 from ..models import Usuario
 from ..schemas import UsuarioCrear, UsuarioOut
+from ..schemas.catalogo import SucursalOut
 from ..schemas.usuario import ReglasUsuarios
 from ..services import auditoria_service
 from ..services.auth import hash_password, requiere_admin
+from .productos import listar_sucursales
 
 settings = get_settings()
 
@@ -108,7 +114,21 @@ def reglas():
     Asi el largo minimo de la clave vive en un solo lugar (`LARGO_MINIMO_CLAVE`)
     y no copiado en el navegador, donde quedaria desfasado el dia que cambie.
     """
-    return ReglasUsuarios(largo_minimo_clave=LARGO_MINIMO_CLAVE)
+    return ReglasUsuarios(
+        largo_minimo_clave=LARGO_MINIMO_CLAVE, horas_sesion=settings.token_horas,
+    )
+
+
+@router.get("/sucursales", response_model=list[SucursalOut])
+def sucursales_para_asignar(db: Session = Depends(get_db)):
+    """Todas las sucursales que se le pueden dar a un usuario.
+
+    `GET /api/sucursales` filtra por las sucursales de quien pregunta: un admin
+    con sucursales restringidas solo podria asignar las suyas, y las demas del
+    usuario le aparecerian como "ya no esta en la lista". Es la misma consulta,
+    con la misma regla de sucursales ocultas, sin el filtro de quien mira.
+    """
+    return listar_sucursales(db=db, permitidas=None)
 
 
 @router.post("", response_model=UsuarioOut)
@@ -140,9 +160,34 @@ def crear_o_actualizar(
             )
         if payload.activo is False:
             raise HTTPException(status_code=400, detail="No puedes desactivarte a ti mismo.")
+        # Es otra forma de quitarse el admin: requiere_comprador le cierra todo
+        # Abastecimiento y la web le muestra el menu de vendedor, sin "Usuarios".
+        if payload.es_vendedor is True:
+            raise HTTPException(
+                status_code=400,
+                detail="No puedes marcarte a ti mismo como vendedor de sucursal: "
+                "perderías el acceso a Abastecimiento y a la administración.",
+            )
+
+    # El motor llama rutas de Abastecimiento en cada corrida (ventas historicas,
+    # equivalencia de SKU, recalculo de precios); como vendedor le responden 403
+    # y publica a medias, que es peor que no publicar.
+    if payload.es_vendedor is True and es_cuenta_motor(email):
+        raise HTTPException(
+            status_code=400,
+            detail="La cuenta del motor no puede ser vendedor de sucursal: el motor "
+            "dejaría de publicar compras y precios.",
+        )
 
     usuario = db.get(Usuario, email)
     nuevo = usuario is None
+
+    if payload.solo_crear and not nuevo:
+        raise HTTPException(
+            status_code=409,
+            detail="Ya existe un usuario con ese correo. Búscalo en la lista y usa "
+            "Editar o Cambiar clave.",
+        )
 
     if nuevo:
         if not payload.password:

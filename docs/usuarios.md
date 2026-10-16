@@ -13,34 +13,57 @@ entero exige admin (`main.py`, `dependencies=[Depends(requiere_admin)]`).
 
 - **Crear**: correo, nombre, clave inicial, roles y sucursales. La clave tiene
   que tener al menos `LARGO_MINIMO_CLAVE` caracteres (`routers/usuarios.py`, hoy
-  4; la pantalla lo lee de `GET /api/admin/usuarios/reglas`).
+  4; la pantalla lo lee de `GET /api/admin/usuarios/reglas`). Si el correo ya
+  tiene cuenta no se crea nada: la pantalla lo dice al escribirlo ("Ya existe un
+  usuario con ese correo...") y manda `solo_crear: true`, con lo que el servidor
+  responde 409 si llega igual (por ejemplo, desde otra pestaña). Antes de eso,
+  crear con el correo del motor le cambiaba la clave y le quitaba el admin.
 - **Editar**: nombre, roles, sucursales y si la cuenta esta activa. Viaja solo lo
   que cambio: el servidor deja igual lo que no llega, asi que cambiar un nombre no
   puede quitarle el admin a nadie.
 - **Desactivar, no borrar**: un usuario borrado se llevaria la trazabilidad de lo
-  que creo (sugerencias, requerimientos, auditoria). Desactivado no puede entrar.
+  que creo (sugerencias, requerimientos, auditoria). Desactivado no puede entrar,
+  y si tenia la sesion abierta queda afuera en su siguiente accion:
+  `requiere_auth` (services/auth.py) revisa en cada peticion que la cuenta exista
+  y este activa, y responde 401 si no. Hasta el 16-10-2026 solo lo revisaba el
+  login, y un admin desactivado seguia siendo admin con su sesion hasta 12 horas.
 - **Cambiar clave**: la nueva se escribe dos veces o se genera al azar en el
   navegador. La guardada nunca se muestra: el servidor solo tiene un hash
-  (PBKDF2) y no hay forma de recuperarla.
+  (PBKDF2) y no hay forma de recuperarla. La anterior deja de servir para entrar,
+  pero una sesion ya abierta sigue hasta que vence (`token_horas`, hoy 12; la
+  pantalla lo dice con `horas_sesion` de `/reglas`). Para sacar a alguien de
+  inmediato hay que desactivarlo. Cortar las sesiones al cambiar la clave pide
+  guardar en `usuario` desde cuando valen: queda pendiente.
 
-Un admin no puede quitarse el admin ni desactivarse a si mismo (la pantalla
-bloquea esas casillas y el servidor responde 400 si llega igual). Los errores
-400 del servidor se muestran tal cual.
+Un admin no puede quitarse el admin, desactivarse ni marcarse vendedor a si mismo
+(la pantalla bloquea esas casillas y el servidor responde 400 si llega igual):
+como vendedor perderia todo Abastecimiento y el menu de admin. Los errores 400 y
+409 del servidor se muestran tal cual.
+
+Los dialogos llevan el foco al primer campo al abrirse (Correo, Nombre o Clave
+nueva) y lo devuelven al boton que los abrio al cerrarse. Lo escrito en las
+claves se borra al cerrar o guardar.
 
 ## Roles y sucursales
 
 | Rol | Que cambia |
 |---|---|
 | Admin | Administra la plataforma: usuarios, carga de datos y todo lo demas. Tiene todos los permisos especiales. |
-| Solo lectura | Ve todo pero no crea ni modifica sugerencias ni requerimientos (`requiere_escritura`). |
+| Solo lectura | Ve todo pero no crea ni modifica sugerencias manuales, pedidos de compra ni la lista InStock (`requiere_escritura`). Los requerimientos de sucursal no pasan por ahi: los puede procesar o rechazar. |
 | Vendedor de sucursal | Menu propio: solo arma y sigue requerimientos (`requiere_comprador` lo saca del resto). |
 
 **Sucursales** (`sucursales_permitidas`): para un vendedor son por las que puede
 pedir, y necesita al menos una (si no, el servidor rechaza el alta). Para el
 resto restringen lo que ve; sin ninguna ve todas. La lista sale de
-`GET /api/sucursales`, la misma de los filtros del sugerido. Si un usuario tiene
-una sucursal que ya no esta en esa lista, la pantalla la muestra igual para no
-quitarsela al guardar.
+`GET /api/admin/usuarios/sucursales`: la misma consulta de `GET /api/sucursales`
+(con las sucursales ocultas fuera), pero sin filtrar por las sucursales del admin
+que mira; si no, un admin restringido solo podria asignar las suyas. Una API
+anterior a esa ruta responde 404 y la pantalla usa la lista general.
+
+Si un usuario tiene una sucursal que ya no esta en la lista, la pantalla la
+muestra igual con "(ya no está en la lista)" para no quitarsela al guardar, y se
+puede desmarcar y volver a marcar. Mientras la lista no llega, o si fallo, no se
+pone esa etiqueta.
 
 ## Permisos especiales (solo lectura)
 
@@ -72,15 +95,24 @@ Cambiarle la clave, quitarle el admin o desactivarla deja al motor sin publicar.
 La pantalla avisa "Si cambias esto, el motor deja de publicar hasta que se
 actualice la clave en el PC donde corre" y no deja guardar hasta marcar que se
 entiende. Despues del cambio hay que actualizar `PLATAFORMA_PASSWORD` en ese
-`.env` (o devolverle el admin o reactivarla).
+`.env` (o devolverle el admin o reactivarla). Desactivarla corta tambien una
+corrida que este en curso, a mitad de la publicacion.
+
+Marcarla como vendedor la rompe de otra forma: `requiere_comprador` le responde
+403 en `/api/ventas-historicas/meta`, `/api/requerimiento/sku-proveedor` y
+`/api/precios/recalcular`, que el motor llama en cada corrida, mientras
+`/api/admin/cargar-sugerido` sigue publicando (publicacion a medias). Por eso la
+pantalla no ofrece Vendedor para esa cuenta y el servidor responde 400. Solo
+lectura y sucursales no la afectan: el motor no usa rutas que miren esos campos.
 
 ## API
 
 | Endpoint | Que hace |
 |---|---|
 | `GET /api/admin/usuarios` | Lista. Nunca trae la clave ni el hash. |
-| `GET /api/admin/usuarios/reglas` | `{"largo_minimo_clave": 4}` para validar antes de mandar. |
-| `POST /api/admin/usuarios` | Crea o actualiza por correo (idempotente). Solo cambia los campos que llegan; con `password` reemplaza la clave. |
+| `GET /api/admin/usuarios/reglas` | `{"largo_minimo_clave": 4, "horas_sesion": 12}` para validar y avisar antes de mandar. |
+| `GET /api/admin/usuarios/sucursales` | Todas las sucursales que se pueden asignar, sin el filtro del admin que pregunta. |
+| `POST /api/admin/usuarios` | Crea o actualiza por correo (idempotente). Solo cambia los campos que llegan; con `password` reemplaza la clave. Con `solo_crear: true` responde 409 si el correo ya existe. |
 | `POST /api/admin/usuarios/{email}/desactivar` | Desactiva. La pantalla no lo usa: manda `activo: false` por el POST. |
 
 La respuesta sumo dos campos el 16-10-2026, al final y con valor por defecto, asi
@@ -99,6 +131,8 @@ nunca se escribe.
   (`emails_motor`).
 - Web: `apps/web/app/usuarios/page.tsx`, `components/usuarios/`,
   `lib/usuarios.ts`, item en `components/sidebar.tsx`.
+- API: `services/auth.py` (`requiere_auth` y `requiere_admin` revisan `activo`).
 - Pruebas: `apps/api/tests/test_usuarios.py`, `tests/test_usuarios_pantalla.py`,
-  `apps/web/__tests__/usuarios-page.test.tsx`, `usuarios-lib.test.ts`,
+  `tests/test_usuarios_revision.py`, `apps/web/__tests__/usuarios-page.test.tsx`,
+  `usuarios-lib.test.ts`, `usuarios-clave-memoria.test.tsx`,
   `sidebar-usuarios.test.tsx`.

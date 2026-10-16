@@ -10,6 +10,10 @@
  * 3. Que cambiarle la clave, quitarle el admin o desactivar la cuenta del motor
  *    pida una confirmacion explicita: si no, el motor deja de publicar.
  * 4. Que el error del servidor se vea tal cual.
+ * 5. Lo que encontro la revision del 16-10-2026: crear con un correo que ya
+ *    existe pisaba esa cuenta (la del motor incluida), la cuenta propia y la del
+ *    motor se podian marcar como vendedor, el foco no entraba a los dialogos y
+ *    las sucursales fuera de la lista desaparecian al desmarcarlas.
  */
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -17,7 +21,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import UsuariosPage from "@/app/usuarios/page";
 import type { Sucursal } from "@/lib/types";
-import { AVISO_MOTOR, type UsuarioAdmin } from "@/lib/usuarios";
+import { AVISO_MOTOR, MENSAJE_CORREO_EXISTE, type UsuarioAdmin } from "@/lib/usuarios";
 
 const base: Omit<UsuarioAdmin, "email"> = {
   nombre: null, activo: true, es_admin: false, solo_lectura: false, es_vendedor: false,
@@ -56,14 +60,14 @@ vi.mock("@/lib/api-client", () => ({ api: { sucursales: mocks.sucursales } }));
 vi.mock("@/lib/auth", () => ({ getEsAdmin: mocks.esAdmin, getEmail: () => "jefa@ejemplo.cl" }));
 vi.mock("@/lib/usuarios", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/usuarios")>()),
-  usuariosApi: { listar: mocks.listar, reglas: mocks.reglas, guardar: mocks.guardar },
+  usuariosApi: { listar: mocks.listar, reglas: mocks.reglas, guardar: mocks.guardar, sucursales: mocks.sucursales },
 }));
 
 // Con llaves: si beforeEach devuelve una funcion, vitest la llama al terminar la
 // prueba como limpieza, y mockReset() devuelve el propio mock.
 beforeEach(() => {
   mocks.listar.mockReset().mockResolvedValue(USUARIOS);
-  mocks.reglas.mockReset().mockResolvedValue({ largo_minimo_clave: 4 });
+  mocks.reglas.mockReset().mockResolvedValue({ largo_minimo_clave: 4, horas_sesion: 12 });
   mocks.guardar.mockReset().mockImplementation(async (d: { email: string }) => ({ ...base, email: d.email }));
   mocks.sucursales.mockReset().mockResolvedValue(SUCURSALES);
   mocks.replace.mockReset();
@@ -165,6 +169,8 @@ describe("crear", () => {
     expect(mocks.guardar).toHaveBeenCalledWith({
       email: "nuevo@ejemplo.cl", password: "clave1234", nombre: "Persona Nueva",
       es_admin: false, solo_lectura: false, es_vendedor: true, sucursales: ["CURICO"],
+      // Alta estricta: si el correo ya existe el servidor responde 409 en vez de pisarlo.
+      solo_crear: true,
     });
     expect(await screen.findByText(/Usuario creado: nuevo@ejemplo.cl/)).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -343,5 +349,140 @@ describe("cuenta del motor", () => {
     await abrir();
     fireEvent.click(screen.getByRole("button", { name: "Cambiar la clave de vendedor@ejemplo.cl" }));
     expect(dialogo().queryByText(new RegExp(AVISO_MOTOR))).not.toBeInTheDocument();
+  });
+});
+
+describe("crear con un correo que ya existe", () => {
+  it("con el correo de la cuenta del motor no manda nada y dice que ya existe", async () => {
+    await abrir();
+    fireEvent.click(screen.getByRole("button", { name: /Crear usuario/ }));
+    fireEvent.change(dialogo().getByLabelText("Correo"), { target: { value: " Admin@Curifor.com " } });
+    // Se dice al tiro, antes de intentar guardar.
+    expect(dialogo().getByText(MENSAJE_CORREO_EXISTE)).toBeInTheDocument();
+
+    fireEvent.change(dialogo().getByLabelText("Clave inicial"), { target: { value: "nueva1" } });
+    fireEvent.change(dialogo().getByLabelText("Repite la clave"), { target: { value: "nueva1" } });
+    fireEvent.click(dialogo().getByRole("button", { name: /Crear usuario/ }));
+
+    await waitFor(() => expect(dialogo().getByText(MENSAJE_CORREO_EXISTE)).toBeInTheDocument());
+    expect(mocks.guardar).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Usuario creado/)).not.toBeInTheDocument();
+  });
+
+  it("si otra pestaña lo creo recien, el 409 del servidor se ve tal cual", async () => {
+    mocks.guardar.mockRejectedValueOnce(new Error(MENSAJE_CORREO_EXISTE));
+    await abrir();
+    fireEvent.click(screen.getByRole("button", { name: /Crear usuario/ }));
+    fireEvent.change(dialogo().getByLabelText("Correo"), { target: { value: "otra@ejemplo.cl" } });
+    fireEvent.change(dialogo().getByLabelText("Clave inicial"), { target: { value: "clave1234" } });
+    fireEvent.change(dialogo().getByLabelText("Repite la clave"), { target: { value: "clave1234" } });
+    fireEvent.click(dialogo().getByRole("button", { name: /Crear usuario/ }));
+
+    expect(await dialogo().findByText(MENSAJE_CORREO_EXISTE)).toBeInTheDocument();
+    expect(mocks.guardar).toHaveBeenCalledWith(expect.objectContaining({ email: "otra@ejemplo.cl", solo_crear: true }));
+  });
+});
+
+describe("roles que no se ofrecen", () => {
+  it("la cuenta del motor no se puede marcar como vendedor", async () => {
+    await abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Editar a admin@curifor.com" }));
+    expect(dialogo().getByRole("checkbox", { name: /^Vendedor de sucursal/ })).toBeDisabled();
+    expect(dialogo().getByText(/La cuenta del motor no puede ser vendedor/)).toBeInTheDocument();
+  });
+
+  it("el admin no puede marcarse vendedor a si mismo", async () => {
+    await abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Editar a jefa@ejemplo.cl" }));
+    expect(dialogo().getByRole("checkbox", { name: /^Vendedor de sucursal/ })).toBeDisabled();
+    expect(dialogo().getByText(/No puedes marcarte como vendedor a ti mismo/)).toBeInTheDocument();
+  });
+
+  it("a otra persona si se la puede marcar como vendedor", async () => {
+    await abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Editar a precios@ejemplo.cl" }));
+    expect(dialogo().getByRole("checkbox", { name: /^Vendedor de sucursal/ })).toBeEnabled();
+  });
+
+  it("solo lectura dice lo que de verdad bloquea el servidor", async () => {
+    await abrir();
+    fireEvent.click(screen.getByRole("button", { name: /Crear usuario/ }));
+    const ayuda = dialogo().getByRole("checkbox", { name: /^Solo lectura/ }).closest("label");
+    expect(ayuda).toHaveTextContent("sugerencias, pedidos de compra ni la lista InStock");
+    expect(ayuda).not.toHaveTextContent("requerimientos");
+  });
+});
+
+describe("sucursales que no estan en la lista", () => {
+  const CON_CERRADA: UsuarioAdmin = {
+    ...base, email: "antigua@ejemplo.cl", nombre: "Antigua", sucursales: ["LINDEROS", "CERRADA"],
+  };
+
+  it("desmarcar una por error no la hace desaparecer", async () => {
+    mocks.listar.mockResolvedValue([...USUARIOS, CON_CERRADA]);
+    await abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Editar a antigua@ejemplo.cl" }));
+    const cerrada = () => dialogo().getByRole("checkbox", { name: /CERRADA/ });
+    expect(dialogo().getByText("(ya no está en la lista)")).toBeInTheDocument();
+
+    fireEvent.click(cerrada());
+    expect(cerrada()).not.toBeChecked();
+    fireEvent.click(cerrada());
+    expect(cerrada()).toBeChecked();
+  });
+
+  it("si la lista no cargo no dice que sus sucursales ya no estan", async () => {
+    mocks.sucursales.mockRejectedValue(new Error("caida"));
+    await abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Editar a vendedor@ejemplo.cl" }));
+    expect(dialogo().getByText(/No se pudo cargar la lista de sucursales/)).toBeInTheDocument();
+    // La que tiene se sigue viendo marcada, para no quitarsela al guardar.
+    expect(dialogo().getByRole("checkbox", { name: "LINDEROS" })).toBeChecked();
+    expect(dialogo().queryByText("(ya no está en la lista)")).not.toBeInTheDocument();
+  });
+});
+
+describe("foco de los dialogos", () => {
+  it("crear: entra al correo y al cancelar vuelve al boton que lo abrio", async () => {
+    await abrir();
+    const crear = screen.getByRole("button", { name: /Crear usuario/ });
+    crear.focus();
+    fireEvent.click(crear);
+    expect(dialogo().getByLabelText("Correo")).toHaveFocus();
+
+    fireEvent.click(dialogo().getByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /Crear usuario/ })).toHaveFocus();
+  });
+
+  it("editar: entra al nombre", async () => {
+    await abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Editar a vendedor@ejemplo.cl" }));
+    expect(dialogo().getByLabelText("Nombre")).toHaveFocus();
+  });
+
+  it("cambiar clave: entra a la clave nueva y con Escape vuelve a la fila", async () => {
+    await abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Cambiar la clave de vendedor@ejemplo.cl" }));
+    expect(dialogo().getByLabelText("Clave nueva")).toHaveFocus();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Cambiar la clave de vendedor@ejemplo.cl" })).toHaveFocus();
+  });
+});
+
+describe("sesiones abiertas", () => {
+  it("cambiar la clave avisa que una sesion abierta sigue hasta que vence", async () => {
+    await abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Cambiar la clave de vendedor@ejemplo.cl" }));
+    expect(dialogo().getByText(/hasta que se le venza \(12 horas como máximo\)/)).toBeInTheDocument();
+    expect(dialogo().queryByText(/La anterior deja de servir al guardar/)).not.toBeInTheDocument();
+  });
+
+  it("desactivar dice que la saca aunque tenga la sesion abierta", async () => {
+    await abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Editar a precios@ejemplo.cl" }));
+    expect(dialogo().getByText(/si tenía la sesión abierta queda afuera/)).toBeInTheDocument();
   });
 });

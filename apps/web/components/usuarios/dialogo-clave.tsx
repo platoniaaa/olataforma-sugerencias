@@ -3,6 +3,9 @@
 // Cambiar la clave de alguien. La que tenia no se puede ver ni recuperar (el
 // servidor guarda solo un hash): se reemplaza por una nueva, escrita dos veces
 // o generada al azar. Solo viaja la clave; el resto del usuario queda igual.
+//
+// Cambiar la clave no corta una sesion que ya esta abierta (el token sigue
+// valiendo hasta que vence): la pantalla lo dice, y desactivar si la corta.
 import { useEffect, useState } from "react";
 import { AlertCircle, KeyRound, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,11 +18,13 @@ interface Props {
   open: boolean;
   usuario: UsuarioAdmin | null;
   minimoClave: number | null;
+  /** Cuanto dura una sesion (del servidor). null = no llego: se dice sin numero. */
+  horasSesion: number | null;
   onClose: () => void;
   onGuardado: (u: UsuarioAdmin, mensaje: string) => void;
 }
 
-export function DialogoClave({ open, usuario, minimoClave, onClose, onGuardado }: Props) {
+export function DialogoClave({ open, usuario, minimoClave, horasSesion, onClose, onGuardado }: Props) {
   const [clave, setClave] = useState("");
   const [repetida, setRepetida] = useState("");
   const [entiendeMotor, setEntiendeMotor] = useState(false);
@@ -27,8 +32,9 @@ export function DialogoClave({ open, usuario, minimoClave, onClose, onGuardado }
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Se limpia al abrir y al cerrar: la clave escrita no queda en memoria mientras
+  // la pestaña siga en /usuarios.
   useEffect(() => {
-    if (!open) return;
     setClave("");
     setRepetida("");
     setEntiendeMotor(false);
@@ -48,6 +54,8 @@ export function DialogoClave({ open, usuario, minimoClave, onClose, onGuardado }
     setError(null);
     try {
       const u = await usuariosApi.guardar({ email: usuario.email, password: clave });
+      setClave("");
+      setRepetida("");
       onGuardado(
         u,
         `Clave cambiada para ${u.email}. Pásasela por un medio que no sea el correo.` +
@@ -65,7 +73,7 @@ export function DialogoClave({ open, usuario, minimoClave, onClose, onGuardado }
       open={open}
       onClose={() => { if (!guardando) onClose(); }}
       title="Cambiar clave"
-      description={`Clave nueva para ${usuario.nombre ? `${usuario.nombre} (${usuario.email})` : usuario.email}. La anterior deja de servir al guardar.`}
+      description={`Clave nueva para ${usuario.nombre ? `${usuario.nombre} (${usuario.email})` : usuario.email}.`}
       className="max-w-md"
     >
       <form
@@ -73,6 +81,11 @@ export function DialogoClave({ open, usuario, minimoClave, onClose, onGuardado }
         onSubmit={(e) => { e.preventDefault(); void guardar(); }}
         noValidate
       >
+        <p className="text-[12.5px] text-ink-600">
+          La anterior deja de servir para entrar. Si la persona tiene la sesión abierta, sigue
+          dentro hasta que se le venza ({horasSesion != null ? `${horasSesion} horas como máximo` : "unas horas"}).
+          Para sacarla antes, desactiva la cuenta.
+        </p>
         <CampoClave
           id="clave-nueva"
           etiqueta="Clave nueva"
@@ -82,6 +95,7 @@ export function DialogoClave({ open, usuario, minimoClave, onClose, onGuardado }
           minimo={minimoClave}
           error={intentado ? problema : null}
           disabled={guardando}
+          autoFocus
         />
 
         {motor && (

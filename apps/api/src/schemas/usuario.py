@@ -26,6 +26,12 @@ class UsuarioCrear(BaseModel):
     # Sucursales que puede ver. Para un vendedor son ademas por las que puede
     # pedir. Lista vacia = ve todas (menos si es vendedor, que necesita una).
     sucursales: list[str] | None = None
+    # Alta estricta: si el correo ya tiene cuenta responde 409 en vez de
+    # actualizarla. Lo usa "Crear usuario" de la pantalla: sin esto, crear con un
+    # correo que ya existe (por ejemplo el del motor) le cambiaba la clave y le
+    # quitaba los roles sin ningun aviso. Quien no lo manda (scripts/clave_usuario.py)
+    # sigue con el POST idempotente de siempre.
+    solo_crear: bool | None = None
 
 
 class UsuarioOut(BaseModel):
@@ -55,3 +61,6 @@ class ReglasUsuarios(BaseModel):
     """Lo que la pantalla necesita saber para validar antes de mandar."""
 
     largo_minimo_clave: int
+    # Cuanto dura una sesion (`token_horas`). Cambiar la clave no corta una
+    # sesion ya abierta, y la pantalla lo dice con este numero.
+    horas_sesion: int

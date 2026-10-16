@@ -2,9 +2,11 @@
 
 // El motor publica el sugerido entrando con una cuenta admin de la plataforma
 // (EMAILS_MOTOR en el servidor; la clave esta en el .env del PC donde corre).
-// Cambiarle la clave, quitarle el admin o desactivarla lo deja sin publicar, y
-// nadie se entera hasta que el equipo ve datos viejos. Por eso se pide marcar
-// que se entiende antes de dejar guardar.
+// Cambiarle la clave, quitarle el admin, desactivarla o marcarla como vendedor
+// lo deja sin publicar (o publicando a medias), y nadie se entera hasta que el
+// equipo ve datos viejos. Por eso se pide marcar que se entiende antes de dejar
+// guardar (`tocaAlMotor` en lib/usuarios.ts). Vendedor ademas no se ofrece en la
+// pantalla y el servidor lo rechaza.
 import { AlertTriangle } from "lucide-react";
 import { AVISO_MOTOR } from "@/lib/usuarios";
 

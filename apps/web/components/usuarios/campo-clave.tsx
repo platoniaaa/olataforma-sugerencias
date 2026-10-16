@@ -19,9 +19,11 @@ interface Props {
   minimo: number | null;
   error?: string | null;
   disabled?: boolean;
+  /** El primer campo del dialogo: recibe el foco al abrir. */
+  autoFocus?: boolean;
 }
 
-export function CampoClave({ id, etiqueta, clave, repetida, onChange, minimo, error, disabled }: Props) {
+export function CampoClave({ id, etiqueta, clave, repetida, onChange, minimo, error, disabled, autoFocus }: Props) {
   const [mostrar, setMostrar] = useState(false);
   const [generada, setGenerada] = useState(false);
   const [copiada, setCopiada] = useState(false);
@@ -65,6 +67,7 @@ export function CampoClave({ id, etiqueta, clave, repetida, onChange, minimo, er
             aria-invalid={Boolean(error)}
             aria-describedby={`${id}-ayuda`}
             className="font-mono"
+            autoFocus={autoFocus}
           />
           <button
             type="button"

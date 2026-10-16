@@ -20,17 +20,19 @@ import {
 } from "@/lib/usuarios";
 import { MENSAJE_SIN_SERVIDOR } from "@/lib/api-client";
 
-const mocks = vi.hoisted(() => ({ req: vi.fn(), reqConReintentos: vi.fn() }));
+const mocks = vi.hoisted(() => ({ req: vi.fn(), reqConReintentos: vi.fn(), sucursalesGeneral: vi.fn() }));
 
 vi.mock("@/lib/api-client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api-client")>()),
   req: mocks.req,
   reqConReintentos: mocks.reqConReintentos,
+  api: { sucursales: mocks.sucursalesGeneral },
 }));
 
 beforeEach(() => {
   mocks.req.mockReset();
   mocks.reqConReintentos.mockReset();
+  mocks.sucursalesGeneral.mockReset();
 });
 
 const USUARIO: UsuarioAdmin = {
@@ -76,6 +78,11 @@ describe("tocaAlMotor", () => {
     expect(tocaAlMotor(MOTOR, { email: MOTOR.email, password: "nueva1234" })).toBe(true);
     expect(tocaAlMotor(MOTOR, { email: MOTOR.email, es_admin: false })).toBe(true);
     expect(tocaAlMotor(MOTOR, { email: MOTOR.email, activo: false })).toBe(true);
+  });
+
+  it("en la del motor lo pide marcarla como vendedor: le cierra ventas, equivalencias y precios", () => {
+    expect(tocaAlMotor(MOTOR, { email: MOTOR.email, es_vendedor: true, sucursales: ["LINDEROS"] })).toBe(true);
+    expect(tocaAlMotor(MOTOR, { email: MOTOR.email, es_vendedor: false })).toBe(false);
   });
 
   it("en la del motor no lo piden el nombre ni las sucursales", () => {
@@ -132,6 +139,21 @@ describe("usuariosApi", () => {
   it("sin servidor dice que no se pudo conectar", async () => {
     mocks.req.mockRejectedValue(new TypeError("Failed to fetch"));
     await expect(usuariosApi.guardar({ email: "v@ejemplo.cl", nombre: "V" })).rejects.toThrow(MENSAJE_SIN_SERVIDOR);
+  });
+
+  it("las sucursales para asignar salen de la ruta de admin, sin el filtro de quien mira", async () => {
+    const lista = [{ sucursal_id: "LINDEROS", nombre: "Linderos", region: null, abastece_desde_cd: null, prioridad_cd: 1 }];
+    mocks.reqConReintentos.mockResolvedValue(respuesta(200, lista));
+    expect(await usuariosApi.sucursales()).toEqual(lista);
+    expect(mocks.reqConReintentos).toHaveBeenCalledWith("/api/admin/usuarios/sucursales");
+    expect(mocks.sucursalesGeneral).not.toHaveBeenCalled();
+  });
+
+  it("una API anterior a esa ruta (404) usa la lista general", async () => {
+    mocks.reqConReintentos.mockResolvedValue(respuesta(404, { detail: "Not Found" }));
+    mocks.sucursalesGeneral.mockResolvedValue([]);
+    expect(await usuariosApi.sucursales()).toEqual([]);
+    expect(mocks.sucursalesGeneral).toHaveBeenCalledTimes(1);
   });
 
   it("guardar manda el JSON por POST a la ruta de admin", async () => {

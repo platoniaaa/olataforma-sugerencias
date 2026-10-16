@@ -5,6 +5,11 @@
 //
 // Al editar se manda solo lo que cambio: el servidor deja como estaba todo lo que
 // no llega, y asi cambiar el nombre no puede tocar los roles.
+//
+// El alta es estricta (`solo_crear`): el POST es idempotente por correo, y crear
+// con un correo que ya existe (el del motor, por ejemplo) le cambiaba la clave y
+// le quitaba los roles sin aviso. La pantalla lo frena antes con la lista que ya
+// tiene, y el servidor responde 409 si llega igual (otra pestaña, por ejemplo).
 import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, Loader2, Save, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,6 +19,7 @@ import { AvisoMotor } from "@/components/usuarios/aviso-motor";
 import { CampoClave } from "@/components/usuarios/campo-clave";
 import type { Sucursal } from "@/lib/types";
 import {
+  MENSAJE_CORREO_EXISTE,
   NOTA_PERMISOS_ESPECIALES,
   type DatosUsuario,
   type UsuarioAdmin,
@@ -23,6 +29,7 @@ import {
   errorClave,
   etiquetaPermiso,
   hayCambios,
+  normalizarCorreo,
   tocaAlMotor,
   usuariosApi,
 } from "@/lib/usuarios";
@@ -33,7 +40,9 @@ const VACIO: DatosUsuario = {
 
 const ROLES: { campo: "es_admin" | "solo_lectura" | "es_vendedor"; etiqueta: string; ayuda: string }[] = [
   { campo: "es_admin", etiqueta: "Admin", ayuda: "Administra la plataforma: usuarios, carga de datos y todo lo demás." },
-  { campo: "solo_lectura", etiqueta: "Solo lectura", ayuda: "Ve todo, pero no puede crear ni modificar sugerencias ni requerimientos." },
+  // Lo que bloquea `requiere_escritura` en el servidor, ni mas ni menos: los
+  // requerimientos de sucursal no pasan por ahi.
+  { campo: "solo_lectura", etiqueta: "Solo lectura", ayuda: "Ve todo, pero no puede crear ni modificar sugerencias, pedidos de compra ni la lista InStock." },
   { campo: "es_vendedor", etiqueta: "Vendedor de sucursal", ayuda: "Solo arma y sigue los requerimientos de sus sucursales." },
 ];
 
@@ -41,8 +50,11 @@ interface Props {
   open: boolean;
   /** null = usuario nuevo. */
   usuario: UsuarioAdmin | null;
-  sucursales: Sucursal[];
+  /** null = la lista todavia no llega (o fallo). */
+  sucursales: Sucursal[] | null;
   errorSucursales: string | null;
+  /** Correos que ya tienen cuenta: el alta no los pisa. */
+  correosExistentes: string[];
   minimoClave: number | null;
   /** Correo de quien esta usando la pantalla: no puede quitarse el admin ni desactivarse. */
   emailPropio: string | null;
@@ -51,7 +63,7 @@ interface Props {
 }
 
 export function FormularioUsuario({
-  open, usuario, sucursales, errorSucursales, minimoClave, emailPropio, onClose, onGuardado,
+  open, usuario, sucursales, errorSucursales, correosExistentes, minimoClave, emailPropio, onClose, onGuardado,
 }: Props) {
   const nuevo = usuario === null;
   const [email, setEmail] = useState("");
@@ -63,10 +75,11 @@ export function FormularioUsuario({
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Cada vez que se abre parte de lo guardado, no de lo que quedo a medias.
+  // Cada vez que se abre parte de lo guardado, no de lo que quedo a medias. Al
+  // cerrar tambien se limpia: la clave escrita no queda en memoria mientras la
+  // pestaña siga en /usuarios.
   useEffect(() => {
-    if (!open) return;
-    setEmail(usuario?.email ?? "");
+    setEmail(open ? usuario?.email ?? "" : "");
     setDatos(usuario ? datosDe(usuario) : VACIO);
     setClave("");
     setRepetida("");
@@ -83,14 +96,23 @@ export function FormularioUsuario({
   const avisarMotor = tocaAlMotor(usuario, cambios);
 
   // Las sucursales que ya tiene y no estan en la lista (cerradas u ocultas) se
-  // muestran igual: si no, guardar se las quitaria sin que nadie lo decida.
+  // muestran igual: si no, guardar se las quitaria sin que nadie lo decida. Salen
+  // de lo guardado y de lo marcado, para que desmarcar una por error no la haga
+  // desaparecer. "Ya no esta en la lista" solo se dice si la lista llego bien.
   const opciones = useMemo(() => {
-    const ids = new Set(sucursales.map((s) => s.sucursal_id));
-    const extra = datos.sucursales.filter((s) => !ids.has(s)).map((s) => ({ id: s, nombre: s, fuera: true }));
-    return [...sucursales.map((s) => ({ id: s.sucursal_id, nombre: s.nombre ?? s.sucursal_id, fuera: false })), ...extra];
-  }, [sucursales, datos.sucursales]);
+    const lista = sucursales ?? [];
+    const ids = new Set(lista.map((s) => s.sucursal_id));
+    const listaConfiable = sucursales !== null && !errorSucursales;
+    const extra = Array.from(new Set([...(usuario?.sucursales ?? []), ...datos.sucursales]))
+      .filter((s) => !ids.has(s))
+      .map((s) => ({ id: s, nombre: s, fuera: listaConfiable }));
+    return [...lista.map((s) => ({ id: s.sucursal_id, nombre: s.nombre ?? s.sucursal_id, fuera: false })), ...extra];
+  }, [sucursales, errorSucursales, usuario, datos.sucursales]);
 
-  const errorCorreo = nuevo && !email.trim().includes("@") ? "Escribe un correo válido." : null;
+  const correoExiste = nuevo && correosExistentes.some((c) => normalizarCorreo(c) === normalizarCorreo(email));
+  const errorCorreo = nuevo && !email.trim().includes("@")
+    ? "Escribe un correo válido."
+    : correoExiste ? MENSAJE_CORREO_EXISTE : null;
   const errorDeClave = nuevo ? errorClave(clave, repetida, minimoClave) : null;
   const errorSucursal = datos.es_vendedor && datos.sucursales.length === 0
     ? "Un vendedor necesita al menos una sucursal: es por donde pide."
@@ -115,13 +137,14 @@ export function FormularioUsuario({
 
     const payload: UsuarioGuardar = nuevo
       ? {
-          email: email.trim().toLowerCase(),
+          email: normalizarCorreo(email),
           password: clave,
           nombre: datos.nombre.trim(),
           es_admin: datos.es_admin,
           solo_lectura: datos.solo_lectura,
           es_vendedor: datos.es_vendedor,
           sucursales: datos.sucursales,
+          solo_crear: true,
         }
       : cambios;
 
@@ -129,6 +152,8 @@ export function FormularioUsuario({
     setError(null);
     try {
       const u = await usuariosApi.guardar(payload);
+      setClave("");
+      setRepetida("");
       const mensaje = nuevo
         ? `Usuario creado: ${u.email}. Pásale la clave por un medio que no sea el correo.`
         : `Cambios guardados para ${u.email}.` +
@@ -142,8 +167,8 @@ export function FormularioUsuario({
     }
   }
 
-  const campo = (texto: string | null) =>
-    intentado && texto ? <p role="alert" className="mt-1 text-[12.5px] text-rose-700">{texto}</p> : null;
+  const campo = (texto: string | null, siempre = false) =>
+    (intentado || siempre) && texto ? <p role="alert" className="mt-1 text-[12.5px] text-rose-700">{texto}</p> : null;
 
   return (
     <Dialog
@@ -171,10 +196,12 @@ export function FormularioUsuario({
                 inputMode="email"
                 value={email}
                 onChange={(e) => { setEmail(e.target.value); setError(null); }}
-                aria-invalid={intentado && Boolean(errorCorreo)}
+                aria-invalid={(intentado || correoExiste) && Boolean(errorCorreo)}
                 placeholder="nombre@ejemplo.cl"
+                autoFocus
               />
-              {campo(errorCorreo)}
+              {/* Que el correo ya existe se dice al tiro: no es un error de tipeo a medias. */}
+              {campo(errorCorreo, correoExiste)}
             </div>
           ) : (
             <div>
@@ -189,6 +216,7 @@ export function FormularioUsuario({
               autoComplete="off"
               value={datos.nombre}
               onChange={(e) => set("nombre", e.target.value)}
+              autoFocus={!nuevo}
             />
           </div>
         </fieldset>
@@ -209,7 +237,7 @@ export function FormularioUsuario({
         <fieldset className="space-y-2" disabled={guardando}>
           <legend className="mb-1 text-[12.5px] font-medium text-ink-700">Roles</legend>
           {ROLES.map((r) => {
-            const bloqueado = r.campo === "es_admin" && propio && usuario?.es_admin;
+            const bloqueado = bloqueoDeRol(r.campo, usuario, propio);
             return (
               <label key={r.campo} className="flex cursor-pointer items-start gap-2">
                 <input
@@ -221,9 +249,7 @@ export function FormularioUsuario({
                 />
                 <span>
                   <span className="font-medium text-ink-900">{r.etiqueta}</span>
-                  <span className="block text-[12px] text-ink-500">
-                    {bloqueado ? "No puedes quitarte el admin a ti mismo." : r.ayuda}
-                  </span>
+                  <span className="block text-[12px] text-ink-500">{bloqueado ?? r.ayuda}</span>
                 </span>
               </label>
             );
@@ -274,7 +300,7 @@ export function FormularioUsuario({
                 <span className="block text-[12px] text-ink-500">
                   {propio
                     ? "No puedes desactivarte a ti mismo."
-                    : "Desactivada no puede entrar. No se borra nada de lo que hizo."}
+                    : "Desactivada no puede entrar, y si tenía la sesión abierta queda afuera. No se borra nada de lo que hizo."}
                 </span>
               </span>
             </label>
@@ -293,7 +319,8 @@ export function FormularioUsuario({
             ) : (
               <p className="text-[12.5px] text-ink-600">Ninguno.</p>
             )}
-            <p className="mt-1 text-[12px] text-ink-500">
+            {/* ink-600: sobre paper-100, ink-500 queda en 4,39:1 (bajo el 4,5:1 de AA). */}
+            <p className="mt-1 text-[12px] text-ink-600">
               {NOTA_PERMISOS_ESPECIALES} No se cambian desde esta pantalla.
             </p>
           </div>
@@ -326,4 +353,22 @@ export function FormularioUsuario({
       </form>
     </Dialog>
   );
+}
+
+/**
+ * Por que un rol no se puede tocar, o null si se puede. Admin y Vendedor en la
+ * cuenta propia son la misma trampa por dos caminos: el vendedor pierde todo
+ * Abastecimiento y el menu de admin. La cuenta del motor como vendedor publica a
+ * medias. Si ya lo es (cargado a mano), se deja desmarcar para arreglarlo.
+ */
+function bloqueoDeRol(
+  campo: (typeof ROLES)[number]["campo"], usuario: UsuarioAdmin | null, propio: boolean,
+): string | null {
+  if (!usuario) return null;
+  if (campo === "es_admin" && propio && usuario.es_admin) return "No puedes quitarte el admin a ti mismo.";
+  if (campo === "es_vendedor" && !usuario.es_vendedor) {
+    if (propio) return "No puedes marcarte como vendedor a ti mismo: perderías Abastecimiento y esta pantalla.";
+    if (usuario.es_cuenta_motor) return "La cuenta del motor no puede ser vendedor: el motor dejaría de publicar compras y precios.";
+  }
+  return null;
 }

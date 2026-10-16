@@ -190,7 +190,7 @@ def test_los_permisos_especiales_dicen_lo_mismo_que_los_permisos_de_verdad(
 def test_las_reglas_dan_el_largo_minimo_de_la_clave(client, db_session):
     r = client.get("/api/admin/usuarios/reglas")
     assert r.status_code == 200
-    assert r.json() == {"largo_minimo_clave": LARGO_MINIMO_CLAVE}
+    assert r.json()["largo_minimo_clave"] == LARGO_MINIMO_CLAVE
 
 
 def test_las_reglas_son_solo_para_admin(client, db_session):

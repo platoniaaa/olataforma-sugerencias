@@ -74,22 +74,44 @@ def verificar_token(token: str) -> str | None:
 
 
 # --------------------------- dependencia FastAPI --------------------------- #
-def requiere_auth(authorization: str | None = Header(default=None)) -> str:
-    """Valida el header Authorization: Bearer <token>. Devuelve el email."""
+def requiere_auth(
+    authorization: str | None = Header(default=None), db=Depends(get_db),
+) -> str:
+    """Valida el header Authorization: Bearer <token>. Devuelve el email.
+
+    Ademas de la firma, mira que la cuenta exista y siga activa. Hasta el
+    16-10-2026 solo el login revisaba `activo`, y un token dura `token_horas`: a
+    quien desactivaban con la sesion abierta le seguia sirviendo, y si era admin
+    podia reactivarse y desactivar a quien lo saco. Con la pantalla de Usuarios,
+    desactivar paso a ser la forma normal de sacar a alguien.
+
+    401 y no 403: la web cierra la sesion con un 401 y manda al login.
+    """
+    from ..models import Usuario  # import local para evitar ciclo
+
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="No autenticado")
     email = verificar_token(authorization[7:])
     if not email:
         raise HTTPException(status_code=401, detail="Sesion invalida o expirada")
+    user = db.get(Usuario, email)
+    if not user:
+        raise HTTPException(status_code=401, detail="Sesion invalida o expirada")
+    if not user.activo:
+        raise HTTPException(status_code=401, detail="Tu cuenta está desactivada.")
     return email
 
 
 def requiere_admin(email: str = Depends(requiere_auth), db=Depends(get_db)) -> str:
-    """Bloquea endpoints reservados a admin. Devuelve el email si es admin."""
+    """Bloquea endpoints reservados a admin. Devuelve el email si es admin.
+
+    `activo` se mira tambien aca aunque requiere_auth ya lo haga: es lo que
+    protege la administracion de usuarios, y no cuesta otra consulta (la sesion
+    ya tiene al usuario cargado)."""
     from ..models import Usuario  # import local para evitar ciclo
 
     user = db.get(Usuario, email)
-    if not user or not user.es_admin:
+    if not user or not user.es_admin or not user.activo:
         raise HTTPException(status_code=403, detail="Requiere permisos de admin")
     return email
 
