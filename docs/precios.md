@@ -128,14 +128,19 @@ por producto.
     la segunda (cp1252) que no lo parezca cuando Excel guarda como "CSV" y cambia por
     `?` lo que no cabe (flechas, espacio fino). Excel escribe un `?` por unidad UTF-16:
     un emoji queda como `??`. El `?` se calcula ANTES de colapsar los espacios, porque
-    el espacio fino (U+2009) no cabe en cp1252 y Excel lo escribe como `?`.
+    el espacio fino (U+2009) no cabe en cp1252 y Excel lo escribe como `?`. Para "CSV
+    MS-DOS" (cp850) y "CSV Macintosh" (mac_roman), que pierden otros caracteres (`€ – “ ”
+    • ™`, `² ½ ×`), la Referencia no lleva más huellas: la nota del archivo se compara
+    contra la que hay en la plataforma pasada por esa página de códigos, y solo si
+    nadie editó la ficha desde la descarga.
 
   Sin `Referencia` el archivo no se carga. Excel con "disminuir decimales" guarda
   1,1429 como 1,14 o 1,143: si el factor del archivo es el de la referencia redondeado
   a 2 o a 3 decimales (mitad hacia arriba, como Excel), no cuenta como edición. Se
   compara con el valor ya canónico, sin ceros finales: 1,4993 mostrado como `1,50`
   llega como `1.5`. Costo conocido: escribir a propósito el valor redondeado tampoco
-  se distingue.
+  se distingue; por eso la vista previa cuenta esos productos y los lista
+  (`factor_redondeado_total`, `factor_redondeado`) en un aviso amarillo.
 - **Carga**: `POST /api/precios/carga/vista-previa` lee y compara sin guardar;
   `POST /api/precios/carga` vuelve a leer el archivo y aplica. **Todo o nada**: un
   error de validación (factor fuera de rango, tipo que no existe en la política,
@@ -143,7 +148,10 @@ por producto.
   bloquea la carga entera. Se omiten y se listan los conflictos, los códigos que no
   están en la lista y las filas sin `Referencia`. Si el producto cambió en la ficha
   después de bajar el archivo y el archivo lo edita, es conflicto aunque la combinación
-  sea inválida (precio fijo y factor puestos por el otro): solo se omite esa fila. Al
+  sea inválida (precio fijo y factor puestos por el otro): solo se omite esa fila. Eso
+  vale SOLO para el error de combinación, que puede venir de lo que dejó la otra
+  persona; un error de valor (tipo que no existe, factor fuera de rango) es del
+  archivo y bloquea igual, haya editado alguien el producto o no. Al
   aplicar, las filas se bloquean (`FOR UPDATE`) y se vuelve a calcular contra lo que
   hay AHORA: otra persona que edite justo entre comparar y escribir no se pisa, y el
   reintento de una respuesta perdida da "sin cambios".
@@ -166,22 +174,34 @@ por producto.
 - **Formatos**: `.csv` (UTF-8; UTF-16 de "Texto Unicode", con o sin BOM; o la página
   de códigos de Windows: cp1252 de "CSV", cp850 de "CSV MS-DOS" y mac_roman de "CSV
   Macintosh", que se distinguen porque el encabezado `Descuento máximo` solo se lee
-  entero con la correcta; separador `;`, `,` o tabulación; fin de línea CRLF, LF o CR)
-  y `.xlsx`. El `.xlsx` se lee con `python-calamine`: `openpyxl` tardaba 36 s en 40 mil
-  filas en un PC y mucho más en el plan gratis de Render. Calamine arma la hoja entera
-  en memoria y `ABORTA el proceso` con una referencia de celda absurda, así que antes
-  de abrirlo se escanea el XML de la PRIMERA hoja por bloques: última fila y columna
-  con contenido (no cuentan las celdas vacías con formato), referencias dañadas y
-  tamaño descomprimido. No se confía en la `<dimension>` declarada (falta en los
-  archivos en streaming y una celda de más la hace mentir). Topes: 30 MB, 150 MB
-  descomprimido, 250.000 filas y 3 millones de celdas (también en CSV). Cualquier
-  archivo que no sirve da un 422 con un mensaje, nunca un 500. Los códigos se recortan
-  solo en los bordes: `19  FB5Z15201H` (dos espacios) y `19 FB5Z15201H` son productos
-  distintos.
-- **Limitación conocida**: Excel reinterpreta al abrir un CSV las notas que parecen
-  fecha o número (`31/12` pasa a `31-dic`, `0045` a `45`, `1e3` a `1,00E+03`); al
-  volver, parecen una edición de la nota. La vista previa muestra el "antes → después".
-  Un `.xlsx` generado por la plataforma evitaría esto, pero tardaba 83 s.
+  entero con la correcta; si borraron las columnas de descuento (no son obligatorias),
+  gana la página en que más celdas dicen `Sí`; separador `;`, `,` o tabulación; fin de
+  línea CRLF, LF o CR) y `.xlsx`. El `.xlsx` se lee con `python-calamine`: `openpyxl`
+  tardaba 36 s en 40 mil filas en un PC y mucho más en el plan gratis de Render.
+  Calamine arma la hoja entera en memoria y `ABORTA el proceso` con una referencia de
+  celda absurda, así que antes de abrirlo se escanea el XML de la PRIMERA hoja por
+  bloques: última fila y columna con contenido (no cuentan las celdas vacías con
+  formato, ni `<c .../>` ni `<c ...></c>`), referencias dañadas, tamaño descomprimido y
+  texto sin etiquetas (más de 1 MB seguido: Excel admite 32.767 caracteres por
+  celda). Las etiquetas de Excel, openpyxl y xlsxwriter se leen con un regex rápido;
+  desde el primer bloque con una etiqueta de otra forma (prefijo `<x:c`, comillas
+  simples, otro orden de atributos, celdas sin `r`) se lee con uno general, más lento,
+  que usa `<row r=` para las celdas sin referencia. No se confía en la `<dimension>`
+  declarada (falta en los archivos en streaming y una celda de más la hace mentir).
+  Topes: 30 MB, 100 MB descomprimido, 250.000 filas y 2 millones de celdas con texto
+  (también en CSV; las filas vacías `;;;;` que Excel deja al final no cuentan).
+  Cualquier archivo que no sirve da un 422 con un mensaje, nunca un 500; si los datos
+  no están en la primera hoja, el mensaje lo dice. Los códigos se recortan solo en los
+  bordes: `19  FB5Z15201H` (dos espacios) y `19 FB5Z15201H` son productos distintos.
+- **Notas que Excel lee como número o fecha**: al abrir un CSV, `0123` pasa a `123`,
+  `3/4` a `03-abr`, `1E5` a `1,00E+05` y un teléfono de 12 dígitos pierde dígitos. Como
+  con las fórmulas, esas notas (número, porcentaje, moneda, fecha, hora, notación
+  científica) salen con un apostrofe delante y se lo quita al leer; un entero sin ceros
+  a la izquierda de hasta 11 dígitos vuelve igual y no lo lleva. Se ve en la columna
+  Obs del archivo.
+- **Limitación conocida**: un factor que Excel muestre con 0 o 1 decimal (`1,5` por
+  1,5385) sí cuenta como edición, y se ve en la vista previa ("antes → después"). No se
+  tolera porque dejaría sin cargar un factor escrito a propósito.
 - **Medido** con la copia local de 60 mil productos: bajar el archivo 3,2 s (11 MB);
   leer y comparar sin ediciones 1,5 a 1,9 s (CSV) o 7,7 s (.xlsx, de los cuales ~2 s
   son el escaneo previo); aplicar 1.500 ediciones 2,0 s en total; subir el mismo
@@ -191,14 +211,12 @@ por producto.
   dos primeras encontraron 25 y 29 defectos reales (varios de pérdida silenciosa de
   datos: una Referencia desalineada convertía precios en precio fijo; un `.xlsx` de
   26 KB tumbaba la API; las notas con emojis se sobrescribían con `?`). La tercera
-  encontró 25 hallazgos (16 distintos); se corrigieron los 3 más serios (emoji,
-  redondeo del factor que termina en 0, y el diálogo que se cerraba al tocar la barra
-  de desplazamiento) y se agregó el freno de 200. **Pendientes menores** (ninguno
-  afecta datos reales hoy): notas con `€ – “ ” •` en "CSV MS-DOS" o "Macintosh"; el
-  escaneo de `.xlsx` con etiquetas con prefijo (`<x:c`), comillas simples u otro orden
-  de atributos; un CSV con filas vacías al final cuenta contra el tope de celdas; el
-  tope de celdas (3 millones) es alto para 512 MB; un factor redondeado a 0 o 1
-  decimal sí cuenta como edición; la vista previa no se enfoca al terminar de leer.
+  encontró 25 hallazgos (16 distintos), todos corregidos salvo el factor a 0 o 1
+  decimal (ver Limitación conocida): emoji, redondeo del factor que termina en 0, el
+  diálogo que se cerraba al tocar la barra de desplazamiento, las otras páginas de
+  códigos, el escaneo del `.xlsx`, las filas vacías del CSV, el tope de celdas, un error
+  de valor escondido como conflicto, las notas que parecen número, el foco de la vista
+  previa y los avisos de descarga y lectura (ahora separados). Se agregó el freno de 200.
 
 ## Exportar al ERP
 

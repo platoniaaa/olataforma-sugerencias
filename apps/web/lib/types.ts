@@ -1556,6 +1556,9 @@ export interface CargaPreciosVistaPrevia {
   fijan_total: number;
   fijan: Record<string, number>;
   umbral_masiva: number;
+  /** Productos cuyo Factor Excel mostró redondeado: se toma como sin cambios. */
+  factor_redondeado_total: number;
+  factor_redondeado: string[];
   errores: CargaPreciosError[];
   errores_total: number;
   conflictos: CargaPreciosError[];

@@ -117,7 +117,10 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
   const [previa, setPrevia] = useState<CargaPreciosVistaPrevia | null>(null);
   const [resultado, setResultado] = useState<CargaPreciosResultado | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [aviso, setAviso] = useState<string | null>(null);
+  // Un aviso por operacion: con uno solo, el reintento de la descarga aparecia junto a "Leyendo
+  // el archivo" y parecia que fallaba la lectura, y cada una borraba el aviso de la otra.
+  const [avisoDescarga, setAvisoDescarga] = useState<string | null>(null);
+  const [avisoLectura, setAvisoLectura] = useState<string | null>(null);
   const [descargando, setDescargando] = useState(false);
   const [confirmaQuitas, setConfirmaQuitas] = useState(false);
   const [confirmaMasiva, setConfirmaMasiva] = useState(false);
@@ -126,6 +129,7 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
   const botonDescargar = useRef<HTMLButtonElement>(null);
   const panelResultado = useRef<HTMLDivElement>(null);
   const alerta = useRef<HTMLParagraphElement>(null);
+  const panelPrevia = useRef<HTMLElement>(null);
   // Cada lectura y cada descarga lleva un numero. Si cuando termina ya no es el
   // vigente -se eligio otro archivo, o se cerro el dialogo-, su respuesta se descarta:
   // sin esto, una lectura lenta que llegaba tarde dejaba el nombre de un archivo y la
@@ -141,6 +145,9 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
   // El foco va al error solo si viene de lo que la persona acaba de hacer; un error
   // de otra operacion no le quita la casilla o el boton donde esta.
   const enfocarError = useRef(false);
+  // Terminada la lectura, la vista previa y el boton Cargar quedan abajo, fuera de pantalla: el
+  // unico cambio visible era que desaparecia "Leyendo el archivo", y parecia que no pasaba nada.
+  const enfocarPrevia = useRef(false);
 
   // Al cerrarse el dialogo se empieza de cero: un archivo viejo en pantalla invita a
   // cargarlo despues de que la lista ya cambio.
@@ -155,7 +162,8 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
     setPrevia(null);
     setResultado(null);
     setError(null);
-    setAviso(null);
+    setAvisoDescarga(null);
+    setAvisoLectura(null);
     setConfirmaQuitas(false);
     setConfirmaMasiva(false);
   }, [open]);
@@ -170,6 +178,14 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
   // Salir sin pasar por "cerrar" (la pagina se desmonta) tambien corta la lectura.
   useEffect(() => () => cancelaLectura.current?.abort(), []);
 
+  // Al terminar de leer, el foco va a la vista previa (y el navegador la lleva a la vista).
+  useEffect(() => {
+    if (fase === "previa" && previa && enfocarPrevia.current) {
+      enfocarPrevia.current = false;
+      panelPrevia.current?.focus();
+    }
+  }, [fase, previa]);
+
   // Al terminar, el foco va al resultado: el boton que lo tenia desaparece.
   useEffect(() => {
     if (fase === "listo") panelResultado.current?.focus();
@@ -183,14 +199,14 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
     try {
       const n = await api.exportarPrecios(
         { soloDiferencias: false, formato: "editable" },
-        (i, t) => { if (id === descarga.current) setAviso(`El servidor no responde. Reintentando (${i} de ${t})…`); },
+        (i, t) => { if (id === descarga.current) setAvisoDescarga(`Descarga: el servidor no responde. Reintentando (${i} de ${t})…`); },
       );
       if (id === descarga.current) {
-        setAviso(`Archivo descargado: ${cantidad(n, "producto", "productos")}. Ábrelo con Excel, edita y vuelve aquí.`);
+        setAvisoDescarga(`Archivo descargado: ${cantidad(n, "producto", "productos")}. Ábrelo con Excel, edita y vuelve aquí.`);
       }
     } catch (e) {
       if (id === descarga.current) {
-        setAviso(null);
+        setAvisoDescarga(null);
         const activo = typeof document !== "undefined" ? document.activeElement : null;
         enfocarError.current = activo === botonDescargar.current || activo === document.body;
         setError(e instanceof Error ? e.message : "No se pudo descargar el archivo.");
@@ -208,7 +224,7 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
     setPrevia(null);
     setResultado(null);
     setError(null);
-    setAviso(null);
+    setAvisoLectura(null);
     setConfirmaQuitas(false);
     setConfirmaMasiva(false);
     setArchivo(f);
@@ -222,16 +238,17 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
     try {
       const p = await api.vistaPreviaCargaPrecios(
         f,
-        (i, t) => { if (id === lectura.current) setAviso(`El servidor no responde. Reintentando (${i} de ${t})…`); },
+        (i, t) => { if (id === lectura.current) setAvisoLectura(`Lectura: el servidor no responde. Reintentando (${i} de ${t})…`); },
         control.signal,
       );
       if (id !== lectura.current) return;
-      setAviso(null);
+      setAvisoLectura(null);
+      enfocarPrevia.current = true;
       setPrevia(p);
       setFase("previa");
     } catch (e) {
       if (id !== lectura.current) return;
-      setAviso(null);
+      setAvisoLectura(null);
       enfocarError.current = true;
       setError(e instanceof Error ? e.message : "No se pudo leer el archivo.");
       setFase("inicio");
@@ -289,10 +306,6 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
             <AlertCircle size={16} className="mt-0.5 shrink-0" /> {error}
           </p>
         )}
-        {aviso && fase !== "listo" && (
-          <p role="status" className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700">{aviso}</p>
-        )}
-
         {fase === "listo" && resultado ? (
           <div ref={panelResultado} tabIndex={-1} role="status" className="space-y-3 outline-none">
             {resultado.aplicados === 0 && omitidosCarga > 0 ? (
@@ -332,6 +345,9 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
                 {descargando ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
                 Descargar para editar
               </Button>
+              {avisoDescarga && (
+                <p role="status" className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700">{avisoDescarga}</p>
+              )}
             </section>
 
             <section className="space-y-2">
@@ -397,10 +413,13 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
                   </span>
                 )}
               </div>
+              {avisoLectura && (
+                <p role="status" className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700">{avisoLectura}</p>
+              )}
             </section>
 
             {previa && (
-              <section className="space-y-3" aria-label="Qué cambia">
+              <section ref={panelPrevia} tabIndex={-1} className="space-y-3 outline-none" aria-label="Qué cambia">
                 <h3 className="text-[13px] font-semibold text-slate-900">Qué cambia</h3>
                 <div className="flex flex-wrap gap-2 text-[12px]">
                   <span className="rounded-md bg-slate-100 px-2 py-1">{cantidad(previa.filas, "fila leída", "filas leídas")}</span>
@@ -424,8 +443,9 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
                 {hayErrores && (
                   <div role="alert" className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-rose-800">
                     <p className="font-medium">
-                      El archivo tiene {formatoNumero(previa.errores_total)} error(es). No se carga nada hasta corregirlos:
-                      arréglalos en Excel y vuelve a subirlo.
+                      {previa.errores_total === 1
+                        ? "El archivo tiene 1 error. No se carga nada hasta corregirlo: arréglalo en Excel y vuelve a subirlo."
+                        : `El archivo tiene ${formatoNumero(previa.errores_total)} errores. No se carga nada hasta corregirlos: arréglalos en Excel y vuelve a subirlo.`}
                     </p>
                     <ListaErrores items={previa.errores} total={previa.errores_total} tono="rojo" />
                   </div>
@@ -484,6 +504,20 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
                       />
                       <span>Entiendo que se fijan {formatoNumero(fijan)} valores y quiero cargarlos.</span>
                     </label>
+                  </div>
+                )}
+
+                {previa.factor_redondeado_total > 0 && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+                    <p className="font-medium">
+                      {previa.factor_redondeado_total === 1
+                        ? "1 producto trae el Factor redondeado (por ejemplo 1,14 en vez de 1,1429) y se toma como sin cambios."
+                        : `${formatoNumero(previa.factor_redondeado_total)} productos traen el Factor redondeado (por ejemplo 1,14 en vez de 1,1429) y se toman como sin cambios.`}
+                    </p>
+                    <ListaCodigos codigos={previa.factor_redondeado} total={previa.factor_redondeado_total} />
+                    <p className="mt-1 text-[12px]">
+                      Excel lo hace al mostrar menos decimales. Si querías justo ese valor, no se cargará: cámbialo en la ficha del producto.
+                    </p>
                   </div>
                 )}
 

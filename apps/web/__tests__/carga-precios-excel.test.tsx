@@ -39,7 +39,7 @@ const BASE: CargaPreciosVistaPrevia = {
   archivo: "lista.csv", filas: 39830, sin_cambios: 39826, a_cambiar: 2, por_campo: { tipo: 1, precio_fijo: 1 },
   efecto: { suben: 1, bajan: 0, sin_cambio_de_precio: 1, con_precio_nuevo: 0 },
   quitan_total: 0, quitan: {}, quitan_ejemplos: [], umbral_quitas: 10,
-  fijan_total: 0, fijan: {}, umbral_masiva: 200,
+  fijan_total: 0, fijan: {}, umbral_masiva: 200, factor_redondeado_total: 0, factor_redondeado: [],
   errores: [], errores_total: 0, conflictos: [], conflictos_total: 0,
   desconocidos: [], desconocidos_total: 0, sin_referencia: [], sin_referencia_total: 0,
   cambios: [
@@ -164,7 +164,7 @@ describe("la vista previa", () => {
     await subir();
 
     const alerta = screen.getByRole("alert");
-    expect(alerta).toHaveTextContent("El archivo tiene 2 error(es). No se carga nada");
+    expect(alerta).toHaveTextContent("El archivo tiene 2 errores. No se carga nada hasta corregirlos");
     expect(alerta).toHaveTextContent("Fila 3");
     expect(alerta).toHaveTextContent("Factor: 0,9 no vale");
     expect(alerta).toHaveTextContent('Tipo: "Livano" no existe');
@@ -337,6 +337,104 @@ describe("poner muchos precios fijos o factores", () => {
   });
 });
 
+describe("la vista previa", () => {
+  it("al terminar de leer, el foco pasa a la vista previa: abajo, fuera de pantalla, parecia que no pasaba nada", async () => {
+    abrir();
+
+    await subir();
+
+    await waitFor(() => expect(screen.getByRole("region", { name: "Qué cambia" })).toHaveFocus());
+  });
+
+  it("con un solo error el texto va en singular", async () => {
+    mocks.previa.mockResolvedValue({
+      ...BASE, errores_total: 1, errores: [{ fila: 3, producto: "71 AAA1", mensaje: "Factor: 0,9 no vale." }],
+    });
+    abrir();
+
+    await subir();
+
+    expect(screen.getByRole("alert")).toHaveTextContent("El archivo tiene 1 error. No se carga nada hasta corregirlo");
+    expect(screen.queryByText(/error\(es\)/)).not.toBeInTheDocument();
+  });
+});
+
+describe("factores que Excel redondeo", () => {
+  it("avisa cuantos productos se tomaron como sin cambios y que se puede hacer", async () => {
+    mocks.previa.mockResolvedValue({
+      ...BASE, factor_redondeado_total: 3, factor_redondeado: ["71 AAA1", "72 R01", "13 BBB2"],
+    });
+    abrir();
+
+    await subir();
+
+    expect(screen.getByText(/3 productos traen el Factor redondeado/)).toBeInTheDocument();
+    expect(screen.getByText(/71 AAA1, 72 R01, 13 BBB2/)).toBeInTheDocument();
+    expect(screen.getByText(/cámbialo en la ficha del producto/)).toBeInTheDocument();
+    // Es informativo: no bloquea la carga ni pide confirmar.
+    expect(screen.getByRole("button", { name: "Cargar 2 productos" })).toBeEnabled();
+  });
+
+  it("con uno solo habla en singular", async () => {
+    mocks.previa.mockResolvedValue({ ...BASE, factor_redondeado_total: 1, factor_redondeado: ["71 AAA1"] });
+    abrir();
+
+    await subir();
+
+    expect(screen.getByText(/1 producto trae el Factor redondeado/)).toBeInTheDocument();
+  });
+
+  it("sin redondeos no aparece el aviso", async () => {
+    abrir();
+
+    await subir();
+
+    expect(screen.queryByText(/Factor redondeado/)).not.toBeInTheDocument();
+  });
+});
+
+describe("los avisos de descarga y de lectura", () => {
+  it("cada uno muestra lo suyo: el reintento de la descarga no parece un fallo de la lectura", async () => {
+    mocks.descargar.mockImplementation((_o: unknown, alReintentar: (i: number, t: number) => void) => {
+      alReintentar(2, 4);
+      return new Promise(() => {});
+    });
+    mocks.previa.mockImplementation((_f: File, alReintentar: (i: number, t: number) => void) => {
+      alReintentar(1, 4);
+      return new Promise(() => {});
+    });
+    abrir();
+
+    fireEvent.click(screen.getByRole("button", { name: /Descargar para editar/ }));
+    elegirArchivo();
+
+    expect(await screen.findByText("Descarga: el servidor no responde. Reintentando (2 de 4)…")).toBeInTheDocument();
+    expect(await screen.findByText("Lectura: el servidor no responde. Reintentando (1 de 4)…")).toBeInTheDocument();
+  });
+
+  it("elegir un archivo no borra el aviso de la descarga, ni terminar de leer lo pisa", async () => {
+    abrir();
+    fireEvent.click(screen.getByRole("button", { name: /Descargar para editar/ }));
+    expect(await screen.findByText(/Archivo descargado: 39\.830 productos/)).toBeInTheDocument();
+
+    await subir();
+
+    expect(screen.getByText(/Archivo descargado: 39\.830 productos/)).toBeInTheDocument();
+  });
+
+  it("el aviso de lectura se va cuando termina de leer", async () => {
+    mocks.previa.mockImplementation((_f: File, alReintentar: (i: number, t: number) => void) => {
+      alReintentar(1, 4);
+      return Promise.resolve(BASE);
+    });
+    abrir();
+
+    await subir();
+
+    expect(screen.queryByText(/Lectura: el servidor no responde/)).not.toBeInTheDocument();
+  });
+});
+
 describe("cargar", () => {
   it("sube el mismo archivo que se miro, avisa el resultado y refresca la lista", async () => {
     const onCargado = vi.fn();
@@ -419,7 +517,7 @@ describe("cargar", () => {
   });
 
   it("si la carga falla muestra el error y deja reintentar con el mismo archivo", async () => {
-    mocks.cargar.mockRejectedValueOnce(new Error("El archivo tiene 1 error(es). No se cargó nada."));
+    mocks.cargar.mockRejectedValueOnce(new Error("El archivo tiene 1 error. No se cargó nada."));
     abrir();
     await subir();
 

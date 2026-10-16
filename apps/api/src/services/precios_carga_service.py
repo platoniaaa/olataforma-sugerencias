@@ -80,11 +80,16 @@ _CLAVE_POR_CAMPO_OV = {
 
 MAX_BYTES = 30 * 1024 * 1024
 MAX_FILAS = 250_000            # la lista real tiene ~40 mil: esto solo frena archivos con basura
-# Celdas con contenido (filas x columnas): ~150 MB de memoria con 3 millones. La lista
-# real son ~1 millon (40 mil x 25). Un CSV de 240 mil filas x 41 columnas pasaba el tope
-# de filas y de bytes, y ocupaba mas de 800 MB: el plan gratis de Render tiene 512.
-MAX_CELDAS = 3_000_000
-MAX_DESCOMPRIMIDO = 150 * 1024 * 1024
+# Celdas con TEXTO (filas x columnas; las vacias no cuentan): con 3 millones el pico medido
+# fue de 479 MB, al borde de los 512 del plan gratis de Render. 2 millones dejan holgura y
+# la lista real son ~1 millon (40 mil x 25). Un CSV de 240 mil filas x 41 columnas pasaba
+# el tope de filas y de bytes, y ocupaba mas de 800 MB.
+MAX_CELDAS = 2_000_000
+MAX_DESCOMPRIMIDO = 100 * 1024 * 1024
+# Texto seguido, sin una sola etiqueta, que se tolera en el XML de una hoja. Excel admite
+# 32.767 caracteres por celda: una "cadena" de 100 MB cabia bajo el tope descomprimido y
+# llevaba la memoria a 406 MB.
+_TEXTO_MAXIMO = 1 << 20
 # Un encabezado con tilde que SIEMPRE esta en el archivo bajado: con el se distingue la
 # pagina de codigos en que Excel lo guardo (cp1252, cp850 de "CSV MS-DOS", mac_roman).
 MARCA_CODIFICACION = "Descuento máximo"
@@ -152,25 +157,68 @@ def _sin_guarda(t: str) -> str:
     return t
 
 
+# Lo que Excel convierte en numero, porcentaje, fecha, hora o notacion cientifica al abrir
+# un CSV: "0123" pasa a 123, "3/4" a 03-abr, "1E5" a 1,00E+05, y un telefono de 12 digitos
+# a 5,69123E+11 (se pierden digitos). Un entero sin ceros a la izquierda de hasta 11
+# digitos vuelve igual: no necesita guarda.
+_PARECE_NUMERO = re.compile(
+    r"[-+]?\$?\s*\d[\d.,]*\s*%?"                  # 0123, 1,5, 15%, $ 5.000, 569123456789
+    r"|\d{1,4}[/-]\d{1,4}(?:[/-]\d{1,4})?"        # 3/4, 10-12, 1/2/2026
+    r"|\d{1,2}:\d{2}(?::\d{2})?"                  # 12:30
+    r"|[\d.,]+[eE][-+]?\d+")                      # 1E5
+_NUMERO_LLANO = re.compile(r"0|[1-9]\d{0,10}")
+
+
+def _pide_guarda_obs(t: str) -> bool:
+    """La observacion necesita el apostrofe: Excel la leeria como formula o como
+    numero/fecha. Recursivo en el apostrofe inicial, para que `_c_obs(_proteger_obs(x))`
+    devuelva siempre `x` (una nota que ya empieza con apostrofe y se ve como numero)."""
+    if t[:1] in _FORMULA:
+        return True
+    s = t.strip()
+    if _PARECE_NUMERO.fullmatch(s) and not _NUMERO_LLANO.fullmatch(s):
+        return True
+    return t[:1] == "'" and _pide_guarda_obs(t[1:])
+
+
+def _proteger_obs(texto: str) -> str:
+    return "'" + texto if _pide_guarda_obs(texto) else texto
+
+
 def _c_obs(v) -> str:
-    return _sin_guarda(_c_texto(v))
+    t = _c_texto(v)
+    if t[:1] == "'" and _pide_guarda_obs(t[1:]):
+        return t[1:]
+    return t
 
 
 _FUERA_BMP = re.compile("[\U00010000-\U0010ffff]")
 
 
-def _ansi(t: str) -> str:
+def _ansi(t: str, pagina: str = "cp1252") -> str:
     """El texto como queda al guardar como "CSV" de Excel (cp1252): lo que no cabe
     pasa a "?". Un emoji o una flecha en una nota se sobrescribian con "?" al abrir el
     archivo y guardarlo sin editar nada. Excel escribe un "?" por unidad UTF-16, asi que
     un emoji (fuera del plano basico, dos unidades) queda como "??"."""
-    return _FUERA_BMP.sub("??", t).encode("cp1252", errors="replace").decode("cp1252")
+    return _FUERA_BMP.sub("??", t).encode(pagina, errors="replace").decode(pagina)
 
 
-def _c_obs_ansi(v) -> str:
+def _c_obs_ansi(v, pagina: str = "cp1252") -> str:
     """La observacion como la deja Excel: el "?" entra ANTES de colapsar los espacios,
     porque un espacio fino (U+2009) no cabe en cp1252 y Excel lo escribe como "?"."""
-    return _c_obs(_ansi(_texto(v)))
+    return _c_obs(_ansi(_texto(v), pagina))
+
+
+# Las otras paginas de codigos en que Excel guarda un CSV: "CSV MS-DOS" y "CSV Macintosh".
+# La Referencia solo trae la huella de cp1252; para estas dos se compara contra la nota
+# que hay en la plataforma (ver `_ruido_de_pagina`).
+_OTRAS_PAGINAS = ("cp850", "mac_roman")
+
+
+def _ruido_de_pagina(archivo: str, obs) -> bool:
+    """La nota del archivo es la de la plataforma tal como la deja Excel en cp850 o
+    mac_roman: lo que esa pagina no tiene (€ – “ ” • ™ ...) paso a "?"."""
+    return any(archivo == _c_obs_ansi(obs, p) for p in _OTRAS_PAGINAS)
 
 
 def leer_numero(valor, entero: bool = False) -> float | None:
@@ -285,20 +333,24 @@ def _igual(campo: str, valor: str, base: str, base_ansi: str = "") -> bool:
         return _h(valor) in (base, base_ansi)
     if campo in ("tipo", "procedencia"):
         return valor.casefold() == base.casefold()
-    if valor == base:
-        return True
-    if campo == "factor" and valor and base:
-        # Excel con "disminuir decimales" guarda 1,1429 como 1,14 o 1,143: si lo unico
-        # que cambio es ese redondeo (mitad hacia arriba, como Excel y no como el
-        # round de Python), nadie edito el factor. Se compara con el valor ya canonico,
-        # sin ceros finales: 1,4993 mostrado como "1,50" llega como "1.5". Costo
-        # conocido: escribir a proposito el valor redondeado tampoco se distingue.
-        try:
-            v, b = Decimal(valor), Decimal(base)
-            return any(v == b.quantize(Decimal(1).scaleb(-k), rounding=ROUND_HALF_UP) for k in (2, 3))
-        except (ArithmeticError, ValueError):
-            return False
-    return False
+    return valor == base or (campo == "factor" and _redondeo_de_excel(valor, base))
+
+
+def _redondeo_de_excel(valor: str, base: str) -> bool:
+    """El factor del archivo es el de la referencia redondeado a 2 o 3 decimales.
+
+    Excel con "disminuir decimales" guarda 1,1429 como 1,14 o 1,143: si lo unico que
+    cambio es ese redondeo (mitad hacia arriba, como Excel y no como el round de Python),
+    nadie edito el factor. Se compara con el valor ya canonico, sin ceros finales: 1,4993
+    mostrado como "1,50" llega como "1.5". Costo conocido: escribir a proposito el valor
+    redondeado tampoco se distingue; la vista previa cuenta esos casos."""
+    if not valor or not base:
+        return False
+    try:
+        v, b = Decimal(valor), Decimal(base)
+        return any(v == b.quantize(Decimal(1).scaleb(-k), rounding=ROUND_HALF_UP) for k in (2, 3))
+    except (ArithmeticError, ValueError):
+        return False
 
 
 def huella_decisiones(ov: dict | None) -> str:
@@ -401,7 +453,7 @@ def csv_editable(db) -> tuple[bytes, int]:
         for clave in ("glosa", "rubro", "tipo"):
             celdas[i[clave]] = _proteger(celdas[i[clave]])
         p = _Valores(f[i["tipo"]], f[i["procedencia_final"]], f[i["factor"]], f[i["precio_final"]])
-        celdas += [_proteger((ov or {}).get("obs") or ""), _si_no((ov or {}).get("congelar")),
+        celdas += [_proteger_obs((ov or {}).get("obs") or ""), _si_no((ov or {}).get("congelar")),
                    _si_no((ov or {}).get("no_producto")), referencia(interno, p, ov)]
         return celdas
 
@@ -419,6 +471,9 @@ class _Valores:
 
 
 # ------------------------------------------------------------------- lectura
+_SI_CELDA = re.compile(r"(?:^|[;,\t\r\n])Sí(?=$|[;,\t\r\n])", re.M)
+
+
 def _decodificar(contenido: bytes) -> str:
     """El archivo como texto. Excel lo guarda en UTF-8, en UTF-16 ("Texto Unicode") o
     en la pagina de codigos de Windows ("CSV"), y "CSV MS-DOS" y "CSV Macintosh" usan
@@ -445,12 +500,18 @@ def _decodificar(contenido: bytes) -> str:
     except UnicodeDecodeError:
         pass
     # El encabezado "Descuento máximo" esta siempre: con la pagina de codigos correcta
-    # se lee entero. Si no esta (borraron la columna), cp1252, que es la de "CSV".
+    # se lee entero. Si no esta (borraron las columnas de descuento, que no se editan),
+    # gana la pagina en que mas celdas dicen "Sí" (Congelar y No es producto): en otra
+    # la "í" sale como "¡" o "’". Sin ninguna, cp1252, que es la de "CSV".
+    mejor, mejor_n = None, 0
     for nombre in ("cp1252", "cp850", "mac_roman"):
         texto = contenido.decode(nombre, errors="replace")
         if MARCA_CODIFICACION in texto[:30000]:
             return texto
-    return contenido.decode("cp1252", errors="replace")
+        n = len(_SI_CELDA.findall(texto))
+        if n > mejor_n:
+            mejor, mejor_n = texto, n
+    return mejor if mejor is not None else contenido.decode("cp1252", errors="replace")
 
 
 def _filas_csv(contenido: bytes) -> list[list]:
@@ -464,13 +525,17 @@ def _filas_csv(contenido: bytes) -> list[list]:
         # StringIO por defecto el lector no lo separa y falla.
         for fila in csv.reader(io.StringIO(texto, newline=""), delimiter=sep):
             filas.append(fila)
-            celdas += len(fila)
+            # Solo cuentan las celdas con texto: Excel escribe una linea ";;;;;" por cada
+            # fila con formato debajo de los datos, y esas no ocupan memoria (comparten
+            # el mismo str vacio).
+            celdas += sum(1 for c in fila if c)
             if len(filas) > MAX_FILAS:
                 raise ErrorCarga(f"El archivo tiene más de {_miles(MAX_FILAS)} filas. La lista tiene "
                                  "unas 40 mil: ¿quedaron filas de más al final?")
             if celdas > MAX_CELDAS:
-                raise ErrorCarga(f"El archivo tiene más de {_miles(MAX_CELDAS)} celdas. La lista tiene "
-                                 "unas 40 mil filas por 25 columnas: ¿quedaron columnas de más?")
+                raise ErrorCarga(f"El archivo tiene más de {_miles(MAX_CELDAS)} celdas con contenido. "
+                                 "La lista tiene unas 40 mil filas por 25 columnas: ¿quedaron filas o "
+                                 "columnas de más? Bórralas y guarda de nuevo.")
     except csv.Error as e:
         raise ErrorCarga(
             f"No pude leer el archivo como CSV ({e}). Guárdalo desde Excel como CSV UTF-8 "
@@ -507,50 +572,117 @@ def _primera_hoja(z: zipfile.ZipFile) -> str | None:
 
 
 _BLOQUE_XML = 1 << 20          # lo que se lee de la hoja por vez
-# Con contenido: no se cierra sola (`<c r="E2" s="1"/>`) ni se abre y se cierra de inmediato
-# (`<c r="E2" s="1"></c>`, como la escribe openpyxl).
+# La forma que escriben Excel, openpyxl y xlsxwriter: `<c r="A1" ...>` con contenido (no
+# se cierra sola, `<c r="E2" s="1"/>`, ni se abre y se cierra de inmediato, `<c r="E2"
+# s="1"></c>`, como la deja openpyxl) y `<row r="N" ...>`. Se lee rapido, con un regex.
 _CELDA = re.compile(r'<c r="([A-Z]{1,3})(\d{1,7})"[^>/]*>(?!</c>)')
-_CELDA_RARA = re.compile(r'<c r="(?![A-Z]{1,3}\d{1,7}")')
+_FILA = re.compile(r'<row r="(\d{1,7})"')
+# Cualquier <c> o <row> que NO tiene esa forma: referencia dañada, atributos en otro orden,
+# comillas simples, prefijo de espacio de nombres (`<x:c`, de librerias basadas en el SDK
+# de Open XML), celdas sin referencia. calamine las lee todas, asi que desde el bloque en que
+# aparece la primera se lee con `_escanear_general`, mas lento.
+_ETIQUETA_RARA = re.compile(
+    r'<(?:[A-Za-z_][\w.-]*:(?:c|row)(?=[\s/>])'                 # con prefijo: siempre
+    r'|c(?=[\s/>])(?! r="[A-Z]{1,3}\d{1,7}")'                    # sin prefijo y sin la forma canonica
+    r'|row(?=[\s/>])(?! r="\d{1,7}"))')
+_ETIQUETA_HOJA = re.compile(r"<(?:[A-Za-z_][\w.-]*:)?(c|row)(?=[\s/>])([^>]*)>")
+_ATRIBUTO_R = re.compile(r"""\br\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+_REFERENCIA = re.compile(r"([A-Z]{1,3})(\d{1,7})")
+_CIERRE_CELDA = re.compile(r"</(?:[A-Za-z_][\w.-]*:)?c\s*>")
+_COLA_XML = 512                # una etiqueta cortada por el borde del bloque se mira con el siguiente
+
+
+def _referencia_danada() -> ErrorCarga:
+    return ErrorCarga(
+        "El archivo de Excel tiene celdas con una referencia dañada. Vuelve a guardarlo desde Excel, o como CSV.")
+
+
+def _escanear_general(texto, limite, columnas, max_fila, max_col, fila_actual, col_actual):
+    """Lo mismo que la via rapida, para etiquetas de cualquier forma. Una celda sin
+    referencia ocupa el lugar que le toca en su fila (`<row r=`)."""
+    for m in _ETIQUETA_HOJA.finditer(texto):
+        if m.start() >= limite:
+            break
+        atributos = m.group(2)
+        r = _ATRIBUTO_R.search(atributos)
+        ref = None if r is None else (r.group(1) if r.group(1) is not None else r.group(2))
+        if m.group(1) == "row":
+            if ref is not None and not (ref.isdigit() and len(ref) <= 7):
+                raise _referencia_danada()
+            fila_actual = int(ref) if ref is not None else fila_actual + 1
+            col_actual = 0
+            continue
+        if ref is not None:
+            mr = _REFERENCIA.fullmatch(ref)
+            if mr is None:
+                # Una referencia asi (r="A99999999999999999999") hace que calamine pida
+                # cientos de GB y ABORTE el proceso entero, sin excepcion.
+                raise _referencia_danada()
+            letras = mr.group(1)
+            col = columnas.get(letras)
+            if col is None:
+                col = columnas[letras] = _columna_a_numero(letras)
+            fila, col_actual = int(mr.group(2)), col
+        else:
+            fila, col_actual = fila_actual, col_actual + 1
+        if atributos.rstrip().endswith("/") or _CIERRE_CELDA.match(texto, m.end()):
+            continue                   # vacia: calamine tampoco la lee
+        if fila > max_fila:
+            max_fila = fila
+        if col_actual > max_col:
+            max_col = col_actual
+    return max_fila, max_col, fila_actual, col_actual
 
 
 def _escanear_hoja(f) -> tuple[int, int]:
     """(ultima fila, ultima columna) con CONTENIDO en la hoja, leyendo el XML por
     bloques. No se confia en la dimension declarada: falta en los archivos que
     escribe openpyxl en modo streaming, y una celda de mas la hace mentir. Las celdas
-    vacias con formato (`<c r="E2" s="1"/>`) no cuentan: calamine tampoco las lee, y
-    formatear una columna entera dejaba el archivo sin poder subirse."""
+    vacias con formato no cuentan: calamine tampoco las lee, y formatear una columna
+    entera dejaba el archivo sin poder subirse. Tampoco se acepta un texto enorme sin
+    una sola etiqueta: Excel admite 32.767 caracteres por celda."""
     max_fila = max_col = 0
+    fila_actual = col_actual = 0
     columnas: dict[str, int] = {}
     resto = ""
+    corrida = 0                    # bytes seguidos sin una etiqueta
+    lento = False
     while True:
         bloque = f.read(_BLOQUE_XML)
         final = not bloque
+        primera = bloque.find(b"<")
+        corrida += len(bloque) if primera < 0 else primera       # la corrida termina en la 1a etiqueta
+        if corrida > _TEXTO_MAXIMO:
+            raise ErrorCarga("El archivo de Excel tiene una celda con muchísimo texto (Excel admite hasta "
+                             "32.767 caracteres por celda). Revísalo, o guárdalo como CSV.")
+        if primera >= 0:
+            corrida = len(bloque) - 1 - bloque.rfind(b"<")        # lo que sigue a la ultima
         texto = resto + bloque.decode("utf-8", "ignore")
         # Lo que queda cerca del final puede ser una etiqueta cortada: se mira con el
-        # bloque siguiente.
-        limite = len(texto) if final else max(len(texto) - 64, 0)
-        for m in _CELDA.finditer(texto):
-            if m.start() >= limite:
-                break
-            fila = int(m.group(2))
-            if fila > max_fila:
-                max_fila = fila
-            letras = m.group(1)
-            col = columnas.get(letras)
-            if col is None:
-                col = columnas[letras] = _columna_a_numero(letras)
-            if col > max_col:
-                max_col = col
-        # Solo cuenta lo que EMPIEZA antes del limite: una etiqueta cortada por el borde
-        # del bloque no esta completa y parecia "dañada" (con `search(.., endpos=limite)`
-        # el lookahead veia el texto truncado).
-        for m in _CELDA_RARA.finditer(texto):
-            if m.start() >= limite:
-                break
-            # Una referencia asi (r="A99999999999999999999") hace que calamine pida
-            # cientos de GB y ABORTE el proceso entero, sin excepcion.
-            raise ErrorCarga("El archivo de Excel tiene celdas con una referencia dañada. Vuelve a "
-                             "guardarlo desde Excel, o como CSV.")
+        # bloque siguiente. Solo cuenta lo que EMPIEZA antes del limite.
+        limite = len(texto) if final else max(len(texto) - _COLA_XML, 0)
+        if not lento:
+            m = _ETIQUETA_RARA.search(texto)
+            lento = m is not None and m.start() < limite
+        if lento:
+            max_fila, max_col, fila_actual, col_actual = _escanear_general(
+                texto, limite, columnas, max_fila, max_col, fila_actual, col_actual)
+        else:
+            for m in _CELDA.finditer(texto):
+                if m.start() >= limite:
+                    break
+                fila = int(m.group(2))
+                if fila > max_fila:
+                    max_fila = fila
+                letras = m.group(1)
+                col = columnas.get(letras)
+                if col is None:
+                    col = columnas[letras] = _columna_a_numero(letras)
+                if col > max_col:
+                    max_col = col
+            i = texto.rfind('<row r="', 0, limite)       # por si el bloque siguiente es de la via lenta
+            if i >= 0:
+                fila_actual, col_actual = int(_FILA.match(texto, i).group(1)), 0
         if final:
             return max_fila, max_col
         resto = texto[limite:]
@@ -666,6 +798,14 @@ def _tipos_validos(db) -> dict[str, str]:
     return {politica.tipo_canonico(_norm(t.replace(SEP, "/"))): t for t in nombres}
 
 
+# El unico error que puede venir de lo que OTRA persona dejo en la ficha y no del archivo:
+# el archivo edita el factor y la otra persona puso un precio fijo, o al reves.
+_ERROR_COMBINACION = (
+    "Un producto no puede tener precio fijo y factor propio a la vez. Cambia solo uno de los "
+    "dos, o deja vacía la celda del otro para quitárselo."
+)
+
+
 def _datos_override(ed: dict[str, str], ov: dict, tipos: dict[str, str]) -> tuple[dict, list[str]]:
     """De lo que la persona cambio en el archivo, lo que se le aplica al producto
     (mismos nombres que `guardar_override`) y los errores. Pura: no toca la base."""
@@ -739,10 +879,7 @@ def _datos_override(ed: dict[str, str], ov: dict, tipos: dict[str, str]) -> tupl
     fijo = datos["precio_fijo"] if "precio_fijo" in datos else ov.get("precio_fijo")
     margen = datos["margen_fijo"] if "margen_fijo" in datos else ov.get("margen_fijo")
     if not errs and fijo is not None and margen is not None:
-        errs.append(
-            "Un producto no puede tener precio fijo y factor propio a la vez. Cambia solo uno de los "
-            "dos, o deja vacía la celda del otro para quitárselo."
-        )
+        errs.append(_ERROR_COMBINACION)
     return datos, errs
 
 
@@ -797,13 +934,21 @@ def _quita(campo: str, valor) -> bool:
 def planificar(db, nombre: str, contenido: bytes) -> _Plan:
     """Lee el archivo y arma lo que se cargaria. No escribe nada."""
     filas = leer_archivo(nombre, contenido)
-    cols, enc = _mapear(filas)
+    try:
+        cols, enc = _mapear(filas)
+    except ErrorCarga as e:
+        if nombre.lower().endswith((".xlsx", ".xlsm")) and str(e).startswith("No encuentro"):
+            raise ErrorCarga(
+                f"{e} Del libro de Excel solo se lee la primera hoja: si la de los datos no es la "
+                "primera, muévela al principio y guarda de nuevo.") from e
+        raise
     plan = _Plan()
     errores: list[dict] = []
     conflictos: list[dict] = []
     vistos: dict[str, int] = {}
     candidatos: dict[str, tuple[int, dict[str, str], str]] = {}
     sin_referencia: list[str] = []
+    redondeados: list[str] = []
     leidas = sin_cambios = 0
 
     def celda(fila, clave):
@@ -849,6 +994,8 @@ def planificar(db, nombre: str, contenido: bytes) -> _Plan:
         if malo:
             continue
         ed = {c: valores[c] for c, _ in CAMPOS if not _igual(c, valores[c], base[c], obs_ansi)}
+        if "factor" not in ed and valores["factor"] != base["factor"]:
+            redondeados.append(codigo)         # Excel mostro el factor con menos decimales
         if not ed:
             sin_cambios += 1
             continue
@@ -880,7 +1027,19 @@ def planificar(db, nombre: str, contenido: bytes) -> _Plan:
                 desconocidos.append(codigo)
                 continue
             ov = ovs.get(codigo) or {}
+            if "obs" in ed and huella_decisiones(ov) == h2 and _ruido_de_pagina(ed["obs"], ov.get("obs")):
+                # "CSV MS-DOS" o "Macintosh" cambiaron por "?" lo que su pagina de codigos no
+                # tiene (€, comillas curvas, rayas...): la nota es la misma de la plataforma.
+                ed = {k: v for k, v in ed.items() if k != "obs"}
+                if not ed:
+                    sin_cambios += 1
+                    continue
             datos, errs = _datos_override(ed, ov, tipos)
+            if errs and errs != [_ERROR_COMBINACION]:
+                # Un error del propio archivo (tipo que no existe, factor fuera de rango)
+                # bloquea la carga, lo haya editado otra persona o no.
+                errores.extend({"fila": n, "producto": codigo, "mensaje": e} for e in errs)
+                continue
             if huella_decisiones(ov) != h2 and (datos or errs):
                 # Otra persona (o una carga anterior) edito este producto despues de
                 # bajar el archivo, y el archivo lo edita tambien: se omite SOLO esta
@@ -934,6 +1093,7 @@ def planificar(db, nombre: str, contenido: bytes) -> _Plan:
         "quitan_total": sum(n_quitan.values()), "quitan": dict(n_quitan),
         "quitan_ejemplos": ejemplos_quitan, "umbral_quitas": UMBRAL_QUITAS,
         "fijan_total": sum(n_fijan.values()), "fijan": dict(n_fijan), "umbral_masiva": UMBRAL_MASIVA,
+        "factor_redondeado_total": len(redondeados), "factor_redondeado": redondeados[:TOPE_CODIGOS],
         "errores": errores[:TOPE_LISTA], "errores_total": len(errores),
         "conflictos": conflictos[:TOPE_LISTA], "conflictos_total": len(conflictos),
         "desconocidos": desconocidos[:TOPE_CODIGOS], "desconocidos_total": len(desconocidos),
@@ -962,8 +1122,10 @@ def aplicar(db, nombre: str, contenido: bytes, usuario: str | None,
     nuevos, hace falta `confirmar_masiva`."""
     plan = planificar(db, nombre, contenido)
     if plan.errores_total:
+        uno = plan.errores_total == 1
         raise ErrorCarga(
-            f"El archivo tiene {plan.errores_total} error(es). No se cargó nada: corrígelos y súbelo de nuevo.")
+            f"El archivo tiene {plan.errores_total} {'error' if uno else 'errores'}. No se cargó nada: "
+            f"{'corrígelo' if uno else 'corrígelos'} y súbelo de nuevo.")
     r = plan.resumen
     if r["quitan_total"] >= UMBRAL_QUITAS and not confirmar_quitas:
         raise ErrorCarga(

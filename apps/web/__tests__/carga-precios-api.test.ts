@@ -42,12 +42,12 @@ describe("cargarPrecios", () => {
   it("un error con detalle se muestra tal cual", async () => {
     const { api } = await cargar();
     fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ detail: "El archivo tiene 2 error(es). No se cargó nada." }), {
+      new Response(JSON.stringify({ detail: "El archivo tiene 2 errores. No se cargó nada." }), {
         status: 422, headers: { "Content-Type": "application/json" },
       }),
     );
 
-    await expect(api.cargarPrecios(ARCHIVO)).rejects.toThrow("El archivo tiene 2 error(es). No se cargó nada.");
+    await expect(api.cargarPrecios(ARCHIVO)).rejects.toThrow("El archivo tiene 2 errores. No se cargó nada.");
   });
 
   it("manda las confirmaciones solo cuando se piden", async () => {
