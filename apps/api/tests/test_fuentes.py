@@ -196,7 +196,8 @@ def listados(dia: str = DIA, *, sin: tuple = ()) -> list[dict]:
         return {
             "clave": clave, "existe": clave not in sin, "metodo": "onedrive",
             "ruta_portable": ruta_portable,
-            "ruta_absoluta": f"C:\\Users\\usuario\\OneDrive - Empresa\\{ruta_portable[22:]}",
+            "ruta_absoluta": "C:\\Users\\usuario\\OneDrive - Empresa\\"
+                             + ruta_portable[len("%OneDriveCommercial%\\"):],
             "truncado": False,
             "archivos": [] if clave in sin else [
                 {"ruta_relativa": r, "tamano": t, "modificado_en": _hora(h, dia),
