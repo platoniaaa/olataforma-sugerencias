@@ -1451,7 +1451,8 @@ def semaforo(
     filas = estado.get("filas")
     archivo_txt = _nombre_de(principal["ruta_relativa"]) if principal else nombre
     if len(archivos) > 1:
-        archivo_txt = f"{len(archivos)} archivos ({', '.join(_nombre_de(a['ruta_relativa']) for a in archivos[:3])})"
+        nombres = ", ".join(_nombre_de(a["ruta_relativa"]) for a in archivos[:3])
+        archivo_txt = f"{len(archivos)} archivos ({nombres})"
     cuando = _de(_cuando(modificado, ahora_chile)) if modificado else None
     filas_txt = f", {_miles(filas)} filas" if isinstance(filas, (int, float)) and filas > 0 else ""
     activa_config = modo == "activa"
