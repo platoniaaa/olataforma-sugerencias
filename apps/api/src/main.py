@@ -21,6 +21,7 @@ from .routers import (
     chat,
     compras,
     cron,
+    fuentes,
     health,
     incidencias,
     instock,
@@ -147,6 +148,9 @@ app.include_router(inventario_ciclico.router, dependencies=_protegido)
 app.include_router(incidencias.router, dependencies=_protegido)
 # Admin: requiere flag es_admin (no solo estar logueado).
 app.include_router(admin.router, dependencies=[Depends(requiere_admin)])
+# Fuentes de datos (/api/admin/fuentes): la usan el motor (con su usuario admin) y
+# la pantalla /cargar/fuentes. Solo admin: nada de esto lo ve el equipo.
+app.include_router(fuentes.router, dependencies=[Depends(requiere_admin)])
 # Usuarios: crear/editar/desactivar. Cada endpoint valida admin por su cuenta
 # para poder saber QUIEN lo hizo y dejarlo en la auditoria.
 app.include_router(usuarios.router, dependencies=[Depends(requiere_admin)])
