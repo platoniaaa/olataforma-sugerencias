@@ -37,3 +37,21 @@ class UsuarioOut(BaseModel):
     es_vendedor: bool = False
     sucursales: list[str] = Field(default_factory=list)
     creado_en: datetime | None = None
+    # Los dos de abajo se agregaron el 16-10-2026 para la pantalla de Usuarios.
+    # Son campos nuevos al final y con valor por defecto: quien ya leia esta
+    # respuesta (scripts/clave_usuario.py) no ve ningun cambio.
+    #
+    # La usa el motor para publicar (EMAILS_MOTOR). Cambiarle la clave, quitarle
+    # el admin o desactivarla deja al motor sin publicar.
+    es_cuenta_motor: bool = False
+    # Permisos que no estan en la base sino en la configuracion del servidor, por
+    # correo (EMAILS_PRECIOS, EMAILS_CALIBRACION, EMAILS_VER_ACCESOS,
+    # EMAILS_ACTUALIZAR). Solo informativo: no se editan desde la plataforma.
+    # Valores: "precios", "calibracion", "ver_accesos", "actualizar".
+    permisos_especiales: list[str] = Field(default_factory=list)
+
+
+class ReglasUsuarios(BaseModel):
+    """Lo que la pantalla necesita saber para validar antes de mandar."""
+
+    largo_minimo_clave: int

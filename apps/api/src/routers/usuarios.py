@@ -16,16 +16,25 @@ Que NO hace, a proposito:
   trazabilidad de todo lo que creo (sugerencias, requerimientos, auditoria).
 - No deja que un admin se quite a si mismo el admin ni se desactive: es la forma
   clasica de quedarse sin ningun administrador y sin manera de volver a entrar.
+
+Desde el 16-10-2026 hay pantalla (`/usuarios` en la web, solo admin), para que
+la administracion no dependa de quien conoce el endpoint. La respuesta suma dos
+campos para esa pantalla, sin tocar los que ya estaban: `es_cuenta_motor` y
+`permisos_especiales` (ver `UsuarioOut`).
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..config import get_settings
 from ..db import get_db
 from ..models import Usuario
 from ..schemas import UsuarioCrear, UsuarioOut
+from ..schemas.usuario import ReglasUsuarios
 from ..services import auditoria_service
 from ..services.auth import hash_password, requiere_admin
+
+settings = get_settings()
 
 router = APIRouter(prefix="/api/admin/usuarios", tags=["usuarios"])
 
@@ -39,6 +48,29 @@ router = APIRouter(prefix="/api/admin/usuarios", tags=["usuarios"])
 # Es una decision tomada, no un descuido. Si alguien lo ve y piensa en subirlo,
 # que lo converse antes.
 LARGO_MINIMO_CLAVE = 4
+
+
+def permisos_especiales(email: str) -> list[str]:
+    """Permisos que le da la configuracion del servidor a este correo.
+
+    Es la misma pregunta que hacen `puede_precios`, `puede_calibrar`,
+    `requiere_ver_accesos` y `puede_actualizar` en services/auth.py, sin la parte
+    de "o es admin": aca interesa que dice la lista por correo, porque es lo unico
+    que la pantalla no puede mostrar mirando la base. El orden es fijo para que la
+    pantalla no los baraje entre una carga y otra.
+    """
+    e = (email or "").lower()
+    listas = (
+        ("precios", settings.emails_precios_set),
+        ("calibracion", settings.emails_calibracion_set),
+        ("ver_accesos", settings.emails_ver_accesos_set),
+        ("actualizar", settings.emails_actualizar_set),
+    )
+    return [nombre for nombre, correos in listas if e in correos]
+
+
+def es_cuenta_motor(email: str) -> bool:
+    return (email or "").lower() in settings.emails_motor_set
 
 
 def _a_out(u: Usuario) -> dict:
@@ -57,6 +89,8 @@ def _a_out(u: Usuario) -> dict:
         "es_vendedor": bool(getattr(u, "es_vendedor", False)),
         "sucursales": [str(s) for s in sucursales if s],
         "creado_en": u.creado_en,
+        "es_cuenta_motor": es_cuenta_motor(u.email),
+        "permisos_especiales": permisos_especiales(u.email),
     }
 
 
@@ -65,6 +99,16 @@ def listar(db: Session = Depends(get_db)):
     """Quienes tienen acceso y con que rol. Nunca incluye la contrasena."""
     filas = db.scalars(select(Usuario).order_by(Usuario.email)).all()
     return [_a_out(u) for u in filas]
+
+
+@router.get("/reglas", response_model=ReglasUsuarios)
+def reglas():
+    """Las reglas que valida el alta, para que la pantalla avise antes de mandar.
+
+    Asi el largo minimo de la clave vive en un solo lugar (`LARGO_MINIMO_CLAVE`)
+    y no copiado en el navegador, donde quedaria desfasado el dia que cambie.
+    """
+    return ReglasUsuarios(largo_minimo_clave=LARGO_MINIMO_CLAVE)
 
 
 @router.post("", response_model=UsuarioOut)
@@ -148,9 +192,13 @@ def crear_o_actualizar(
         entidad="usuario",
         entidad_id=email,
         usuario_email=email_admin,
+        # La clave nunca va al detalle, solo el hecho de que cambio: es lo que
+        # responde "¿quien le cambio la clave al motor?" sin volver a escribirla.
         detalle=(
             f"vendedor={usuario.es_vendedor} admin={usuario.es_admin} "
             f"activo={usuario.activo}"
+            + (" clave=cambiada" if payload.password and not nuevo else "")
+            + (" cuenta_motor=si" if es_cuenta_motor(email) else "")
         ),
     )
     db.commit()

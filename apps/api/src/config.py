@@ -83,6 +83,13 @@ class Settings(BaseSettings):
         "fmora@curifor.com,hgarcia@curifor.com,mramos@curifor.com,asalinas@curifor.com"
     )
 
+    # Cuentas con las que el motor entra a publicar (PLATAFORMA_EMAIL en el .env del
+    # PC que lo corre). No dan ningun permiso: solo sirven para que la pantalla de
+    # Usuarios avise antes de cambiarles la clave, quitarles el admin o
+    # desactivarlas, porque cualquiera de las tres deja al motor sin publicar hasta
+    # que se actualice ese .env. Separados por coma; EMAILS_MOTOR sobreescribe.
+    emails_motor: str = "admin@curifor.com"
+
     # --- Historia del sugerido y alertas (post-sincronizacion) ---
     # Guarda una foto diaria del sugerido (solo filas con actividad) para ver la
     # evolucion y, mas adelante, medir la precision del modelo.
@@ -200,6 +207,10 @@ SUMMARIZECOLUMNS(
     @property
     def emails_precios_set(self) -> set[str]:
         return {e.strip().lower() for e in self.emails_precios.split(",") if e.strip()}
+
+    @property
+    def emails_motor_set(self) -> set[str]:
+        return {e.strip().lower() for e in self.emails_motor.split(",") if e.strip()}
 
     @property
     def powerbi_configurado(self) -> bool:
