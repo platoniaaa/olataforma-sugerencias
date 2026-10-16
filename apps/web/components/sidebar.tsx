@@ -25,6 +25,7 @@ import {
   Sigma,
   SlidersHorizontal,
   Tag,
+  Users,
   X,
 } from "lucide-react";
 import {
@@ -79,6 +80,7 @@ const NAV: NavItem[] = [
   { href: "/modelo", label: "Modelo", icon: Sigma },
   { href: "/configuracion", label: "Configuración", icon: SlidersHorizontal, soloCalibracion: true },
   { href: "/cargar", label: "Cargar datos", icon: Database, soloAdmin: true },
+  { href: "/usuarios", label: "Usuarios", icon: Users, soloAdmin: true },
 ];
 
 interface Props {
