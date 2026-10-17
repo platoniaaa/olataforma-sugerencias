@@ -149,11 +149,13 @@ class EstadoFuenteIn(_Abierto):
     # encontrado | falta | carpeta_no_encontrada | error_lectura | inestable
     hecho: str
     archivos: list[ArchivoReportadoIn] = Field(default_factory=list)
-    candidatos: int | None = None
+    # El motor manda la lista (hasta 20, con la forma de `archivos` sin sha256).
+    candidatos: list[ArchivoReportadoIn] | int | None = None
     carpetas_con_candidatos: list[str] | int | None = None
     descartados: list[dict[str, Any]] = Field(default_factory=list)   # [{nombre, motivo}]
     filas: int | None = None
     hoja_leida: str | int | None = None
+    # La fila detectada como se ve en Excel (desde 1). En `FuenteCfg` va desde 0.
     fila_encabezado: int | None = None
     edad_dias_habiles: int | None = None
     mismo_contenido_que_anterior: bool = False
@@ -179,7 +181,7 @@ class ListadoCarpetaIn(_Abierto):
 
     clave: str
     existe: bool
-    metodo: str | None = None       # env | ruta_por_pc | onedrive | sharepoint
+    metodo: str | None = None       # env | ruta_por_pc | onedrive | atajo (SharePoint)
     ruta_portable: str | None = None   # %OneDriveCommercial%\...
     ruta_absoluta: str | None = None   # trae el usuario de Windows: solo en el detalle
     archivos: list[ArchivoListadoIn] = Field(default_factory=list)

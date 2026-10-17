@@ -124,7 +124,11 @@ const PANEL: Panel = {
   carpetas_por_pc: [{
     pc: "PC-ABAST-01", alias: "PC de Abastecimiento", es_titular: true, corrida_id: "c1", tipo: "oficial",
     iniciada_en: "2026-10-15T12:30:00Z",
-    carpetas: [{ clave: "bases_de_datos", nombre: "Bases de datos", tipo: "onedrive", ruta_portable: "%OneDriveCommercial%\\Documentos\\Desarrollos\\Bases de datos", metodo: "onedrive", existe: true, archivos: 35, truncado: false }],
+    carpetas: [
+      { clave: "bases_de_datos", nombre: "Bases de datos", tipo: "onedrive", ruta_portable: "%OneDriveCommercial%\\Documentos\\Desarrollos\\Bases de datos", metodo: "onedrive", existe: true, archivos: 35, truncado: false },
+      // El motor resuelve la carpeta de SharePoint por su acceso directo: metodo "atajo".
+      { clave: "databi_datos", nombre: "Data BI › Datos (SharePoint del equipo)", tipo: "sharepoint", ruta_portable: "%OneDriveCommercial%\\Abastecimiento y Logística-Data BI - Datos", metodo: "atajo", existe: true, archivos: 16, truncado: false },
+    ],
   }],
   activacion: {
     puede_activar: false, corridas_necesarias: 2, corridas_en_verde: 0,
@@ -234,6 +238,9 @@ describe("panel", () => {
 
     // Las carpetas por PC muestran la ruta portable, no la del usuario de Windows.
     expect(screen.getByText("%OneDriveCommercial%\\Documentos\\Desarrollos\\Bases de datos")).toBeInTheDocument();
+    // Como resolvio el motor cada carpeta, en palabras y no con su clave interna.
+    expect(screen.getByText(/16 archivos · acceso directo a SharePoint/)).toBeInTheDocument();
+    expect(screen.queryByText(/· atajo/)).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Cargar datos/ })).toHaveAttribute("href", "/cargar");
   });
 

@@ -43,11 +43,12 @@ const CLASE_MODO: Record<Panel["modo"], string> = {
   activa: "border border-emerald-200 bg-emerald-50 text-emerald-800",
 };
 
+// Los valores que manda el motor en `metodo` (`config_fuentes.resolver_carpeta`).
 const TEXTO_METODO: Record<string, string> = {
   env: "ruta escrita en el PC",
   ruta_por_pc: "ruta de este PC",
   onedrive: "OneDrive",
-  sharepoint: "acceso directo a SharePoint",
+  atajo: "acceso directo a SharePoint",
 };
 
 type Accion =

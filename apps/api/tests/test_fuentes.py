@@ -912,6 +912,27 @@ def test_panel_muestra_las_13_que_lee_las_4_que_reconoce_y_las_carpetas(con_list
     assert niveles == sorted(niveles, key=orden.get)
 
 
+def test_la_fila_de_encabezados_se_muestra_como_en_excel(client):
+    """El motor reporta la fila detectada desde 1 (como se ve en Excel); la semilla
+    trae la de la configuracion desde 0 (`header_row`). El seguimiento nacional trae
+    un titulo arriba: la semilla dice 1 (= fila 2) y el lector la encontro en la 10."""
+    sembrado(client)
+    assert fuente(config(client), "seguimiento_curifor_nacional")["fila_encabezado"] == 1
+    # Sin la fila en el reporte, vale la de la configuracion.
+    assert client.get(f"{URL}/seguimiento_curifor_nacional").json()["hoja_texto"] == \
+        "Automático (detectado: hoja 'Hoja1', fila 2)"
+
+    fuentes = fuentes_del_dia()
+    fuentes["stock_bodegas"].update(hoja_leida="Sheet1", fila_encabezado=1)
+    fuentes["seguimiento_curifor_nacional"].update(hoja_leida="Seguimiento Compras",
+                                                   fila_encabezado=10)
+    mandar(client, "c-dia", fuentes=fuentes)
+    assert client.get(f"{URL}/stock_bodegas").json()["hoja_texto"] == \
+        "Automático (detectado: hoja 'Sheet1', fila 1)"
+    assert client.get(f"{URL}/seguimiento_curifor_nacional").json()["hoja_texto"] == \
+        "Automático (detectado: hoja 'Seguimiento Compras', fila 10)"
+
+
 def test_detalle_de_una_fuente(con_listado):
     _put(con_listado, "stock_bodegas", {"frecuencia_dias": 3}, base=1, nota="ensayo de plazo")
     d = con_listado.get(f"{URL}/stock_bodegas").json()
@@ -965,6 +986,30 @@ def test_el_motivo_del_log_se_traduce_sin_opciones_de_linea_de_comandos(client):
     assert "--" not in json.dumps(client.get(URL).json(), ensure_ascii=False)
     assert fuentes_service.traducir_motivo("Algo raro. Corre con --forzar para seguir.") == \
         "Algo raro."
+
+
+# La primera linea de cada `_fallar` del motor (correr_motor_real._correr), tal cual
+# la escribe, y la guarda de titular. Si el motor cambia una, aca se nota.
+@pytest.mark.parametrize("primera, frase", [
+    ("No se carga a produccion: faltan archivos o estan desactualizados.",
+     "No se publicó: falta un archivo obligatorio o hay uno vencido. Revisa las fuentes en rojo."),
+    ("No se carga a produccion con archivos desactualizados.",
+     "No se publicó porque hay archivos vencidos."),
+    ("El motor no pudo calcular el sugerido.",
+     "No se publicó: el motor no pudo calcular el sugerido."),
+    ("Un archivo llegó vacío o incompleto",
+     "No se publicó: un archivo llegó vacío o incompleto."),
+    ("No se carga a produccion con el ultimo mes de ventas vacio.",
+     "No se publicó: el respaldo de ventas no trae el último mes cerrado."),
+    ("El motor calculo bien, pero la plataforma rechazo la carga.",
+     "El motor calculó, pero la plataforma rechazó la carga."),
+    ("NO SE PUBLICA: este PC no es el titular (PC de la jefa)",
+     "No se publicó: este PC no es el titular."),
+])
+def test_cada_motivo_del_motor_se_traduce_a_una_frase(primera, frase):
+    detalle = "\nProblemas:\n  - Falta el archivo de Mix de reemplazos\n\nRevisalos, o corre con " \
+              "--ignorar-frescura si sabes que asi corresponde."
+    assert fuentes_service.traducir_motivo(primera + detalle) == frase
 
 
 # --------------------------------------------------------------------------- #

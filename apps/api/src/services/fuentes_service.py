@@ -1649,6 +1649,9 @@ def _texto_resultado(c: MotorCorrida) -> str:
 
 # Motivos conocidos de `_fallar` del motor -> frase para la persona.
 _MOTIVOS = (
+    # Modo activa: la guarda de frescura junta lo vencido con las obligatorias que faltan.
+    ("faltan archivos o estan desactualizados",
+     "No se publicó: falta un archivo obligatorio o hay uno vencido. Revisa las fuentes en rojo."),
     ("archivos desactualizados", "No se publicó porque hay archivos vencidos."),
     ("no pudo calcular", "No se publicó: el motor no pudo calcular el sugerido."),
     ("ultimo mes de ventas vacio", "No se publicó: el respaldo de ventas no trae el último mes "
@@ -2027,9 +2030,16 @@ def detalle_fuente(db: Session, clave: str) -> dict:
     estado_base = _fuentes_de(ctx.base).get(clave) if ctx.base else None
     hoja = estado_base.get("hoja_leida") if isinstance(estado_base, dict) else None
     fila_enc = (estado_base.get("fila_encabezado") if isinstance(estado_base, dict) else None)
-    if fila_enc is None:
-        fila_enc = f.get("fila_encabezado")
-    n_fila = (int(fila_enc) + 1) if isinstance(fila_enc, int) else 1
+    if isinstance(fila_enc, int) and fila_enc >= 1:
+        # El motor reporta la fila que detecto como se ve en Excel, desde 1
+        # (`lectores_excel.LECTURAS`)...
+        n_fila = fila_enc
+    elif isinstance(f.get("fila_encabezado"), int):
+        # ...y la configuracion la guarda como la usa el lector, desde 0
+        # (`FuenteSpec.header_row`).
+        n_fila = f["fila_encabezado"] + 1
+    else:
+        n_fila = 1
     if hoja is not None:
         hoja_texto = f"Automático (detectado: hoja '{hoja}', fila {n_fila})"
     elif f.get("hoja") is not None:
