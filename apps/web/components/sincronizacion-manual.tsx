@@ -154,9 +154,9 @@ export function SincronizacionManual({ compacto = false }: { compacto?: boolean 
       <div>
         <p className="kicker">Actualizar ahora</p>
         <p className="mt-1.5 text-[12.5px] text-ink-700">
-          Si la tarea de las 10:00 no corrió, esto la ejecuta a mano: el motor recalcula
-          con los Excel de <b>Bases de datos</b> y publica para todo el equipo. Tarda unos
-          3 minutos.
+          Si la tarea de las 09:30 no corrió, esto la ejecuta a mano: el motor recalcula
+          con los Excel de las carpetas de <b>Fuentes de datos</b> y publica para todo el
+          equipo. Tarda unos 3 minutos.
         </p>
       </div>
 

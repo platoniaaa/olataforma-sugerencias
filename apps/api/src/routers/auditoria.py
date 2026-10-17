@@ -1,5 +1,5 @@
 """Endpoints de auditoria (log de acciones) y notificaciones in-app."""
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, select
@@ -17,28 +17,12 @@ from ..schemas import (
 )
 from ..services import auditoria_service
 from ..services.auth import requiere_auth, requiere_ver_accesos
+# Vive en services/calendario (la usa tambien Fuentes de datos); el nombre con
+# guion bajo se mantiene porque los tests lo importan desde aca.
+from ..services.calendario import dias_habiles_entre as _dias_habiles_entre
 
 router = APIRouter(tags=["auditoria"])
 settings = get_settings()
-
-
-def _dias_habiles_entre(desde: date, hasta: date) -> int:
-    """Dias habiles transcurridos entre dos fechas (sabados y domingos no cuentan).
-
-    Se cuenta en dias HABILES y no en horas porque la tarea corre de lunes a
-    viernes: contando horas, todos los lunes avisaria que los datos son "de hace
-    3 dias" cuando en realidad la ultima corrida fue la que correspondia. Un aviso
-    que se equivoca todos los lunes es un aviso que nadie mira.
-    """
-    if hasta <= desde:
-        return 0
-    dias = 0
-    cursor = desde
-    while cursor < hasta:
-        cursor += timedelta(days=1)
-        if cursor.weekday() < 5:  # 0=lunes .. 4=viernes
-            dias += 1
-    return dias
 
 
 # A partir de cuantos dias habiles sin cargar se considera desactualizado. Con 2

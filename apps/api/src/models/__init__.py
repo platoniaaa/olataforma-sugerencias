@@ -31,6 +31,7 @@ from .precio_producto import PrecioProducto
 from .precio_override import PrecioOverride
 from .precio_cambio import PrecioCambio, PrecioEnvio
 from .inventario_ciclico import IcEvidencia, IcItem, IcRol
+from .fuente_dato import FuenteConfig, MotorCorrida
 
 __all__ = [
     "Sugerido",
@@ -70,4 +71,6 @@ __all__ = [
     "IcItem",
     "IcEvidencia",
     "IcRol",
+    "FuenteConfig",
+    "MotorCorrida",
 ]

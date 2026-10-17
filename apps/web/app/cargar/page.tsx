@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, FileSpreadsheet, Upload } from "lucide-react";
+import { CheckCircle2, ChevronRight, FileSpreadsheet, FolderSearch, Upload } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api-client";
@@ -51,11 +51,33 @@ export default function CargarPage() {
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-slate-900">Cargar datos</h1>
         <p className="text-[13px] text-slate-500">
-          El sugerido lo calcula el motor con los Excel de <b>Bases de datos</b> y se
-          publica solo todos los días. Acá puedes ver cuándo fue la última vez y
+          El sugerido lo calcula el motor con los Excel de las carpetas de{" "}
+          <Link href="/cargar/fuentes" className="font-medium text-brand hover:underline">
+            Fuentes de datos
+          </Link>{" "}
+          y se publica solo cada día hábil. Acá puedes ver cuándo fue la última vez y
           forzarlo si hace falta.
         </p>
       </div>
+
+      {/* Fuentes de datos: de donde lee el motor cada archivo y si esta al dia. Solo
+          admin, como esta pagina; no tiene item propio en el menu. */}
+      <Link
+        href="/cargar/fuentes"
+        className="group block rounded-sm border border-ink-200 bg-white shadow-card transition-colors hover:border-brand-200 hover:bg-brand-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-700/40"
+      >
+        <div className="flex items-start gap-3 px-4 py-4">
+          <FolderSearch size={20} className="mt-0.5 shrink-0 text-brand" aria-hidden="true" />
+          <div className="min-w-0 flex-1">
+            <p className="font-display text-[15px] font-medium text-ink-900">Fuentes de datos</p>
+            <p className="mt-1 text-[13px] text-ink-600">
+              De dónde lee el motor cada archivo, de qué fecha era y si está al día. Semáforo
+              por archivo y carpetas de cada PC.
+            </p>
+          </div>
+          <ChevronRight size={18} className="mt-0.5 shrink-0 text-ink-400 group-hover:text-brand" aria-hidden="true" />
+        </div>
+      </Link>
 
       {/* Como se actualiza hoy: la tarea corre el motor, sin Power BI. */}
       <Card className="border-brand-200 bg-brand-50/60">
@@ -64,25 +86,26 @@ export default function CargarPage() {
             Actualización automática diaria
           </p>
           <p className="mt-2">
-            Todos los días a las <b>10:00 AM</b>, una tarea programada en el PC del
-            administrador ejecuta el motor: lee los Excel de{" "}
-            <code className="rounded-sm bg-white px-1 py-px font-mono text-[12px] text-accent-700">
-              Bases de datos
-            </code>
+            Cada día hábil a las <b>09:30</b>, una tarea programada en el PC del motor lo
+            ejecuta: lee los Excel de las carpetas de{" "}
+            <Link href="/cargar/fuentes" className="font-medium text-accent-700 hover:underline">
+              Fuentes de datos
+            </Link>
             , calcula el sugerido y lo publica para todo el equipo.{" "}
             <b>Ya no depende del Power BI.</b>
           </p>
           <p className="mt-3">
             <span className="kicker">Lo único que hay que mantener</span>
             <br />
-            Los archivos de esa carpeta al día (stock y seguimiento a diario; ventas al
+            Los archivos de esas carpetas al día (stock y seguimiento a diario; ventas al
             cerrar el mes). Si alguno está vencido, el motor <b>no publica</b> y lo avisa,
-            en vez de dejar datos viejos como buenos.
+            en vez de dejar datos viejos como buenos. En Fuentes de datos se ve qué archivo
+            leyó cada día y de qué fecha era.
           </p>
           <SincronizacionManual />
           <p className="mt-3 text-[11.5px] text-ink-500">
             Log de cada corrida en{" "}
-            <code className="font-mono">logs/motor_&lt;fecha&gt;.log</code> del PC del admin.
+            <code className="font-mono">logs/motor_&lt;fecha&gt;.log</code> del PC del motor.
           </p>
         </CardContent>
       </Card>
