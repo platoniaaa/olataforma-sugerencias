@@ -141,11 +141,27 @@ def test_texto_de_llego_vacio_con_la_corrida_anterior():
                           "a generar el archivo (si lo deja el programa del ERP, córrelo de nuevo).")
 
 
-def test_no_se_pudo_leer():
-    e = _hoy("catalogo", hecho="error_lectura", mensaje="falta la hoja 'Lista sin duplicados'")
-    s = _sem("catalogo", e)
+def test_no_se_pudo_leer_sin_la_excepcion_ni_la_ruta_del_pc():
+    # Como lo arma el motor al no poder copiar el archivo (`_materializar`).
+    mensaje = ("No se pudo copiar Stock bodegas.xlsx: [Errno 13] Permission denied: "
+               "'C:\\Users\\usuario\\OneDrive - Empresa\\stock\\Stock bodegas.xlsx'")
+    s = _sem("stock_bodegas", _hoy("stock_bodegas", hecho="error_lectura", mensaje=mensaje))
     assert (s["nivel"], s["etiqueta"]) == ("rojo", "No se pudo leer")
-    assert "falta la hoja 'Lista sin duplicados'" in s["texto"]
+    # La fila (y la campanita) dicen que hacer; el error exacto queda en el detalle.
+    assert s["texto"] == ("No se pudo leer Stock bodegas.xlsx: puede estar abierto, bloqueado o "
+                          "sin bajar de OneDrive. Ciérralo y vuelve a correr; el error exacto está "
+                          "en el detalle de la fuente.")
+
+
+def test_el_error_exacto_de_lectura_sale_en_el_detalle(client):
+    sembrado(client)
+    mensaje = "PermissionError: [Errno 13] Permission denied: 'Stock bodegas.xlsx'"
+    fuentes = fuentes_del_dia()
+    fuentes["stock_bodegas"].update(hecho="error_lectura", mensaje=mensaje)
+    mandar(client, "c-dia", fuentes=fuentes)
+    d = client.get(f"{URL}/stock_bodegas").json()
+    assert d["corridas"][0]["mensaje"] == mensaje
+    assert "Errno" not in d["estado"]["texto"]
 
 
 @pytest.mark.parametrize("dia, nivel, extra", [
@@ -260,6 +276,30 @@ def test_sin_datos_y_desactivada():
     cfg = dict(CFG["lista_erp"], activa=False)
     s = _sem("lista_erp", _hoy("lista_erp"), cfg=cfg)
     assert (s["nivel"], s["regla"]) == ("gris", "desactivada")
+
+
+def test_en_prueba_una_fuente_que_frenaria_en_activa_no_queda_en_verde():
+    """El motor publica con el .env y el archivo esta al dia, pero con la configuracion
+    de esta pantalla la corrida frenaria: activar asi seria un error."""
+    motivo = "Stock bodegas.xlsx tiene 5 días hábiles y se espera cada 2"
+    e = _hoy("stock_bodegas", prueba="difiere_esperado")
+    e["prueba"]["frenaria"] = motivo
+    s = _sem("stock_bodegas", e)
+    assert (s["nivel"], s["etiqueta"], s["regla"]) == ("amarillo", "En activa frenaría", "frenaria")
+    assert s["texto"] == ("Con la configuración de esta pantalla, en modo activa la publicación "
+                          f"se frenaría ({motivo}). Corrígelo antes de activar.")
+    # Sin `frenaria`, sigue al dia.
+    assert _sem("stock_bodegas", _hoy("stock_bodegas", prueba="difiere_esperado"))["regla"] == "al_dia"
+
+
+def test_la_prueba_dice_de_que_fecha_es_el_archivo_que_tomaria():
+    out = svc._texto_prueba({
+        "resultado": "difiere_esperado",
+        "archivo": {"carpeta": "databi_datos", "ruta_relativa": "Stock bodegas.xlsx",
+                    "modificado_en": "2026-10-16T09:34:00-03:00"},
+    }, obligatoria=True, ahora=VIERNES)
+    assert out["texto"] == ("La configuración de la plataforma tomaría Stock bodegas.xlsx, de hoy a "
+                            "las 09:34: es una diferencia esperada (ensayo).")
 
 
 def test_la_prueba_dice_si_en_activa_frenaria():
@@ -394,6 +434,59 @@ def test_la_foto_de_hoy_deja_las_tres_requeridas_en_verde(client, db_session):
     d = client.get(f"{URL}/ventas").json()
     assert d["descartados"] == [{"nombre": "Motorcraft 2026.xlsx",
                                  "motivo": "no tiene forma de respaldo de venta", "nuevo": False}]
+
+
+def _frenada_por_filas(client, id, dia, filas):
+    hoy = fuentes_del_dia(dia)
+    hoy["stock_bodegas"]["filas"] = filas
+    mandar(client, id, iniciada_en=f"{dia}T09:30:00-03:00", fuentes=hoy, resultado="frenada",
+           motivo="Un archivo llegó vacío o incompleto")
+
+
+def test_la_caida_de_filas_se_compara_con_la_ultima_oficial_ok_como_el_motor(client, db_session):
+    """El motor compara con `anterior` de GET /config (la ultima oficial `ok`). Dos dias
+    frenados seguidos con el stock a medias siguen en rojo el segundo dia."""
+    sembrado(client)
+    mandar(client, "c-16", iniciada_en="2026-10-16T09:30:00-03:00",
+           fuentes=fuentes_del_dia("2026-10-16"))
+    _frenada_por_filas(client, "c-19", "2026-10-19", 9000)
+    _frenada_por_filas(client, "c-20", "2026-10-20", 9000)
+    assert client.get(f"{URL}/config").json()["anterior"]["stock_bodegas"]["filas"] == 19883
+
+    panel = svc.panel(db_session, ahora=datetime(2026, 10, 20, 10, 30, tzinfo=TZ_CHILE))
+    stock = next(f for f in panel["fuentes"] if f["clave"] == "stock_bodegas")
+    assert (stock["nivel"], stock["regla"]) == ("rojo", "incompleto")
+    assert "(la última corrida que publicó traía 19.883)" in stock["texto"]
+
+
+def test_un_probar_entremedio_no_borra_el_rojo_ni_los_datos_del_panel(client, db_session):
+    """Un `--probar --reportar` en el PC titular no lee los archivos (filas vacias): no
+    sirve para comparar filas ni como dato del panel si hay una oficial."""
+    sembrado(client)
+    mandar(client, "c-16", iniciada_en="2026-10-16T09:30:00-03:00",
+           fuentes=fuentes_del_dia("2026-10-16"))
+    probar = fuentes_del_dia("2026-10-16")
+    for e in probar.values():
+        e["filas"] = None
+    mandar(client, "c-probar-16", tipo="probar", iniciada_en="2026-10-16T15:00:00-03:00",
+           fuentes=probar)
+    _frenada_por_filas(client, "c-19", "2026-10-19", 5000)
+
+    panel = svc.panel(db_session, ahora=datetime(2026, 10, 19, 10, 30, tzinfo=TZ_CHILE))
+    stock = next(f for f in panel["fuentes"] if f["clave"] == "stock_bodegas")
+    assert (stock["nivel"], stock["regla"]) == ("rojo", "incompleto")
+
+    # Otro --probar despues de la oficial: el panel sigue mostrando la oficial.
+    probar_19 = fuentes_del_dia("2026-10-19")
+    for e in probar_19.values():
+        e["filas"] = None
+    mandar(client, "c-probar-19", tipo="probar", iniciada_en="2026-10-19T15:00:00-03:00",
+           fuentes=probar_19)
+    panel = svc.panel(db_session, ahora=datetime(2026, 10, 19, 15, 30, tzinfo=TZ_CHILE))
+    assert panel["corrida_id"] == "c-19"
+    filas = {f["clave"]: f for f in panel["fuentes"]}
+    assert filas["seguimiento_curifor_nacional"]["filas"] == 812
+    assert filas["stock_bodegas"]["regla"] == "incompleto"
 
 
 def test_si_el_titular_no_corrio_cada_fila_dice_de_que_corrida_es_el_dato(client, db_session):

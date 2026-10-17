@@ -228,7 +228,11 @@ export function DetalleFuente({ clave, ahora, version, carpetas, recarga, onClos
                           <span className="block text-ink-500">{TEXTO_TIPO_CORRIDA[c.tipo] ?? c.tipo}</span>
                         </td>
                         <td className="px-2 py-1.5">{nombrePc(c.pc, c.alias)}</td>
-                        <td className="px-2 py-1.5"><NivelBadge nivel={c.nivel} etiqueta={c.etiqueta} /></td>
+                        <td className="px-2 py-1.5">
+                          <NivelBadge nivel={c.nivel} etiqueta={c.etiqueta} />
+                          {/* El error exacto del motor: solo aquí, puede traer la ruta del PC. */}
+                          {c.mensaje && <span className="mt-1 block break-all font-mono text-[11px] text-ink-500">{c.mensaje}</span>}
+                        </td>
                         <td className="px-2 py-1.5">
                           {c.archivos.map((a) => a.nombre).join(", ") || "—"}
                           {c.hoja_leida != null && <span className="block text-ink-500">Hoja {String(c.hoja_leida)}</span>}

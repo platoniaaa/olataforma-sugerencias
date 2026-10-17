@@ -49,6 +49,27 @@ router = APIRouter(prefix="/api/admin/fuentes", tags=["fuentes"])
 TOPE_REPORTE_BYTES = 2 * 1024 * 1024
 
 
+_MSG_REPORTE_GRANDE = "El reporte pasa de 2 MB: no se guardó. Revisa el listado de carpetas."
+
+
+async def _leer_con_tope(request: Request, tope: int) -> bytes:
+    """El cuerpo, cortando con 413 apenas pasa el tope. `request.body()` junta todo en
+    memoria antes de poder medirlo: un envio de 1 GB tumbaria la API para el equipo.
+    Primero se mira el Content-Length; despues se cuenta lo que llega, que cubre un
+    envio sin Content-Length (por trozos)."""
+    largo = request.headers.get("content-length")
+    if largo is not None and largo.isdigit() and int(largo) > tope:
+        raise HTTPException(status_code=413, detail=_MSG_REPORTE_GRANDE)
+    trozos: list[bytes] = []
+    total = 0
+    async for trozo in request.stream():
+        total += len(trozo)
+        if total > tope:
+            raise HTTPException(status_code=413, detail=_MSG_REPORTE_GRANDE)
+        trozos.append(trozo)
+    return b"".join(trozos)
+
+
 def _ejecutar(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
@@ -74,12 +95,7 @@ async def post_reporte(
     email: str = Depends(requiere_admin),
 ):
     """Reporte de inicio o de fin de una corrida (upsert por `id`). Sobre 2 MB, 413."""
-    cuerpo = await request.body()
-    if len(cuerpo) > TOPE_REPORTE_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail="El reporte pasa de 2 MB: no se guardó. Revisa el listado de carpetas.",
-        )
+    cuerpo = await _leer_con_tope(request, TOPE_REPORTE_BYTES)
     try:
         datos = ReporteIn.model_validate_json(cuerpo)
     except ValidationError as e:

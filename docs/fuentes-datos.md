@@ -34,11 +34,15 @@ OneDrive mantiene sincronizadas. Sin TI: no se registran apps ni se usa Graph.
      `difiere_esperado`. Una fuente no obligatoria puede estar en `falta` si el `.env`
      tampoco la encontró: activar no cambia nada para ella;
    - ninguna obligatoria está en `falta`;
+   - ninguna fuente trae `prueba.frenaria`: en prueba la corrida publica con el `.env`,
+     pero con la configuración de la plataforma frenaría (por ejemplo, un ensayo que
+     apunta a un archivo vencido);
    - la configuración no cambió después de esas corridas (salvo el modo o el nombre de
      un PC): si cambió, lo que se comparó ya no es lo que se activaría.
 
-   Si no se cumple, `POST /modo` responde 409 con el motivo. La activación rige desde
-   la corrida siguiente.
+   Si no se cumple, `POST /modo` responde 409 con la cuenta y el motivo; el panel
+   muestra la cuenta ("1 de 2 corridas diarias seguidas en verde") y aparte solo el
+   problema que corta la racha. La activación rige desde la corrida siguiente.
 
 **Volver atrás**: "Volver a prueba" en el panel (rige desde la corrida siguiente), o
 `MOTOR_FUENTES=env` en el `.env` del PC (rige de inmediato e ignora la plataforma por
@@ -88,23 +92,31 @@ tiene ninguna clave de fuente escrita en el código:
 
 - El modo tiene que estar en `catalogo[clave].modos`. `archivo_exacto` exige el nombre;
   `mas_reciente`, al menos un patrón.
-- Patrones y nombre de archivo sin `/`, `\`, `..` ni letra de unidad, hasta 100
-  caracteres. La subcarpeta acepta `/` (un `\` se convierte), pero no `..`, ni `/` al
-  inicio, ni letra de unidad.
+- Patrones y nombre de archivo sin `/`, `\`, `..` ni `:`, hasta 100 caracteres. La
+  subcarpeta acepta `/` (un `\` se convierte), pero no `..`, ni `/` al inicio, ni `:` en
+  ningún nivel. Es lo mismo que rechaza el motor al leer la configuración
+  (`leer_config`), un poco más estricto con `:` (Windows no lo acepta en ningún
+  nombre): si la plataforma lo guardara, el motor descartaría la configuración entera
+  y seguiría con la guardada en el PC. El nombre de archivo se guarda solo en
+  `archivo_exacto`; en los otros modos queda en null (el motor lo revisa en todos).
 - Las ubicaciones apuntan a carpetas que existen y están activas; una fuente activa
   necesita al menos una. Plazo de 1 a 365 días hábiles o sin plazo.
 - Mínimos del catálogo (requerida, `frecuencia_max`, `al_vencer_fijo`).
 - Carpetas: `sharepoint` exige `https://<empresa>.sharepoint.com/sites/…`, la
-  biblioteca y una ruta de al menos un nivel; `onedrive`, una ruta de al menos un
-  nivel. Al editar solo el nombre, las rutas por PC o si está activa, no se exigen
-  los parámetros (la carpeta sembrada trae el sitio en blanco: el PC no lo conoce).
+  biblioteca, una ruta de al menos un nivel y el nombre del acceso directo en OneDrive
+  (sin `/`, `\`, `..` ni `:`): en la Fase 1 el motor encuentra la carpeta solo por
+  `%OneDriveCommercial%\<nombre_atajo>`. `onedrive` exige una ruta de al menos un nivel;
+  ninguna ruta lleva `:`. Al editar solo el nombre, las rutas por PC o si está activa,
+  no se exigen los parámetros (la carpeta sembrada trae el sitio en blanco: el PC no lo
+  conoce).
   Una carpeta que usa alguna fuente no se puede desactivar.
 - **Vista previa** (`POST /{clave}/vista-previa`, no guarda): prueba la configuración
   propuesta contra el último listado de carpetas del PC titular, con la misma regla
   del motor (minúsculas, sin tildes, el más nuevo gana; `por_descarte` toma los
   `.xlsx` que no calzan con ninguna otra fuente y traen en el nombre el año en curso o
-  el anterior). Devuelve "tomaría X / hoy toma Y", conflictos y avisos. Al guardar
-  (`PUT /{clave}`), un conflicto da 422: dos fuentes `lee` con el mismo archivo, o en
+  el anterior, menos los que el último reporte del titular trae como descartados por
+  contenido, como el reporte de Motorcraft). Devuelve "tomaría X / hoy toma Y",
+  conflictos y avisos. Al guardar (`PUT /{clave}`), un conflicto da 422: dos fuentes `lee` con el mismo archivo, o en
   `activa` una obligatoria sin archivo ("Con este cambio el motor no encontraría el
   archivo y la publicación se frenaría"). Entre una `lee` y una `reconoce` es solo
   aviso (la lista de Ford es de `precios_ford` y de `precios_proveedor`). En `prueba`,
@@ -115,9 +127,12 @@ tiene ninguna clave de fuente escrita en el código:
 ## El semáforo
 
 Lo calcula el servidor (`fuentes_service.semaforo`, función pura) con el estado de
-la última corrida del titular, la configuración vigente (o la efectiva, sin
-configurar) y la corrida anterior del mismo PC. La edad de cada archivo se recalcula
-**hoy**, en días hábiles (sábado y domingo no cuentan; feriados todavía no) y en hora
+la última corrida oficial del titular (un `--probar` solo si no hay ninguna oficial: no
+lee los archivos y viene sin filas), la configuración vigente (o la efectiva, sin
+configurar) y la corrida anterior del mismo PC. "Llegó vacío o incompleto" se mide,
+igual que el motor, contra la última corrida oficial `ok` del mismo PC (la que el motor
+recibe como `anterior`): una frenada o un `--probar` en medio no cuentan. La edad de
+cada archivo se recalcula **hoy**, en días hábiles (sábado y domingo no cuentan; feriados todavía no) y en hora
 de Chile: a las 22:00 "hoy" sigue siendo hoy. Se evalúan todas las reglas; manda la
 primera de la peor, y las demás quedan en `alertas`.
 
@@ -132,8 +147,8 @@ primera de la peor, y las demás quedan en `alertas`.
 | Fuente | Rojo | Vencido | edad > plazo y frena |
 | Fuente | Rojo | Falta | sin archivo y obligatoria |
 | Fuente | Rojo | Carpeta no encontrada | ninguna ubicación existe en el PC |
-| Fuente | Rojo | Llegó vacío o incompleto | 0 filas o menos del 60 % de la corrida anterior (donde el catálogo lo controla) |
-| Fuente | Rojo | No se pudo leer | `error_lectura` |
+| Fuente | Rojo | Llegó vacío o incompleto | 0 filas o menos del 60 % de la última corrida oficial `ok` (donde el catálogo lo controla) |
+| Fuente | Rojo | No se pudo leer | `error_lectura`; el error exacto del motor sale solo en el detalle (es la excepción cruda y puede traer la ruta del PC) |
 | Fuente | Rojo | Ventas sin el mes cerrado | la venta del mes cerrado viene en cero, o el periodo quedó atrás; los días 1 a 3, amarillo |
 | Fuente | Amarillo | Atrasado, no frena | edad > plazo y solo avisa |
 | Fuente | Amarillo | Falta (no frena) | sin archivo y no obligatoria; el texto lleva `efecto_si_falta` |
@@ -142,6 +157,7 @@ primera de la peor, y las demás quedan en `alertas`.
 | Fuente | Amarillo | Abierto en Excel | `abierto_en_excel` |
 | Fuente | Amarillo | Archivo nuevo en la carpeta | un descartado que no estaba en la corrida anterior |
 | Fuente | Amarillo | Cambió de carpeta | el ganador viene de otra carpeta que en la corrida anterior |
+| Fuente | Amarillo | En activa frenaría | en prueba, `prueba.frenaria` (o una obligatoria que la plataforma no encuentra): hoy publica con el `.env`, pero activar frenaría |
 | Fuente | Verde | Al día | encontrado y edad ≤ plazo |
 | Fuente | Verde | Encontrado, sin plazo | encontrado y sin plazo |
 
@@ -167,9 +183,12 @@ al avisar, el reporte igual queda guardado.
 cliente en `lib/fuentes-datos.ts`). Si quien entra no es admin vuelve al inicio; un 403
 del servidor se muestra como falta de permiso. Arriba va "← Cargar datos". En orden:
 
-1. **Franja**: modo, PC titular, última corrida (resultado, cuándo, cuánto duró y qué
-   configuración usó) y las alertas globales. Según el modo, el botón para sembrar
-   ("Usar la configuración del PC … como punto de partida"), "Activar" (apagado hasta
+1. **Franja**: modo, PC titular, última corrida (resultado, cuándo, cuánto duró, con
+   qué configuración leyó y los avisos del motor, sin la ruta del PC) y las alertas
+   globales. Sin configurar y en prueba la plataforma responde, pero el motor lee con
+   la configuración escrita en el PC (`resolucion=env`), y así lo dice. Si la última
+   corrida no publicó, se ve en rojo y no dice "Sin alertas.". Según el modo, el botón
+   para sembrar ("Usar la configuración del PC … como punto de partida"), "Activar" (apagado hasta
    tener las corridas en verde, con el motivo a la vista) o "Volver a prueba".
 2. **Fuentes**: las `lee`, de la peor a la mejor, con su semáforo (icono y etiqueta,
    nunca solo el color), archivo, carpeta, fecha relativa y absoluta en hora de Chile,
@@ -211,7 +230,7 @@ el mismo token de siempre.
 | Método y ruta | Qué hace |
 |---|---|
 | `GET /config` | (motor) Configuración vigente + `anterior` (sha256, fecha y filas de la última corrida oficial `ok` del titular). Sin filas: `{"modo": "sin_configurar"}`. |
-| `POST /reporte` | (motor) Upsert por `id`, `fase` `inicio` o `fin`. Una clave de fuente desconocida se guarda con aviso. Sobre 2 MB, 413. Un inicio que llega después del fin no lo pisa; una corrida huérfana reportada como `cortada` sin manifiesto conserva lo que trajo su inicio. Una hora sin zona se toma como hora de Chile. |
+| `POST /reporte` | (motor) Upsert por `id`, `fase` `inicio` o `fin`. Una clave de fuente desconocida se guarda con aviso. Sobre 2 MB, 413, sin juntar el cuerpo entero en memoria (se mira el `Content-Length` y se cuenta lo que llega). Un inicio que llega después del fin no lo pisa; una corrida huérfana reportada como `cortada` sin manifiesto conserva lo que trajo su inicio. Una hora sin zona se toma como hora de Chile. |
 | `GET ` (la raíz) | Panel: franja, fuentes `lee` de la peor a la mejor, las `reconoce`, carpetas por PC, modo, si se puede activar y desde qué corridas sembrar. |
 | `GET /corridas?limit=30` | Historial, con cuántas fuentes quedaron en cada color (a la hora de cada corrida). |
 | `GET /carpetas/{clave}/archivos?pc=` | Último listado de esa carpeta (por defecto en el titular), con subcarpetas y un patrón propuesto por archivo, para los selectores. |

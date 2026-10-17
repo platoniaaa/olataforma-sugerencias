@@ -299,6 +299,9 @@ function UltimasCorridas() {
                     <td className="px-2 py-1">
                       {c.resultado_texto}
                       {c.motivo_texto && <span className="block text-ink-500">{c.motivo_texto}</span>}
+                      {c.avisos?.map((a) => (
+                        <span key={a} className="block text-[11.5px] text-ink-500">· {a}</span>
+                      ))}
                     </td>
                     <td className="px-2 py-1">
                       <Resumen resumen={c.resumen} />

@@ -639,9 +639,9 @@ def cambiar_modo(db: Session, modo: str, *, nota: str, base_version: int,
     if cfg.modo == modo:
         raise ValueError(f"La configuración ya está en modo {modo}.")
     if modo == "activa":
-        ok, motivo, _ = condicion_activar(db, fila, cfg)
+        ok, problema, verdes = condicion_activar(db, fila, cfg)
         if not ok:
-            raise ConflictoFuentes(motivo)
+            raise ConflictoFuentes(motivo_para_activar(problema, verdes))
     nueva = cfg.model_copy(update={"modo": modo})
     return _guardar(db, nueva, antes=cfg, usuario=usuario, nota=nota, base_version=base_version)
 
@@ -692,16 +692,20 @@ _EXTENSION = re.compile(r"\.[a-z0-9]{1,10}")
 _SITIO_SHAREPOINT = re.compile(r"https://[A-Za-z0-9-]+\.sharepoint\.com/sites/[^/\s?#]+.*")
 
 
+# Lo que el motor no acepta (`config_fuentes.leer_config` y `_partes`). Si la
+# plataforma lo guardara, el motor descartaria la configuracion ENTERA y seguiria con
+# la guardada en el PC. ":" se rechaza en cualquier lugar, no solo como letra de
+# unidad: Windows no lo permite en un nombre de archivo ni de carpeta.
 def _validar_patron(p: str, que: str) -> None:
     p = (p or "").strip()
     if not p:
         raise ValueError(f"{que} está vacío.")
     if len(p) > MAX_CARACTERES_PATRON:
         raise ValueError(f"{que} '{p[:30]}…' pasa de {MAX_CARACTERES_PATRON} caracteres.")
-    if "/" in p or "\\" in p or ".." in p or _LETRA_UNIDAD.match(p):
+    if "/" in p or "\\" in p or ".." in p or ":" in p:
         raise ValueError(
-            f"{que} '{p}' no puede llevar /, \\, .. ni una letra de unidad: es solo el "
-            "nombre del archivo, la carpeta se elige aparte."
+            f"{que} '{p}' no puede llevar /, \\, .. ni ':': es solo el nombre del archivo, la "
+            "carpeta se elige aparte."
         )
 
 
@@ -714,8 +718,9 @@ def _validar_subcarpeta(s: str) -> None:
         raise ValueError(f"La subcarpeta '{s}' tiene que ser relativa a la carpeta: sin / al "
                          "inicio ni letra de unidad.")
     partes = s.split("/")
-    if any(p.strip() in ("", "..", ".") for p in partes):
-        raise ValueError(f"La subcarpeta '{s}' no es válida: no puede llevar .. ni partes vacías.")
+    if any(p.strip() in ("", "..", ".") or ":" in p for p in partes):
+        raise ValueError(f"La subcarpeta '{s}' no es válida: no puede llevar .., ':' ni partes "
+                         "vacías.")
 
 
 def _validar_ruta_carpeta(ruta: str, que: str) -> None:
@@ -724,9 +729,9 @@ def _validar_ruta_carpeta(ruta: str, que: str) -> None:
                          "'Documentos/Bases de datos').")
     if len(ruta) > 300:
         raise ValueError(f"{que}: la ruta pasa de 300 caracteres.")
-    if _LETRA_UNIDAD.match(ruta) or any(p.strip() in ("", "..", ".") for p in ruta.split("/")):
+    if ":" in ruta or any(p.strip() in ("", "..", ".") for p in ruta.split("/")):
         raise ValueError(f"{que}: la ruta '{ruta}' tiene que ser relativa a OneDrive, sin letra "
-                         "de unidad ni '..'.")
+                         "de unidad, ':' ni '..'.")
 
 
 def _validar_fuente(f: FuenteCfg, cfg: ConfigFuentes) -> None:
@@ -738,9 +743,10 @@ def _validar_fuente(f: FuenteCfg, cfg: ConfigFuentes) -> None:
     if f.modo not in MODOS_CONOCIDOS or f.modo not in cat.modos:
         raise ValueError(f"{nombre}: esa forma de elegir el archivo no está permitida para esta "
                          "fuente.")
-    if f.modo == "archivo_exacto":
-        if not (f.nombre_archivo or "").strip():
-            raise ValueError(f"{nombre}: falta el nombre del archivo.")
+    if f.modo == "archivo_exacto" and not (f.nombre_archivo or "").strip():
+        raise ValueError(f"{nombre}: falta el nombre del archivo.")
+    if (f.nombre_archivo or "").strip():
+        # El motor lo revisa en todos los modos (`leer_config`), no solo en este.
         _validar_patron(f.nombre_archivo, "El nombre del archivo")
     if f.modo == "mas_reciente" and not [p for p in f.incluye if p and p.strip()]:
         raise ValueError(f"{nombre}: falta al menos un texto que tenga que contener el nombre "
@@ -808,9 +814,15 @@ def _validar_carpeta(c: CarpetaCfg, cfg: ConfigFuentes, *, nueva: bool,
             raise ValueError("Falta la biblioteca de SharePoint (por ejemplo, "
                              "'Documentos compartidos').")
         _validar_ruta_carpeta(ruta, "SharePoint")
+        # En la Fase 1 el motor encuentra una carpeta de SharePoint SOLO por su acceso
+        # directo, %OneDriveCommercial%\<nombre_atajo> (`resolver_carpeta`): el sitio,
+        # la biblioteca y la ruta no los usa. Sin el nombre no la encuentra en ningun PC.
         atajo = str(params.get("nombre_atajo") or "").strip()
-        if atajo and ("/" in atajo or "\\" in atajo or ".." in atajo or len(atajo) > 200):
-            raise ValueError("El nombre del acceso directo es solo un nombre, sin / ni \\.")
+        if not atajo:
+            raise ValueError("Falta el nombre del acceso directo en OneDrive: es lo único que usa "
+                             "el motor para encontrar esta carpeta en cada PC.")
+        if any(x in atajo for x in ("/", "\\", "..", ":")) or atajo == "." or len(atajo) > 200:
+            raise ValueError("El nombre del acceso directo es solo un nombre, sin /, \\, .. ni ':'.")
     else:
         _validar_ruta_carpeta(ruta, "OneDrive")
 
@@ -845,6 +857,11 @@ def _aplicar_cambios_fuente(f: FuenteCfg, cambios: CambiosFuente) -> FuenteCfg:
         datos[campo] = valor
     if not datos.get("nombre"):
         datos["nombre"] = f.nombre
+    if datos.get("modo") != "archivo_exacto":
+        # El formulario conserva el nombre al volver a "El más reciente…", pero el motor
+        # lo revisa en todos los modos: uno invalido, escondido en pantalla, le haria
+        # descartar la configuracion entera.
+        datos["nombre_archivo"] = None
     return FuenteCfg.model_validate(datos)
 
 
@@ -998,15 +1015,21 @@ _CAMBIOS_QUE_NO_INVALIDAN = {"modo", "pcs"}
 
 
 def condicion_activar(db: Session, fila: FuenteConfig, cfg: ConfigFuentes) -> tuple[bool, str | None, int]:
-    """(se puede, motivo si no, corridas en verde).
+    """(se puede, el problema que corta la racha, corridas en verde).
 
     `CORRIDAS_PARA_ACTIVAR` corridas oficiales seguidas del PC titular, `ok`, con
     `config_origen=plataforma`, y en cada una:
     - cada fuente `lee` activa en `coincide` o `difiere_esperado` (una no obligatoria
       puede estar en `falta` si el `.env` tampoco la encontro: activar no cambia nada);
-    - ninguna obligatoria en `falta`.
+    - ninguna obligatoria en `falta`;
+    - ninguna fuente que en activa frenaria la publicacion (`prueba.frenaria`: por
+      ejemplo, el archivo que tomaria la plataforma esta vencido).
     Ademas, la configuracion no puede haber cambiado (salvo modo o nombres de PC)
     despues de esas corridas: si cambio, lo que se comparo ya no es lo que se activa.
+
+    El problema va solo, sin la cuenta: el panel ya muestra "1 de 2 corridas diarias
+    seguidas en verde". Si no hay problema (solo faltan corridas), va None. Para el 409
+    de `POST /modo` se le antepone la cuenta (`motivo_para_activar`).
     """
     titular = cfg.pc_titular
     if not titular:
@@ -1037,9 +1060,14 @@ def condicion_activar(db: Session, fila: FuenteConfig, cfg: ConfigFuentes) -> tu
         verdes += 1
     if verdes >= CORRIDAS_PARA_ACTIVAR:
         return True, None, verdes
-    base = (f"Para activar hacen falta {CORRIDAS_PARA_ACTIVAR} corridas oficiales seguidas del "
+    return False, problema, verdes
+
+
+def motivo_para_activar(problema: str | None, verdes: int) -> str:
+    """El 409 de activar: la cuenta y, si hay, el problema que corta la racha."""
+    base = (f"Para activar hacen falta {CORRIDAS_PARA_ACTIVAR} corridas diarias seguidas del "
             f"PC titular en verde, y hay {verdes}.")
-    return False, f"{base} {problema}" if problema else base, verdes
+    return f"{base} {problema}" if problema else base
 
 
 def _problema_para_activar(c: MotorCorrida, lee: list[dict], catalogo: dict,
@@ -1060,9 +1088,17 @@ def _problema_para_activar(c: MotorCorrida, lee: list[dict], catalogo: dict,
         estado = fuentes.get(f["clave"]) or {}
         prueba = estado.get("prueba") if isinstance(estado.get("prueba"), dict) else {}
         r = prueba.get("resultado")
-        if r in ("coincide", "difiere_esperado"):
-            continue
-        if r == "falta" and not _obligatoria(f, catalogo) and estado.get("hecho") != "encontrado":
+        nombre = f.get("nombre") or f["clave"]
+        if r in ("coincide", "difiere_esperado") or (
+            r == "falta" and not _obligatoria(f, catalogo) and estado.get("hecho") != "encontrado"
+        ):
+            frenaria = prueba.get("frenaria")
+            if frenaria:
+                # En prueba la corrida publica con el .env aunque la plataforma tome un
+                # archivo vencido: activar haria frenar la corrida siguiente.
+                por_que = f" ({frenaria})" if isinstance(frenaria, str) else ""
+                return (f"En la corrida {_de(cuando)}, {nombre}: en activa frenaría la "
+                        f"publicación{por_que}.")
             continue
         if r == "difiere":
             detalle = ("toma un archivo distinto del que toma hoy el motor (si es un ensayo, "
@@ -1071,7 +1107,7 @@ def _problema_para_activar(c: MotorCorrida, lee: list[dict], catalogo: dict,
             detalle = "no encuentra archivo con la configuración de la plataforma"
         else:
             detalle = "no trae la comparación con la configuración de la plataforma"
-        return f"En la corrida {_de(cuando)}, {f.get('nombre') or f['clave']} {detalle}."
+        return f"En la corrida {_de(cuando)}, {nombre} {detalle}."
     return None
 
 
@@ -1106,13 +1142,27 @@ def _anios_de_ventas(hoy: date) -> set[str]:
     return {str(hoy.year), str(hoy.year - 1)}
 
 
+def _descartados_de(estado: dict | None) -> set[str]:
+    """Nombres (normalizados) que el motor descarto para esa fuente en una corrida."""
+    if not isinstance(estado, dict):
+        return set()
+    return {_norm(str(d.get("nombre"))) for d in estado.get("descartados") or []
+            if isinstance(d, dict) and d.get("nombre")}
+
+
 def _candidatos(fuente: dict, todas: list[dict], listados: dict[str, dict],
-                hoy: date) -> tuple[list[tuple[str, dict]], list[str]]:
-    """((carpeta, archivo) que calzan, mas nuevo primero; carpetas que no estan)."""
+                hoy: date, descartados: set[str] | None = None
+                ) -> tuple[list[tuple[str, dict]], list[str]]:
+    """((carpeta, archivo) que calzan, mas nuevo primero; carpetas que no estan).
+
+    `descartados`: en `por_descarte`, lo que el motor ya descarto POR CONTENIDO en la
+    ultima corrida (el reporte de Motorcraft por canal no tiene forma de respaldo de
+    venta). Calza por nombre, pero no se cuenta como si fuera a leerse."""
     exts = {str(e).lower() for e in fuente.get("extensiones") or []}
     modo = fuente.get("modo")
     otras = [f for f in todas if f.get("clave") != fuente.get("clave")]
     anios = _anios_de_ventas(hoy)
+    descartados = descartados or set()
     salida: list[tuple[str, dict]] = []
     sin_carpeta: list[str] = []
     for u in fuente.get("ubicaciones") or []:
@@ -1134,7 +1184,8 @@ def _candidatos(fuente: dict, todas: list[dict], listados: dict[str, dict],
             elif modo == "por_descarte":
                 ok = (not any(_matchea(nombre, o.get("incluye") or [], o.get("excluye") or [])
                               for o in otras)
-                      and any(x in nombre for x in anios))
+                      and any(x in nombre for x in anios)
+                      and _norm(nombre) not in descartados)
             else:
                 ok = _matchea(nombre, fuente.get("incluye") or [], fuente.get("excluye") or [])
             if ok:
@@ -1240,15 +1291,20 @@ def _vista_previa(db: Session, cfg: ConfigFuentes, clave: str) -> dict:
 
     listados = _listados_de(corrida)
     hoy = ahora.date()
-    cands, sin_carpeta = _candidatos(fuente, todas, listados, hoy)
+    fuentes_hoy = _fuentes_de(base_fuentes) if base_fuentes else {}
+    cands, sin_carpeta = _candidatos(fuente, todas, listados, hoy,
+                                     _descartados_de(fuentes_hoy.get(clave)))
     elegidos = _elegidos(fuente, cands)
     elegidos_out = [_archivo_out(c, a, carpetas) for c, a in elegidos]
     for c in sin_carpeta:
         avisos.append(f"{_sujeto_pc(alias, cfg.pc_titular)} no tiene la carpeta "
                       f"'{(carpetas.get(c) or {}).get('nombre') or c}'.")
     if fuente.get("modo") == "por_descarte":
+        ya = [str(d.get("nombre")) for d in (estado_hoy or {}).get("descartados") or []
+              if isinstance(d, dict) and d.get("nombre")]
         avisos.append("El motor además revisa el contenido de cada respaldo: los que no tengan "
-                      "forma de respaldo de venta se descartan.")
+                      "forma de respaldo de venta se descartan"
+                      + (f" (en la última corrida, {', '.join(ya[:4])})." if ya else "."))
 
     if fuente.get("activa", True) and not elegidos and _obligatoria(fuente, catalogo):
         if cfg.modo == "activa":
@@ -1265,7 +1321,8 @@ def _vista_previa(db: Session, cfg: ConfigFuentes, clave: str) -> dict:
     for otra in todas:
         if otra["clave"] == clave or not otra.get("activa", True):
             continue
-        sus, _ = _candidatos(otra, todas, listados, hoy)
+        sus, _ = _candidatos(otra, todas, listados, hoy,
+                             _descartados_de(fuentes_hoy.get(otra["clave"])))
         comunes = mios & {(c, _norm(_ruta(a["ruta_relativa"]))) for c, a in _elegidos(otra, sus)}
         if not comunes:
             continue
@@ -1360,28 +1417,42 @@ def _efecto(texto: str | None) -> str:
     return t
 
 
-def _texto_prueba(prueba: dict, obligatoria: bool) -> dict | None:
+def _frenaria(prueba: dict, obligatoria: bool) -> tuple[bool, str | None]:
+    """(en activa frenaria, por que). `frenaria` es el motivo en texto ("Falta el
+    archivo de ...") o un booleano; una obligatoria que la plataforma no encuentra
+    frena aunque el motor no lo diga."""
+    r = _texto(prueba.get("resultado"))
+    return (bool(prueba.get("frenaria")) or (r == "falta" and obligatoria),
+            _texto(prueba.get("frenaria")))
+
+
+def _texto_prueba(prueba: dict, obligatoria: bool, ahora: datetime | None = None) -> dict | None:
     r = _texto(prueba.get("resultado"))
     if not r:
         return None
-    # El motor manda el archivo como objeto ({carpeta, ruta_relativa, ...}); se acepta
-    # tambien la ruta sola.
+    # El motor manda el archivo como objeto ({carpeta, ruta_relativa, modificado_en,
+    # ...}); se acepta tambien la ruta sola.
     archivo = prueba.get("archivo")
+    modificado = None
     if isinstance(archivo, dict):
+        modificado = _fecha_archivo(archivo.get("modificado_en"))
         archivo = archivo.get("ruta_relativa")
     archivo = _texto(archivo)
     nombre = _nombre_de(archivo) if archivo else None
-    # `frenaria` es el motivo en texto ("Falta el archivo de ...") o un booleano.
-    por_que = _texto(prueba.get("frenaria"))
-    frenaria = bool(prueba.get("frenaria")) or (r == "falta" and obligatoria)
+    # Lo que el ensayo quiere ver: de que fecha es lo que tomaria (las filas no se
+    # pueden dar, el motor no lee ese archivo).
+    tomaria = nombre or "otro archivo"
+    if nombre and modificado is not None and ahora is not None:
+        tomaria = f"{nombre}, {_de(_cuando(modificado, ahora))}"
+    frenaria, por_que = _frenaria(prueba, obligatoria)
     if r == "coincide":
         texto = "La configuración de la plataforma toma el mismo archivo."
     elif r == "difiere_esperado":
-        texto = (f"La configuración de la plataforma tomaría {nombre or 'otro archivo'}: es una "
-                 "diferencia esperada (ensayo).")
+        texto = (f"La configuración de la plataforma tomaría {tomaria}: es una diferencia "
+                 "esperada (ensayo).")
     elif r == "difiere":
-        texto = (f"La configuración de la plataforma tomaría {nombre or 'otro archivo'}, distinto "
-                 "de lo que toma hoy. Revisa la fuente antes de activar.")
+        texto = (f"La configuración de la plataforma tomaría {tomaria}, distinto de lo que toma "
+                 "hoy. Revisa la fuente antes de activar.")
     elif r == "falta":
         texto = "Con la configuración de la plataforma el motor no encontraría el archivo."
     else:
@@ -1404,13 +1475,18 @@ def semaforo(
     listados: dict[str, dict] | None = None,
     alias_pc: str | None = None,
     pc: str | None = None,
+    anterior_ok: dict | None = None,
 ) -> dict:
     """Semaforo de UNA fuente: `{nivel, etiqueta, texto, regla, alertas, edad_dias_habiles}`.
 
     - `estado`: `reporte.fuentes[clave]` de la corrida que se muestra.
     - `cfg`: la fuente en la configuracion (FuenteCfg como dict).
-    - `anterior`: el estado de la misma fuente en la corrida anterior (filas,
-      descartados y carpeta, para "llegó vacío", "archivo nuevo" y "cambió de carpeta").
+    - `anterior`: el estado de la misma fuente en la corrida anterior (descartados y
+      carpeta, para "archivo nuevo" y "cambió de carpeta").
+    - `anterior_ok`: el estado en la ultima corrida oficial `ok` del mismo PC, la que el
+      motor recibe como `anterior` en GET /config: contra ella se mide "llegó vacío o
+      incompleto", igual que el motor. Una corrida frenada o un `--probar` (que no lee
+      los archivos) en medio no cuentan. Si no viene, se usa `anterior`.
     - `ahora_chile`: con zona. La edad se recalcula a esta hora en dias habiles.
     - `catalogo`: la entrada del catalogo de esta fuente.
 
@@ -1483,12 +1559,14 @@ def semaforo(
     controla = cat.get("controla_filas")
     if controla is None:
         controla = cat.get("frecuencia_max") is not None
-    ant_filas = (anterior or {}).get("filas") if isinstance(anterior, dict) else None
+    ref_filas = anterior_ok if anterior_ok is not None else anterior
+    ant_filas = ref_filas.get("filas") if isinstance(ref_filas, dict) else None
     if controla and encontrado and isinstance(filas, (int, float)) and (
         filas == 0 or (isinstance(ant_filas, (int, float)) and ant_filas > 0
                        and filas < RATIO_FILAS_MINIMO * ant_filas)
     ):
-        antes = (f" (la corrida anterior traía {_miles(ant_filas)})"
+        cual = "la última corrida que publicó" if anterior_ok is not None else "la corrida anterior"
+        antes = (f" ({cual} traía {_miles(ant_filas)})"
                  if isinstance(ant_filas, (int, float)) and ant_filas > 0 else "")
         efecto = ("No se publicó para no calcular con datos incompletos."
                   if activa_config else "Con la configuración activa no se publicaría.")
@@ -1498,11 +1576,14 @@ def semaforo(
             "archivo (si lo deja el programa del ERP, córrelo de nuevo).",
             "incompleto"))
     if hecho == "error_lectura":
-        detalle = f" ({estado['mensaje']})" if estado.get("mensaje") else ""
+        # El `mensaje` del motor es la excepcion cruda, en ingles y con la ruta del PC
+        # (trae el usuario de Windows): va solo en el detalle de la fuente, no aca ni
+        # en la campanita.
         alertas.append(_alerta(
             "rojo", "No se pudo leer",
-            f"No se pudo leer {archivo_txt}{detalle}. Revisa que el archivo abra bien en Excel y "
-            "vuelve a correr.",
+            f"No se pudo leer {archivo_txt}: puede estar abierto, bloqueado o sin bajar de "
+            "OneDrive. Ciérralo y vuelve a correr; el error exacto está en el detalle de la "
+            "fuente.",
             "error_lectura"))
     extra = estado.get("extra") if isinstance(estado.get("extra"), dict) else {}
     if encontrado and ("periodo_ultimo_mes" in extra or "total_mes_cerrado" in extra):
@@ -1584,6 +1665,18 @@ def semaforo(
                 f"El archivo ahora viene de {nueva_c} y en la corrida anterior venía de "
                 f"{vieja_c}. Revisa que sea el correcto.",
                 "cambio_carpeta"))
+    if encontrado and isinstance(estado.get("prueba"), dict):
+        # En prueba el motor publica con el .env: la fila puede estar al dia aunque con
+        # la configuracion de la plataforma la corrida frenaria (un ensayo que apunta a
+        # un archivo vencido). Eso no puede quedar en verde antes de activar. Sin
+        # archivo, "Falta" ya lo dice en rojo.
+        frenaria, por_que = _frenaria(estado["prueba"], obligatoria)
+        if frenaria:
+            alertas.append(_alerta(
+                "amarillo", "En activa frenaría",
+                "Con la configuración de esta pantalla, en modo activa la publicación se "
+                f"frenaría{f' ({por_que})' if por_que else ''}. Corrígelo antes de activar.",
+                "frenaria"))
 
     # ---- verde ----
     if encontrado and freq is not None and edad is not None and edad <= freq:
@@ -1660,6 +1753,9 @@ _MOTIVOS = (
     ("vacío o incompleto", "No se publicó: un archivo llegó vacío o incompleto."),
     ("vacio o incompleto", "No se publicó: un archivo llegó vacío o incompleto."),
     ("no es el titular", "No se publicó: este PC no es el titular."),
+    # Resultado `incompleta`: el sugerido si salio; fallaron pasos de la carga.
+    ("quedo incompleta", "El sugerido se publicó, pero algunos pasos no se cargaron: vuelve a "
+                         "correr el motor."),
 )
 
 
@@ -1678,10 +1774,59 @@ def traducir_motivo(motivo: str | None) -> str | None:
     return limpio or None
 
 
+# Una ruta absoluta de Windows dentro de un aviso ("C:\Users\<usuario>\..."), hasta el
+# cierre del parentesis o de la comilla. Trae el usuario de Windows: en la pantalla
+# queda solo el ultimo nombre (la carpeta o el archivo).
+_RUTA_ABSOLUTA = re.compile(r"[A-Za-z]:[\\/][^'\")\n]*")
+MAX_AVISOS_CORRIDA = 10
+
+
+def _sin_rutas(texto: str) -> str:
+    return _RUTA_ABSOLUTA.sub(
+        lambda m: re.split(r"[\\/]", m.group(0).rstrip("\\/ "))[-1] or "la carpeta", texto)
+
+
+def traducir_aviso(aviso: str) -> str | None:
+    """Un aviso del motor (`reporte.avisos`) para la persona: sin la ruta del PC y, el
+    que explica por que se uso la configuracion guardada, en una frase que dice que
+    hacer. Los demas ya vienen en frases del motor."""
+    if not isinstance(aviso, str) or not aviso.strip():
+        return None
+    texto = _sin_rutas(aviso.strip())
+    n = _norm(texto)
+    if n.startswith("se usa la configuracion guardada en este pc el"):
+        # Ya lo dice la franja ("Usó la configuración guardada", con su antigüedad).
+        return None
+    if "no entrego la configuracion de fuentes" in n:
+        # Un ValueError es la validacion del motor (`leer_config`): la configuracion
+        # llego, pero algo de ella no le sirve. Lo demas es de conexion.
+        m = re.search(r"\(ValueError: (.*)\)\.?$", texto)
+        if m:
+            return (f"El motor no aceptó la configuración de esta pantalla ({m.group(1)}). "
+                    "Corrige esa fuente: mientras tanto el motor usa la última configuración que "
+                    "sí aceptó.")
+        return ("El PC no pudo traer la configuración de esta pantalla: no tenía conexión o la "
+                "plataforma no respondió.")
+    return texto
+
+
+def _avisos_de(c: MotorCorrida) -> list[str]:
+    salida: list[str] = []
+    avisos = _reporte(c).get("avisos")
+    for a in avisos if isinstance(avisos, list) else []:
+        t = traducir_aviso(a)
+        if t and t not in salida:
+            salida.append(t)
+        if len(salida) >= MAX_AVISOS_CORRIDA:
+            break
+    return salida
+
+
 def _corrida_out(c: MotorCorrida, alias: str | None, resumen: dict | None = None) -> dict:
     dur = None
     if c.terminada_en and c.iniciada_en:
         dur = int((_utc(c.terminada_en) - _utc(c.iniciada_en)).total_seconds() // 60)
+    rep = _reporte(c)
     return {
         "id": c.id, "pc": c.pc, "alias": alias, "tipo": c.tipo,
         "titular": bool(c.titular), "publico": bool(c.publico),
@@ -1689,6 +1834,10 @@ def _corrida_out(c: MotorCorrida, alias: str | None, resumen: dict | None = None
         "duracion_min": dur, "resultado": c.resultado,
         "resultado_texto": _texto_resultado(c), "motivo_texto": traducir_motivo(c.motivo),
         "config_origen": c.config_origen, "config_version": c.config_version,
+        # Con que eligio el motor lo que leyo: en prueba (y sin configurar) la
+        # plataforma responde, pero lee con el .env y solo compara.
+        "resolucion": _texto(rep.get("resolucion")), "modo_config": _texto(rep.get("modo")),
+        "avisos": _avisos_de(c),
         "version_motor": c.version_motor, "resumen": resumen or {},
     }
 
@@ -1793,8 +1942,12 @@ class _Contexto:
             self.titular = self.recientes[0].pc
         else:
             self.titular = None
-        self.base = next((c for c in self.recientes
-                          if c.pc == self.titular and _fuentes_de(c)), None)
+        # El dato del panel sale de la ultima corrida OFICIAL del titular: un
+        # `--probar --reportar` en ese PC no lee los archivos (viene sin filas) y no
+        # puede tapar lo que leyo la diaria. Un probar sirve solo si no hay oficial.
+        del_titular = [c for c in self.recientes if c.pc == self.titular and _fuentes_de(c)]
+        self.base = next((c for c in del_titular if c.tipo == "oficial"),
+                         del_titular[0] if del_titular else None)
         # Sin configuracion, el semaforo usa lo que el motor usa hoy.
         if self.cfg is not None:
             self.datos = _dump(self.cfg)
@@ -1814,9 +1967,10 @@ class _Contexto:
         pcs = (self.datos.get("pcs") or {}) if self.cfg else {}
         self.alias_de: dict[str, str | None] = {k: (v or {}).get("alias") for k, v in pcs.items()}
         self._anteriores: dict[str, MotorCorrida | None] = {}
+        self._anteriores_ok: dict[str, MotorCorrida | None] = {}
 
     def anterior_de(self, c: MotorCorrida) -> MotorCorrida | None:
-        """La corrida terminada anterior del mismo PC (contra ella se comparan filas,
+        """La corrida terminada anterior del mismo PC (contra ella se comparan
         descartados y carpeta)."""
         if c.id in self._anteriores:
             return self._anteriores[c.id]
@@ -1829,6 +1983,16 @@ class _Contexto:
         self._anteriores[c.id] = anterior
         return anterior
 
+    def anterior_ok_de(self, c: MotorCorrida) -> MotorCorrida | None:
+        """La ultima corrida oficial `ok` del mismo PC antes de `c`: la misma que el
+        motor recibe como `anterior` (`_anterior`), contra la que mide las filas."""
+        if c.id not in self._anteriores_ok:
+            self._anteriores_ok[c.id] = next(
+                (x for x in self.recientes
+                 if x.pc == c.pc and x.id != c.id and x.tipo == "oficial" and x.resultado == "ok"
+                 and _utc(x.iniciada_en) < _utc(c.iniciada_en)), None)
+        return self._anteriores_ok[c.id]
+
     def lee(self) -> list[dict]:
         return [f for f in self.fuentes if _uso(self.catalogo, f["clave"]) == "lee"]
 
@@ -1837,6 +2001,8 @@ class _Contexto:
             return semaforo(None, f, None, ahora or self.ahora,
                             catalogo=self.catalogo.get(f["clave"]), modo=self.modo)
         ant = self.anterior_de(c)
+        ok = self.anterior_ok_de(c)
+        ant_ok = _fuentes_de(ok).get(f["clave"]) if ok else None
         return semaforo(
             _fuentes_de(c).get(f["clave"]), f,
             _fuentes_de(ant).get(f["clave"]) if ant else None,
@@ -1844,6 +2010,9 @@ class _Contexto:
             catalogo=self.catalogo.get(f["clave"]), modo=self.modo,
             carpetas=self.carpetas, listados=_listados_de(c),
             alias_pc=self.alias_de.get(c.pc), pc=c.pc,
+            # Sin oficial ok previa, el motor no tiene contra que comparar: {} y no la
+            # corrida anterior.
+            anterior_ok=ant_ok if isinstance(ant_ok, dict) else {},
         )
 
     def fila_fuente(self, f: dict, c: MotorCorrida | None, dato_de: str | None = None,
@@ -1855,7 +2024,8 @@ class _Contexto:
             tzinfo=TZ_CHILE)) if archivos else None
         prueba = None
         if isinstance(estado, dict) and isinstance(estado.get("prueba"), dict):
-            prueba = _texto_prueba(estado["prueba"], _obligatoria(f, self.catalogo))
+            prueba = _texto_prueba(estado["prueba"], _obligatoria(f, self.catalogo),
+                                   ahora or self.ahora)
         carpeta = principal["carpeta"] if principal else None
         return {
             "clave": f["clave"], "nombre": f.get("nombre") or f["clave"],
@@ -2052,8 +2222,9 @@ def detalle_fuente(db: Session, clave: str) -> dict:
         estado = _fuentes_de(c).get(clave)
         if not isinstance(estado, dict):
             continue
-        sem = ctx.semaforo_de(f, c, a_chile(c.terminada_en or c.iniciada_en))
-        prueba = _texto_prueba(estado["prueba"], _obligatoria(f, ctx.catalogo)) \
+        momento = a_chile(c.terminada_en or c.iniciada_en)
+        sem = ctx.semaforo_de(f, c, momento)
+        prueba = _texto_prueba(estado["prueba"], _obligatoria(f, ctx.catalogo), momento) \
             if isinstance(estado.get("prueba"), dict) else None
         hoja_leida = estado.get("hoja_leida")
         historia.append({
@@ -2066,6 +2237,7 @@ def detalle_fuente(db: Session, clave: str) -> dict:
             "filas": _entero(estado.get("filas")),
             "hoja_leida": hoja_leida if isinstance(hoja_leida, (str, int)) else None,
             "prueba": prueba,
+            "mensaje": _texto(estado.get("mensaje")),
         })
         if len(historia) >= 20:
             break
@@ -2073,7 +2245,8 @@ def detalle_fuente(db: Session, clave: str) -> dict:
     competencia = []
     if ctx.base is not None:
         listados = _listados_de(ctx.base)
-        cands, _ = _candidatos(f, ctx.fuentes, listados, ctx.ahora.date())
+        cands, _ = _candidatos(f, ctx.fuentes, listados, ctx.ahora.date(),
+                               _descartados_de(estado_base))
         elegidos = {(a.get("carpeta"), _norm(_ruta(a["ruta_relativa"])))
                     for a in _archivos_estado(estado_base)}
         por_carpeta: dict[str, list[dict]] = {}

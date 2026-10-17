@@ -6,16 +6,20 @@ Los datos de prueba reproducen la semilla del motor (17 fuentes: 13 que lee y 4 
 solo reconoce, dos carpetas) y el listado de carpetas de un dia normal. Los PCs, los
 correos y la URL de SharePoint son ficticios.
 """
+import asyncio
 import copy
 import inspect
 import json
 from datetime import datetime, timedelta
 
 import pytest
+from fastapi import HTTPException
+from starlette.requests import Request
 
 from src import db as db_modulo
 from src.main import app
 from src.models import AuditoriaLog, FuenteConfig, MotorCorrida, Notificacion, Usuario
+from src.routers import fuentes as router_fuentes
 from src.services import fuentes_service
 from src.services.auth import hash_password, requiere_auth
 from src.services.calendario import TZ_CHILE
@@ -488,6 +492,33 @@ def test_un_reporte_sobre_2_mb_responde_413(client):
     assert r.status_code == 413
 
 
+def test_un_reporte_gigante_se_corta_sin_juntarlo_entero_en_memoria():
+    """El tope se revisa mientras llega el cuerpo: uno de 1 GB (con el token del motor
+    o de un admin) no se junta entero en memoria antes de responder 413."""
+    trozo = 64 * 1024
+    leidos: list[int] = []
+
+    async def receive():
+        leidos.append(trozo)
+        # 4 MB en trozos de 64 KB, sin Content-Length (como un envio "chunked").
+        return {"type": "http.request", "body": b"x" * trozo, "more_body": len(leidos) < 64}
+
+    def pedido(headers):
+        return Request({"type": "http", "method": "POST", "path": f"{URL}/reporte",
+                        "headers": headers, "query_string": b""}, receive)
+
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(router_fuentes.post_reporte(pedido([]), db=None, email=MOTOR))
+    assert e.value.status_code == 413
+    assert sum(leidos) <= router_fuentes.TOPE_REPORTE_BYTES + trozo
+    # Si el Content-Length ya pasa el tope, ni siquiera empieza a leer.
+    leidos.clear()
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(router_fuentes.post_reporte(pedido([(b"content-length", b"1073741824")]),
+                                                db=None, email=MOTOR))
+    assert e.value.status_code == 413 and leidos == []
+
+
 def test_el_fin_sin_resultado_da_422(client):
     r = client.post(f"{URL}/reporte", json={"id": "c-1", "fase": "fin", "pc": PC, "tipo": "oficial"})
     assert r.status_code == 422
@@ -562,6 +593,50 @@ def test_cada_validacion_responde_422(con_listado, clave, cambios, texto):
     r = _put(con_listado, clave, cambios)
     assert r.status_code == 422, r.text
     assert texto in r.json()["detail"]
+
+
+# Lo que el motor rechaza al leer la configuracion (`config_fuentes.leer_config`): una
+# subcarpeta con "/" al inicio, ".." o ":" en cualquier nivel (`_partes`), y un patron
+# o nombre de archivo con "/", "\", ".." o ":" como segunda letra. Si la plataforma lo
+# guardara, el motor descartaria la configuracion ENTERA y seguiria con la guardada
+# en el PC sin que nadie supiera por que. La plataforma es un poco mas estricta con
+# ":": Windows no lo acepta en ningun nombre de archivo ni de carpeta.
+SUBCARPETAS_QUE_EL_MOTOR_RECHAZA = ["../otra", "Ventas/../otra", "/Ventas", "\\Ventas",
+                                    "C:/Ventas", "Data: BI", "stock/C:", "stock/datos:zona"]
+PATRONES_QUE_EL_MOTOR_RECHAZA = ["Bases/lista_erp.*", "Bases\\lista_erp.*", "..*",
+                                 "C:lista_erp.xlsx", "*:lista_erp*", "1:*"]
+
+
+@pytest.mark.parametrize("subcarpeta", SUBCARPETAS_QUE_EL_MOTOR_RECHAZA)
+def test_una_subcarpeta_que_el_motor_rechaza_no_se_guarda(con_listado, subcarpeta):
+    r = _put(con_listado, "lista_erp", {"ubicaciones": [
+        {"carpeta": "bases_de_datos", "subcarpeta": subcarpeta, "recursiva": False}]})
+    assert r.status_code == 422, r.text
+
+
+@pytest.mark.parametrize("patron", PATRONES_QUE_EL_MOTOR_RECHAZA + ["lista:erp*"])
+def test_un_patron_que_el_motor_rechaza_no_se_guarda(con_listado, patron):
+    for cambios in ({"incluye": [patron]}, {"excluye": [patron]},
+                    {"modo": "archivo_exacto", "nombre_archivo": patron}):
+        r = _put(con_listado, "lista_erp", cambios)
+        assert r.status_code == 422, (cambios, r.text)
+        assert "no puede llevar" in r.json()["detail"]
+
+
+def test_un_nombre_de_archivo_fuera_de_siempre_este_archivo_no_queda_guardado(con_listado):
+    """El formulario conserva el nombre al volver a "El más reciente…": el motor lo
+    revisa en todos los modos, asi que fuera de `archivo_exacto` no se guarda."""
+    r = _put(con_listado, "lista_erp", {"nombre_archivo": "stock/Stock bodegas.xlsx",
+                                        "frecuencia_dias": 5})
+    assert r.status_code == 200, r.text
+    assert fuente(config(con_listado), "lista_erp")["nombre_archivo"] is None
+    # Al pasar a "Siempre este archivo" si se guarda, y al volver se borra.
+    r = _put(con_listado, "lista_erp", {"modo": "archivo_exacto", "nombre_archivo": "lista_erp.xlsx"})
+    assert r.status_code == 200, r.text
+    assert fuente(config(con_listado), "lista_erp")["nombre_archivo"] == "lista_erp.xlsx"
+    r = _put(con_listado, "lista_erp", {"modo": "mas_reciente"})
+    assert r.status_code == 200, r.text
+    assert fuente(config(con_listado), "lista_erp")["nombre_archivo"] is None
 
 
 def test_las_validaciones_salen_del_catalogo_y_no_de_claves_escritas(client):
@@ -676,9 +751,18 @@ def test_vista_previa_por_descarte_usa_los_respaldos_del_ano(con_listado, monkey
                         lambda: datetime(2026, 10, 16, 10, 0, tzinfo=TZ_CHILE))
     vp = con_listado.post(f"{URL}/ventas/vista-previa", json={"cambios": {}}).json()
     nombres = sorted(a["nombre"] for a in vp["elegiria"]["archivos"])
-    # El Motorcraft calza por nombre: el motor lo descarta despues por contenido.
-    assert nombres == ["2025 (4).xlsx", "2026 (6).xlsx", "Motorcraft 2026.xlsx"]
-    assert any("revisa el contenido" in a for a in vp["avisos"])
+    # El Motorcraft calza por nombre, pero el motor lo descarta por contenido todos los
+    # dias (viene en los descartados del ultimo reporte): no se cuenta como si fuera a
+    # sumarse, y el aviso lo nombra.
+    assert nombres == ["2025 (4).xlsx", "2026 (6).xlsx"]
+    assert vp["elegiria"]["texto"] == ("Con este cambio el motor tomaría 2 archivos: "
+                                       "2025 (4).xlsx, 2026 (6).xlsx.")
+    assert any("revisa el contenido" in a and "Motorcraft 2026.xlsx" in a for a in vp["avisos"])
+    # El detalle tampoco lo pone a competir: ya sale en los descartados.
+    d = con_listado.get(f"{URL}/ventas").json()
+    candidatos = [a["nombre"] for c in d["competencia"] for a in c["candidatos"]]
+    assert sorted(candidatos) == ["2025 (4).xlsx", "2026 (6).xlsx"]
+    assert [x["nombre"] for x in d["descartados"]] == ["Motorcraft 2026.xlsx"]
 
 
 # --------------------------------------------------------------------------- #
@@ -686,7 +770,8 @@ def test_vista_previa_por_descarte_usa_los_respaldos_del_ano(con_listado, monkey
 # --------------------------------------------------------------------------- #
 def _carpeta(clave="motor_sp", **params):
     base = {"sitio_url": "https://ejemplo.sharepoint.com/sites/DataBI",
-            "biblioteca": "Documentos compartidos", "ruta": "Data BI/Motor"}
+            "biblioteca": "Documentos compartidos", "ruta": "Data BI/Motor",
+            "nombre_atajo": "Data BI - Motor"}
     base.update(params)
     return {"clave": clave, "nombre": "Data BI › Motor", "tipo": "sharepoint", "params": base}
 
@@ -696,8 +781,18 @@ def _carpeta(clave="motor_sp", **params):
     (_carpeta(biblioteca=""), "biblioteca"),
     (_carpeta(ruta=""), "falta la ruta"),
     (_carpeta(ruta="Data BI/../Otra"), "relativa a OneDrive"),
+    (_carpeta(ruta="Data BI/Mo:tor"), "relativa a OneDrive"),
+    # El motor encuentra una carpeta de SharePoint SOLO por el acceso directo
+    # (%OneDriveCommercial%\<nombre_atajo>): sin el, no la encuentra en ningun PC.
+    (_carpeta(nombre_atajo=""), "acceso directo"),
+    (_carpeta(nombre_atajo="Data BI/Motor"), "solo un nombre"),
+    (_carpeta(nombre_atajo="Data BI\\Motor"), "solo un nombre"),
+    (_carpeta(nombre_atajo="Data: BI"), "solo un nombre"),
+    (_carpeta(nombre_atajo=".."), "solo un nombre"),
     ({"clave": "od", "nombre": "OneDrive", "tipo": "onedrive", "params": {"ruta": ""}},
      "falta la ruta"),
+    ({"clave": "od", "nombre": "OneDrive", "tipo": "onedrive",
+      "params": {"ruta": "Documentos/Data:BI"}}, "relativa a OneDrive"),
     ({"clave": "Mayus", "nombre": "X", "tipo": "onedrive", "params": {"ruta": "Documentos"}},
      "minúsculas"),
     ({"clave": "bases_de_datos", "nombre": "X", "tipo": "onedrive",
@@ -730,6 +825,18 @@ def test_alta_y_edicion_de_carpetas(client):
     r = client.put(f"{URL}/carpetas/motor_sp", json={"cambios": {"nombre": "Otra"}, "nota": "x",
                                                      "base_version": 1})
     assert r.status_code == 409
+
+
+def test_editar_los_datos_de_sharepoint_exige_el_acceso_directo(client):
+    sembrado(client)
+    params = dict(CARPETAS[1]["params"], nombre_atajo="")
+    r = client.put(f"{URL}/carpetas/databi_datos", json={
+        "cambios": {"params": params}, "nota": "x", "base_version": 1})
+    assert r.status_code == 422 and "acceso directo" in r.json()["detail"]
+    # Cambiar solo el nombre de la carpeta sembrada no exige nada.
+    r = client.put(f"{URL}/carpetas/databi_datos", json={
+        "cambios": {"nombre": "Data BI › Datos"}, "nota": "x", "base_version": 1})
+    assert r.status_code == 200, r.text
 
 
 def test_alias_del_pc(client):
@@ -806,9 +913,36 @@ def test_activar_sin_las_corridas_en_verde_da_409(client):
     panel = client.get(URL).json()
     assert panel["activacion"]["puede_activar"] is False
     assert panel["activacion"]["corridas_en_verde"] == fuentes_service.CORRIDAS_PARA_ACTIVAR - 1
+    # La pantalla ya muestra la cuenta ("1 de 2 corridas diarias..."): el motivo solo
+    # dice el problema, y aca no hay ninguno (solo falta otra corrida).
+    assert panel["activacion"]["motivo"] is None
     r = client.post(f"{URL}/modo", json={"modo": "activa", "nota": "x", "base_version": 1})
     assert r.status_code == 409
-    assert "hacen falta 2 corridas" in r.json()["detail"]
+    assert r.json()["detail"] == ("Para activar hacen falta 2 corridas diarias seguidas del PC "
+                                  "titular en verde, y hay 1.")
+
+
+def test_una_fuente_que_en_activa_frenaria_corta_la_racha(client):
+    """El ensayo del stock en SharePoint: la plataforma tomaria un archivo de hace 5
+    dias habiles con un plazo de 2. En prueba la corrida publica igual (con el .env),
+    pero activar haria que la siguiente frene."""
+    sembrado(client)
+    motivo = "Stock bodegas.xlsx tiene 5 días hábiles y se espera cada 2"
+    for dia in ("2026-10-14", "2026-10-15"):
+        fuentes = fuentes_del_dia(dia, prueba="coincide")
+        fuentes["stock_bodegas"]["prueba"].update(resultado="difiere_esperado", frenaria=motivo)
+        mandar(client, f"c-{dia}", iniciada_en=_hora("09:30", dia), fuentes=fuentes,
+               config_origen="plataforma", config_version=1)
+    act = client.get(URL).json()["activacion"]
+    assert act["puede_activar"] is False and act["corridas_en_verde"] == 0
+    # "En la corrida de <cuando>, ...": el cuando depende del dia en que corra el test.
+    assert act["motivo"].startswith("En la corrida ")
+    assert act["motivo"].endswith(f", Stock bodegas Curifor: en activa frenaría la publicación "
+                                  f"({motivo}).")
+    r = client.post(f"{URL}/modo", json={"modo": "activa", "nota": "x", "base_version": 1})
+    assert r.status_code == 409
+    assert r.json()["detail"].startswith("Para activar hacen falta 2 corridas diarias seguidas")
+    assert "en activa frenaría la publicación" in r.json()["detail"]
 
 
 def test_activar_con_dos_de_dos_y_volver_a_prueba(client):
@@ -976,6 +1110,43 @@ def test_historial_de_corridas(con_listado):
     assert jefa["resultado_texto"] == "Revisión sin publicar"
 
 
+def test_la_corrida_dice_con_que_configuracion_leyo_el_motor(client):
+    """En prueba (y sin configurar) la plataforma responde y el motor reporta
+    `config_origen=plataforma`, pero lee con el .env: eso lo dice `resolucion`."""
+    sembrado(client)
+    mandar(client, "c-1", config_origen="plataforma", config_version=1,
+           extra_reporte={"modo": "prueba", "resolucion": "env"})
+    u = client.get(URL).json()["franja"]["ultima_corrida"]
+    assert (u["config_origen"], u["resolucion"], u["modo_config"]) == ("plataforma", "env", "prueba")
+    item = client.get(f"{URL}/corridas").json()["items"][0]
+    assert (item["resolucion"], item["modo_config"]) == ("env", "prueba")
+
+
+def test_los_avisos_del_motor_llegan_a_la_pantalla_sin_rutas_del_pc(client):
+    """La causa de usar la configuracion guardada viene en `reporte.avisos`."""
+    avisos = [
+        "La plataforma no entrego la configuracion de fuentes (ValueError: lista_erp: patron "
+        "invalido '*:lista_erp*').",
+        "Se usa la configuracion guardada en este PC el 2026-10-14T09:30:00-03:00.",
+        "La carpeta de MOTOR_CRUDOS_DIR (C:\\Users\\usuario\\Documents\\Bases de datos) no esta "
+        "dentro de OneDrive: no se puede sembrar.",
+    ]
+    mandar(client, "c-1", config_origen="cache",
+           extra_reporte={"avisos": avisos, "modo": "activa", "resolucion": "plataforma"})
+    for u in (client.get(URL).json()["franja"]["ultima_corrida"],
+              client.get(f"{URL}/corridas").json()["items"][0]):
+        assert u["avisos"][0] == ("El motor no aceptó la configuración de esta pantalla "
+                                  "(lista_erp: patron invalido '*:lista_erp*'). Corrige esa fuente: "
+                                  "mientras tanto el motor usa la última configuración que sí "
+                                  "aceptó.")
+        # "Se usa la configuracion guardada..." ya lo dice la franja: no se repite.
+        assert len(u["avisos"]) == 2
+        # La ruta del PC trae el usuario de Windows: queda solo el nombre de la carpeta.
+        assert "MOTOR_CRUDOS_DIR (Bases de datos)" in u["avisos"][1]
+    assert "C:\\" not in json.dumps(client.get(URL).json(), ensure_ascii=False)
+    assert "Users" not in json.dumps(client.get(f"{URL}/corridas").json(), ensure_ascii=False)
+
+
 def test_el_motivo_del_log_se_traduce_sin_opciones_de_linea_de_comandos(client):
     motivo = ("No se carga a produccion con archivos desactualizados.\nArchivos vencidos:\n  - "
               "stock.xlsx\n\nActualizalos en la carpeta de datos, o corre con "
@@ -1005,6 +1176,8 @@ def test_el_motivo_del_log_se_traduce_sin_opciones_de_linea_de_comandos(client):
      "El motor calculó, pero la plataforma rechazó la carga."),
     ("NO SE PUBLICA: este PC no es el titular (PC de la jefa)",
      "No se publicó: este PC no es el titular."),
+    ("La carga oficial quedo incompleta. No se publico:",
+     "El sugerido se publicó, pero algunos pasos no se cargaron: vuelve a correr el motor."),
 ])
 def test_cada_motivo_del_motor_se_traduce_a_una_frase(primera, frase):
     detalle = "\nProblemas:\n  - Falta el archivo de Mix de reemplazos\n\nRevisalos, o corre con " \

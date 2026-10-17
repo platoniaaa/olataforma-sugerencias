@@ -180,9 +180,20 @@ export function EditorCarpeta({ open, carpeta, pcs, version, onClose, onGuardado
               <Input id={id("biblioteca")} value={f.biblioteca} placeholder="Documentos compartidos" onChange={(e) => set("biblioteca", e.target.value)} />
             </div>
             <div>
-              <Label htmlFor={id("atajo")}>Nombre del acceso directo en OneDrive</Label>
-              <Input id={id("atajo")} value={f.nombre_atajo} onChange={(e) => set("nombre_atajo", e.target.value)} />
+              <Label htmlFor={id("atajo")}>Nombre del acceso directo en OneDrive (obligatorio)</Label>
+              <Input
+                id={id("atajo")}
+                value={f.nombre_atajo}
+                required
+                aria-describedby={id("atajo-ayuda")}
+                onChange={(e) => set("nombre_atajo", e.target.value)}
+              />
             </div>
+            <p id={id("atajo-ayuda")} className="text-[12px] text-ink-500 sm:col-span-2">
+              Es el nombre de la carpeta que aparece en OneDrive al agregar el acceso directo. Es lo único que usa
+              el motor para encontrar la carpeta en cada PC; el sitio, la biblioteca y la ruta quedan como
+              referencia.
+            </p>
           </div>
         )}
         <div>

@@ -176,16 +176,34 @@ export function PanelFuentes({ panel, onAbrirFuente, onGuardado }: Props) {
   );
 }
 
+/**
+ * Con qué configuración leyó el motor. Sin configurar y en prueba la plataforma
+ * responde (`config_origen=plataforma`), pero el motor elige los archivos con el .env
+ * del PC (`resolucion=env`); en prueba, además, compara con la de esta pantalla.
+ */
+function textoConfig(c: Corrida): string | null {
+  if (c.resolucion === "env" || c.config_origen === "env") {
+    if (c.modo_config !== "prueba" || c.config_origen === "env") return "leyó con la configuración escrita en el PC";
+    const con = c.config_origen === "cache" ? "la copia de esta pantalla guardada en el PC" : "la de esta pantalla";
+    return `leyó con la configuración escrita en el PC y comparó con ${con}`;
+  }
+  return c.config_origen ? `usó la ${TEXTO_ORIGEN[c.config_origen] ?? c.config_origen}` : null;
+}
+
 function textoCorrida(c: Corrida, ahora: string): string {
   const partes = [`${TEXTO_TIPO_CORRIDA[c.tipo] ?? c.tipo} ${de(cuando(c.iniciada_en, ahora))}, ${nombrePc(c.pc, c.alias)}`];
   if (c.duracion_min != null) partes.push(`duró ${c.duracion_min} min`);
-  if (c.config_origen) partes.push(`usó la ${TEXTO_ORIGEN[c.config_origen] ?? c.config_origen}`);
+  const config = textoConfig(c);
+  if (config) partes.push(config);
   return partes.join(" · ");
 }
 
 function Franja({ panel, onAccion }: { panel: Panel; onAccion: (a: Accion) => void }) {
   const { franja, activacion } = panel;
   const u = franja.ultima_corrida;
+  // Frenada, falló, incompleta, cortada…: la franja puede no tener alertas (la
+  // campanita sí avisó), pero "Sin alertas." al lado de "no publicó" engaña.
+  const noPublico = u != null && u.resultado !== "ok" && u.resultado !== "en_curso";
   return (
     <section aria-label="Estado general" className={cn("space-y-3 rounded-sm border p-4", NIVELES[franja.nivel].franja)}>
       <div className="flex flex-wrap items-center gap-2">
@@ -202,13 +220,26 @@ function Franja({ panel, onAccion }: { panel: Panel; onAccion: (a: Accion) => vo
       <p className="max-w-3xl text-[13px] text-ink-600">{EXPLICACION_MODO[panel.modo]}</p>
 
       {u ? (
-        <div className="rounded-sm border border-ink-200 bg-white px-3 py-2 text-[13px] text-ink-700">
+        <div
+          data-testid="ultima-corrida"
+          className={cn(
+            "rounded-sm border px-3 py-2 text-[13px]",
+            noPublico ? "border-rose-300 bg-rose-50 text-rose-900" : "border-ink-200 bg-white text-ink-700"
+          )}
+        >
           <p>
             <span className="kicker mr-2">Última corrida</span>
-            <b className="text-ink-900">{u.resultado_texto}</b>
+            <b className={noPublico ? "text-rose-800" : "text-ink-900"}>{u.resultado_texto}</b>
             <span className="text-ink-500"> · {textoCorrida(u, panel.ahora)}</span>
           </p>
-          {u.motivo_texto && <p className="mt-1 text-ink-700">{u.motivo_texto}</p>}
+          {u.motivo_texto && <p className={cn("mt-1", noPublico ? "text-rose-800" : "text-ink-700")}>{u.motivo_texto}</p>}
+          {(u.avisos?.length ?? 0) > 0 && (
+            <ul className="mt-1.5 list-disc space-y-0.5 pl-5 text-[12.5px] text-ink-600" aria-label="Avisos del motor">
+              {u.avisos!.map((a) => (
+                <li key={a}>{a}</li>
+              ))}
+            </ul>
+          )}
         </div>
       ) : null}
 
@@ -222,7 +253,7 @@ function Franja({ panel, onAccion }: { panel: Panel; onAccion: (a: Accion) => vo
           ))}
         </ul>
       ) : (
-        u && <p className="text-[13px] text-emerald-800">Sin alertas.</p>
+        u && !noPublico && <p className="text-[13px] text-emerald-800">Sin alertas.</p>
       )}
 
       {panel.modo === "sin_configurar" && (
@@ -258,7 +289,12 @@ function Franja({ panel, onAccion }: { panel: Panel; onAccion: (a: Accion) => vo
           </Button>
           <p className="max-w-2xl text-[12.5px] text-ink-600">
             {activacion.corridas_en_verde} de {activacion.corridas_necesarias} corridas diarias seguidas en verde.
-            {activacion.motivo ? ` ${activacion.motivo}` : " Ya se puede activar; rige desde la corrida siguiente."}
+            {/* El motivo trae solo lo que corta la racha; la cuenta ya está a la vista. */}
+            {activacion.puede_activar
+              ? " Ya se puede activar; rige desde la corrida siguiente."
+              : activacion.motivo
+                ? ` ${activacion.motivo}`
+                : ""}
           </p>
         </div>
       )}

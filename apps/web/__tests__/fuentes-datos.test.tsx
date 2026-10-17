@@ -17,6 +17,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import FuentesDatosPage from "@/app/cargar/fuentes/page";
+import { EditorCarpeta } from "@/components/fuentes/editor-carpeta";
 import { EditorFuente } from "@/components/fuentes/editor-fuente";
 import {
   archivosEnUbicacion,
@@ -26,6 +27,7 @@ import {
   formDesde,
   fuentesApi,
   type ArchivoCarpeta,
+  type Corrida,
   type FuenteCfg,
   type FuenteDetalle,
   type FuentePanel,
@@ -39,6 +41,9 @@ const mocks = vi.hoisted(() => {
   return { req: vi.fn(), replace, router: { replace, push: vi.fn() }, esAdmin: true };
 });
 
+// El mismo texto que `MENSAJE_SIN_SERVIDOR` de lib/api-client.ts.
+const SIN_SERVIDOR = "No se pudo conectar con el servidor. Puede estar reiniciándose: espera un minuto y vuelve a intentar.";
+
 vi.mock("@/lib/api-client", () => ({
   req: mocks.req,
   // Igual que el real: el `detail` en texto del servidor, o el texto por defecto.
@@ -46,6 +51,7 @@ vi.mock("@/lib/api-client", () => ({
     const b = (await res.json().catch(() => ({}))) as { detail?: unknown };
     return typeof b.detail === "string" ? b.detail : fallback;
   },
+  MENSAJE_SIN_SERVIDOR: "No se pudo conectar con el servidor. Puede estar reiniciándose: espera un minuto y vuelve a intentar.",
 }));
 
 vi.mock("@/lib/auth", () => ({ getEsAdmin: () => mocks.esAdmin }));
@@ -90,7 +96,8 @@ const PANEL: Panel = {
     ultima_corrida: {
       id: "c1", pc: "PC-ABAST-01", alias: "PC de Abastecimiento", tipo: "oficial", titular: true, publico: true,
       iniciada_en: "2026-10-15T12:30:00Z", terminada_en: "2026-10-15T12:58:00Z", duracion_min: 28, resultado: "ok",
-      resultado_texto: "Publicó", motivo_texto: null, config_origen: "env", config_version: null, version_motor: null, resumen: {},
+      resultado_texto: "Publicó", motivo_texto: null, config_origen: "env", config_version: null,
+      resolucion: "env", modo_config: "prueba", avisos: [], version_motor: null, resumen: {},
     },
     alertas: [{
       nivel: "rojo", etiqueta: "El PC titular no corrió hoy", regla: "titular_no_corrio",
@@ -308,6 +315,121 @@ describe("panel", () => {
     fireEvent.click(within(confirmar).getByRole("button", { name: "Volver a esta versión" }));
     await waitFor(() => expect(cuerpoDe("/api/admin/fuentes/revertir/1")).toEqual({ base_version: 4, clave: "stock_bodegas" }));
   });
+
+  it("el error exacto de lectura sale en las últimas corridas del detalle", async () => {
+    const mensaje = "PermissionError: [Errno 13] Permission denied: 'Stock bodegas.xlsx'";
+    servidor({
+      "GET /api/admin/fuentes": PANEL,
+      "GET /api/admin/fuentes/config": { modo: "prueba", carpetas: [], fuentes: [] },
+      "GET /api/admin/fuentes/stock_bodegas": {
+        ...DETALLE,
+        corridas: [{
+          corrida_id: "c1", pc: "PC-ABAST-01", alias: null, tipo: "oficial", iniciada_en: "2026-10-16T12:30:00Z",
+          resultado: "ok", hecho: "error_lectura", nivel: "rojo", etiqueta: "No se pudo leer", archivos: [],
+          filas: null, hoja_leida: null, prueba: null, mensaje,
+        }],
+      },
+    });
+    render(<FuentesDatosPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Stock bodegas Curifor" }));
+    const detalle = await screen.findByRole("dialog", { name: "Stock bodegas Curifor" });
+    expect(await within(detalle).findByText(mensaje)).toBeInTheDocument();
+  });
+
+  it("con la API caída dice qué pasó, no 'Failed to fetch'", async () => {
+    mocks.req.mockRejectedValue(new TypeError("Failed to fetch"));
+    render(<FuentesDatosPage />);
+    const alerta = await screen.findByRole("alert");
+    expect(alerta).toHaveTextContent(SIN_SERVIDOR);
+    expect(alerta).not.toHaveTextContent(/failed to fetch/i);
+  });
+
+  const conCorrida = (corrida: Partial<Corrida>, franja: Partial<Panel["franja"]> = {}): Panel => ({
+    ...PANEL,
+    franja: { ...PANEL.franja, alertas: [], nivel: "verde", ...franja, ultima_corrida: { ...PANEL.franja.ultima_corrida!, ...corrida } },
+  });
+
+  it("dice que el motor leyó con la configuración del PC cuando no estaba activa", async () => {
+    // En prueba la plataforma responde (config_origen=plataforma), pero el motor lee con el .env.
+    servidor({
+      "GET /api/admin/fuentes": conCorrida({ config_origen: "plataforma", resolucion: "env", modo_config: "prueba" }),
+      "GET /api/admin/fuentes/config": { modo: "prueba" },
+    });
+    render(<FuentesDatosPage />);
+    const franja = await screen.findByRole("region", { name: "Estado general" });
+    expect(within(franja).getByText(/leyó con la configuración escrita en el PC y comparó con la de esta pantalla/)).toBeInTheDocument();
+    expect(within(franja).queryByText(/usó la configuración de esta pantalla/)).not.toBeInTheDocument();
+  });
+
+  it("sin configurar no dice que comparó con esta pantalla", async () => {
+    servidor({
+      "GET /api/admin/fuentes": {
+        ...conCorrida({ config_origen: "plataforma", resolucion: "env", modo_config: "sin_configurar" }),
+        modo: "sin_configurar", modo_texto: "Sin configurar", version: null,
+      },
+      "GET /api/admin/fuentes/config": { modo: "sin_configurar" },
+    });
+    render(<FuentesDatosPage />);
+    const franja = await screen.findByRole("region", { name: "Estado general" });
+    expect(within(franja).getByText(/leyó con la configuración escrita en el PC$/)).toBeInTheDocument();
+    expect(within(franja).queryByText(/configuración de esta pantalla/)).not.toBeInTheDocument();
+  });
+
+  it("en activa dice que usó la configuración de esta pantalla", async () => {
+    servidor({
+      "GET /api/admin/fuentes": {
+        ...conCorrida({ config_origen: "plataforma", resolucion: "plataforma", modo_config: "activa" }),
+        modo: "activa", modo_texto: "Activa",
+      },
+      "GET /api/admin/fuentes/config": { modo: "activa" },
+    });
+    render(<FuentesDatosPage />);
+    const franja = await screen.findByRole("region", { name: "Estado general" });
+    expect(within(franja).getByText(/usó la configuración de esta pantalla/)).toBeInTheDocument();
+  });
+
+  it("una corrida que no publicó no dice 'Sin alertas.' y se ve en rojo", async () => {
+    servidor({
+      "GET /api/admin/fuentes": conCorrida({
+        resultado: "frenada", resultado_texto: "Frenada: no publicó", publico: false,
+        motivo_texto: "No se publicó: falta un archivo obligatorio o hay uno vencido. Revisa las fuentes en rojo.",
+      }),
+      "GET /api/admin/fuentes/config": { modo: "prueba" },
+    });
+    render(<FuentesDatosPage />);
+    const franja = await screen.findByRole("region", { name: "Estado general" });
+    expect(within(franja).getByText("Frenada: no publicó")).toBeInTheDocument();
+    expect(within(franja).queryByText("Sin alertas.")).not.toBeInTheDocument();
+    expect(within(franja).getByTestId("ultima-corrida")).toHaveClass("border-rose-300");
+  });
+
+  it("una corrida que publicó sin alertas sí dice 'Sin alertas.'", async () => {
+    servidor({ "GET /api/admin/fuentes": conCorrida({}), "GET /api/admin/fuentes/config": { modo: "prueba" } });
+    render(<FuentesDatosPage />);
+    const franja = await screen.findByRole("region", { name: "Estado general" });
+    expect(within(franja).getByText("Sin alertas.")).toBeInTheDocument();
+    expect(within(franja).getByTestId("ultima-corrida")).not.toHaveClass("border-rose-300");
+  });
+
+  it("muestra los avisos del motor de la última corrida", async () => {
+    const aviso = "El motor no aceptó la configuración de esta pantalla (lista_erp: patron invalido '*:x*'). Corrige esa fuente: mientras tanto el motor usa la última configuración que sí aceptó.";
+    servidor({ "GET /api/admin/fuentes": conCorrida({ avisos: [aviso] }), "GET /api/admin/fuentes/config": { modo: "prueba" } });
+    render(<FuentesDatosPage />);
+    const franja = await screen.findByRole("region", { name: "Estado general" });
+    expect(within(franja).getByText(aviso)).toBeInTheDocument();
+  });
+
+  it("el texto de Activar no repite la cuenta", async () => {
+    servidor({
+      "GET /api/admin/fuentes": { ...PANEL, activacion: { puede_activar: false, motivo: null, corridas_necesarias: 2, corridas_en_verde: 1 } },
+      "GET /api/admin/fuentes/config": { modo: "prueba" },
+    });
+    render(<FuentesDatosPage />);
+    const franja = await screen.findByRole("region", { name: "Estado general" });
+    const texto = within(franja).getByText(/corridas diarias seguidas en verde/);
+    expect(texto).toHaveTextContent(/^1 de 2 corridas diarias seguidas en verde\.$/);
+    expect(within(franja).getByRole("button", { name: "Activar" })).toBeDisabled();
+  });
 });
 
 describe("editor", () => {
@@ -402,6 +524,29 @@ describe("editor", () => {
     expect(await screen.findByText("Otro admin guardó un cambio; recarga")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Recargar" })).toBeInTheDocument();
   });
+
+  it("con la API caída, Guardar dice qué pasó y no 'Failed to fetch'", async () => {
+    abrir({
+      "PUT /api/admin/fuentes/stock_bodegas": () => {
+        throw new TypeError("Failed to fetch");
+      },
+    });
+    fireEvent.change(screen.getByLabelText("Se actualiza cada"), { target: { value: "3" } });
+    fireEvent.change(screen.getByLabelText("Nota del cambio"), { target: { value: "x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    expect(await screen.findByText(SIN_SERVIDOR)).toBeInTheDocument();
+    expect(screen.queryByText(/failed to fetch/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("editor de carpetas", () => {
+  it("en SharePoint pide el nombre del acceso directo y dice que es lo que usa el motor", () => {
+    render(<EditorCarpeta open carpeta={null} pcs={[]} version={4} onClose={() => {}} onGuardado={() => {}} />);
+    fireEvent.click(screen.getByLabelText("Biblioteca de SharePoint sincronizada"));
+    const atajo = screen.getByLabelText(/Nombre del acceso directo en OneDrive/);
+    expect(atajo).toBeRequired();
+    expect(screen.getByText(/Es lo único que usa el motor para encontrar la carpeta en cada PC/)).toBeInTheDocument();
+  });
 });
 
 describe("lib/fuentes-datos", () => {
@@ -457,6 +602,21 @@ describe("lib/fuentes-datos", () => {
       incluye: ["*stock*bodega*", "stock curifor.*"],
     });
     expect(cambiosFuente(CFG, { ...form, ubicaciones: [{ carpeta: "bases_de_datos", subcarpeta: "\\stock\\", recursiva: false }] })).toEqual({});
+  });
+
+  it("el nombre de archivo solo viaja con 'Siempre este archivo'", () => {
+    const form = formDesde(CFG);
+    // Escrito en "Siempre este archivo" y vuelto a "El más reciente…": no se manda.
+    expect(cambiosFuente(CFG, { ...form, nombre_archivo: "stock/Stock bodegas.xlsx" })).toEqual({});
+    expect(cambiosFuente(CFG, { ...form, modo: "archivo_exacto", nombre_archivo: "Stock bodegas.xlsx" })).toEqual({
+      modo: "archivo_exacto",
+      nombre_archivo: "Stock bodegas.xlsx",
+    });
+    const exacto: FuenteCfg = { ...CFG, modo: "archivo_exacto", nombre_archivo: "Stock bodegas.xlsx" };
+    expect(cambiosFuente(exacto, { ...formDesde(exacto), modo: "mas_reciente" })).toEqual({
+      modo: "mas_reciente",
+      nombre_archivo: null,
+    });
   });
 
   it("las horas se muestran en hora de Chile: a las 22:00 'hoy' sigue siendo hoy", () => {

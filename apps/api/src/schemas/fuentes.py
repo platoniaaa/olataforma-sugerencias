@@ -463,6 +463,15 @@ class CorridaOut(BaseModel):
     motivo_texto: str | None = None
     config_origen: str | None = None
     config_version: int | None = None
+    # Con que eligio el motor lo que leyo: `env` (el .env del PC) o `plataforma`. En
+    # prueba y sin configurar la plataforma responde (config_origen=plataforma), pero
+    # el motor lee con el .env.
+    resolucion: str | None = None
+    # El modo de la configuracion con que corrio (sin_configurar | prueba | activa).
+    modo_config: str | None = None
+    # Los avisos del motor (`reporte.avisos`) para la persona y sin la ruta del PC: por
+    # ejemplo, por que uso la configuracion guardada.
+    avisos: list[str] = Field(default_factory=list)
     version_motor: str | None = None
     # Cuantas fuentes `lee` quedaron en cada color en esa corrida.
     resumen: dict[str, int] = Field(default_factory=dict)
@@ -497,7 +506,8 @@ class PcPanelOut(BaseModel):
 
 class ActivacionOut(BaseModel):
     puede_activar: bool
-    # Por que no se puede (o null si se puede).
+    # Lo que corta la racha, sin la cuenta (la pantalla ya la muestra). Null si se puede
+    # activar o si solo faltan corridas.
     motivo: str | None = None
     corridas_necesarias: int
     corridas_en_verde: int
@@ -582,6 +592,9 @@ class CorridaFuenteOut(BaseModel):
     filas: int | None = None
     hoja_leida: str | int | None = None
     prueba: PruebaOut | None = None
+    # El error exacto que mando el motor (`error_lectura`). Va solo aca, en el detalle:
+    # es la excepcion cruda y puede traer la ruta del PC.
+    mensaje: str | None = None
 
 
 class CompetenciaOut(BaseModel):

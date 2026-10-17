@@ -1,7 +1,7 @@
 // Cliente de Fuentes de datos (/api/admin/fuentes): de donde lee el motor cada
 // archivo y si esta al dia. Solo admin. El semaforo y los textos los arma el
 // servidor (`fuentes_service.semaforo`): la pantalla solo los muestra.
-import { mensajeError, req } from "./api-client";
+import { MENSAJE_SIN_SERVIDOR, mensajeError, req } from "./api-client";
 
 export type Nivel = "rojo" | "amarillo" | "verde" | "gris";
 export type ModoPanel = "sin_configurar" | "prueba" | "activa";
@@ -80,6 +80,12 @@ export interface Corrida {
   motivo_texto: string | null;
   config_origen: string | null;
   config_version: number | null;
+  /** Con que eligio el motor lo que leyo: "env" (el .env del PC) o "plataforma". */
+  resolucion?: string | null;
+  /** El modo de la configuracion con que corrio: sin_configurar | prueba | activa. */
+  modo_config?: string | null;
+  /** Avisos del motor, ya en texto para la persona y sin la ruta del PC. */
+  avisos?: string[];
   version_motor: string | null;
   resumen: Partial<Record<Nivel, number>>;
 }
@@ -234,6 +240,8 @@ export interface CorridaFuente {
   filas: number | null;
   hoja_leida: string | number | null;
   prueba: Prueba | null;
+  /** El error exacto del motor al leer (solo en el detalle: puede traer la ruta del PC). */
+  mensaje?: string | null;
 }
 
 export interface Competencia {
@@ -344,7 +352,15 @@ export class ErrorFuentes extends Error {
 const RUTA = "/api/admin/fuentes";
 
 async function json<T>(path: string, init?: RequestInit, fallback = "No se pudo completar"): Promise<T> {
-  const res = await req(path, init);
+  let res: Response;
+  try {
+    res = await req(path, init);
+  } catch (e) {
+    // fetch rechaza con TypeError ("Failed to fetch") cuando no hay respuesta: Render
+    // se esta reiniciando o se corto la red. Status 0 = sin respuesta del servidor.
+    if (e instanceof TypeError) throw new ErrorFuentes(0, MENSAJE_SIN_SERVIDOR);
+    throw e;
+  }
   if (!res.ok) {
     const porDefecto = res.status === 409 ? MSG_OTRO_ADMIN : fallback;
     throw new ErrorFuentes(res.status, await mensajeError(res, porDefecto));
@@ -611,7 +627,9 @@ export function cambiosFuente(original: FuenteCfg, form: FormFuente): CambiosFue
   }));
   if (!igual(ubicaciones, original.ubicaciones)) c.ubicaciones = ubicaciones;
   if (form.modo !== original.modo) c.modo = form.modo;
-  const archivo = form.nombre_archivo.trim() || null;
+  // El nombre solo vale en "Siempre este archivo". El formulario lo conserva al volver
+  // a "El más reciente…" y ahí no se ve: no se manda (el motor lo revisa en todo modo).
+  const archivo = form.modo === "archivo_exacto" ? form.nombre_archivo.trim() || null : null;
   if (archivo !== (original.nombre_archivo ?? null)) c.nombre_archivo = archivo;
   const incluye = lineas(form.incluye);
   if (!igual(incluye, original.incluye)) c.incluye = incluye;
