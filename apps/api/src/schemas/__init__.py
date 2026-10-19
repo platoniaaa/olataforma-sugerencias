@@ -8,6 +8,7 @@ from .sugerido import (
     ExportRequest,
     AgrupadoRow,
     InstockResumen,
+    SugeridoOpciones,
     VentaMes,
     VentasResponse,
 )
@@ -102,6 +103,7 @@ __all__ = [
     "ExportRequest",
     "AgrupadoRow",
     "InstockResumen",
+    "SugeridoOpciones",
     "VentaMes",
     "VentasResponse",
     "SugerenciaManualOut",

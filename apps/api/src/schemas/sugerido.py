@@ -185,6 +185,27 @@ class AgrupadoRow(BaseModel):
     n_productos: int = 0
 
 
+class SucursalOpcion(BaseModel):
+    """Una sucursal del sugerido: `nombre` es lo que espera el filtro `sucursal`."""
+
+    sucursal_id: str
+    nombre: str | None = None
+
+
+class SugeridoOpciones(BaseModel):
+    """Los valores distintos del sugerido, para armar los desplegables.
+
+    Sale de `SELECT DISTINCT` sobre la tabla entera (con el alcance del usuario), no
+    de las filas que se estan mostrando: la portada armaba la lista de proveedores
+    con las primeras 5.000 filas (12 MB) y le faltaban 57 de 142."""
+
+    proveedores: list[str] = Field(default_factory=list)
+    marcas: list[str] = Field(default_factory=list)
+    tipos_origen: list[str] = Field(default_factory=list)
+    clases_abc: list[str] = Field(default_factory=list)
+    sucursales: list[SucursalOpcion] = Field(default_factory=list)
+
+
 class VentaMes(BaseModel):
     """Venta de un producto/sucursal en un mes (para la tendencia 12 meses)."""
 

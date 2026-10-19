@@ -1722,6 +1722,41 @@ def agrupado(db: Session, f: SugeridoFiltros, por: str, limite: int = 15) -> lis
     ]
 
 
+def opciones(db: Session, f: SugeridoFiltros) -> dict:
+    """Los valores distintos del sugerido para los desplegables, en SQL.
+
+    Solo el alcance (`_apply_alcance`: sucursales del usuario, sucursales cerradas y
+    productos internos), sin los filtros de la pantalla: un desplegable que se
+    achica segun lo que ya se filtro no deja volver atras. Reemplaza a la portada
+    bajando 5.000 filas (12,5 MB, 9 a 17 s en Render) para sacar los proveedores
+    de ahi, que ademas dejaba fuera a 57 de los 142 (los que solo tenian filas en
+    cero mas alla de la fila 5.000).
+    """
+
+    def _distintos(col) -> list[str]:
+        stmt = _apply_alcance(select(col).distinct(), f).where(col.isnot(None), col != "")
+        return sorted({str(v) for (v,) in db.execute(stmt).all()})
+
+    sucursales: dict[str, str | None] = {}
+    stmt = _apply_alcance(
+        select(Sugerido.sucursal_id, Sugerido.nombre_sucursal).distinct(), f
+    ).where(Sugerido.sucursal_id.isnot(None))
+    for suc, nombre in db.execute(stmt).all():
+        # Si una sucursal viene con dos nombres, gana el primero no vacio.
+        if not sucursales.get(suc):
+            sucursales[suc] = nombre
+    return {
+        "proveedores": _distintos(Sugerido.proveedor),
+        "marcas": _distintos(Sugerido.filtro1_final),
+        "tipos_origen": _distintos(Sugerido.tipo_origen),
+        "clases_abc": _distintos(Sugerido.clasificacion_abc),
+        "sucursales": [
+            {"sucursal_id": s, "nombre": sucursales[s]}
+            for s in sorted(sucursales, key=lambda s: (sucursales[s] or s).lower())
+        ],
+    }
+
+
 def pares_filtrados(db: Session, f: SugeridoFiltros) -> list[tuple[str, str]]:
     """Devuelve los pares (producto, sucursal_id) que cumplen los filtros.
 

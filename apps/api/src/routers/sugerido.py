@@ -13,6 +13,7 @@ from ..schemas import (
     ExportRequest,
     SugeridoFiltros,
     SugeridoKpis,
+    SugeridoOpciones,
     SugeridoPage,
     SugeridoRow,
     VentasResponse,
@@ -99,6 +100,17 @@ def listar(
 @router.get("/kpis", response_model=SugeridoKpis)
 def kpis(f: SugeridoFiltros = Depends(_filtros), db: Session = Depends(get_db)):
     return SugeridoKpis(**sugerido_service.kpis(db, f))
+
+
+@router.get("/opciones", response_model=SugeridoOpciones)
+def opciones(
+    db: Session = Depends(get_db),
+    permitidas: list[str] | None = Depends(sucursales_permitidas),
+):
+    """Proveedores, marcas, tipos de origen, clases y sucursales distintos del
+    sugerido, para los desplegables. Unos pocos KB en vez de las 5.000 filas que
+    bajaba la portada. Respeta las sucursales del usuario."""
+    return sugerido_service.opciones(db, SugeridoFiltros(sucursales_permitidas=permitidas))
 
 
 @router.get("/agrupado", response_model=list[AgrupadoRow])
