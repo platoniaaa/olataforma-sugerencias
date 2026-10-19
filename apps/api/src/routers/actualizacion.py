@@ -11,30 +11,44 @@ El agente es un programa instalado en ese PC que pregunta cada minuto si hay alg
 pendiente. No es una persona y no tiene login: se identifica con la cabecera
 'X-Agente-Secret' (mismo criterio que el router de cron).
 
+Por el mismo buzon pasan dos tipos de pedido (columna `tipo`):
+
+- `recalcular`: correr el motor y publicar. Es el boton "Actualizar ahora" y el valor
+  por defecto (la web vieja no manda cuerpo).
+- `actualizar_motor`: que ese PC baje la ultima version del motor desde GitHub. No
+  recalcula nada. Solo admin: cambia el programa que calcula para todo el equipo.
+
+Nunca hay dos pedidos vivos a la vez, de ningun tipo: actualizar el motor mientras
+corre un calculo cambiaria el programa a mitad de camino.
+
 Reemplaza al esquema anterior, que abria el protocolo `sugerido://` del navegador: eso
 solo funcionaba sentado en el PC del administrador y con una ventana de PowerShell a la
 vista. Con el buzon, el boton sirve desde cualquier equipo o telefono.
 """
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Body, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import desc, select, update
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..db import get_db
-from ..models import AuditoriaLog, SolicitudActualizacion
+from ..models import AuditoriaLog, SolicitudActualizacion, Usuario
 from ..models.solicitud_actualizacion import (
     ACTIVOS,
+    ACTUALIZAR_MOTOR,
     EN_CURSO,
     ERROR,
     EXPIRADA,
     OK,
     PENDIENTE,
+    RECALCULAR,
 )
 from ..services import auditoria_service
 from ..services.auth import puede_actualizar, requiere_actualizar, requiere_auth
+from ..services.calendario import a_chile
 
 router = APIRouter(prefix="/api/actualizacion", tags=["actualizacion"])
 settings = get_settings()
@@ -42,9 +56,19 @@ settings = get_settings()
 # Si nadie la toma en este plazo, el PC que calcula esta apagado (o el agente caido).
 # El agente pregunta cada minuto: 5 min es margen de sobra sin dejar a nadie esperando.
 ESPERA_MAX_MIN = 5
-# El motor tarda ~3 min. Pasado este plazo sin noticias, algo se corto (se cerro la
-# sesion de Windows, se apago el PC a mitad de camino) y la solicitud no volvera.
-CORRIDA_MAX_MIN = 20
+# Pasado este plazo sin noticias de una solicitud tomada, algo se corto (se cerro la
+# sesion de Windows, se apago el PC a mitad de camino) y no volvera a avisar.
+# - recalcular: el motor tarda 22 a 35 min (medido en las corridas de octubre). Con
+#   los 20 min de antes, una corrida sana se daba por muerta a la mitad, y la tarjeta
+#   decia "nunca termino de avisar" mientras el motor seguia publicando.
+# - actualizar_motor: un git fetch + merge, y a lo mas reinstalar dependencias.
+CORRIDA_MAX_MIN = {RECALCULAR: 75, ACTUALIZAR_MOTOR: 15}
+
+# Textos que llegan tal cual a la pantalla.
+DURACION_TEXTO = {
+    RECALCULAR: "Tarda entre 25 y 40 minutos",
+    ACTUALIZAR_MOTOR: "Tarda 1 a 2 minutos",
+}
 
 
 def _verificar_agente(secret: str | None) -> None:
@@ -64,6 +88,10 @@ def _aware(dt: datetime | None) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+def _tipo(s: SolicitudActualizacion) -> str:
+    return s.tipo or RECALCULAR
+
+
 def _caducar(db: Session) -> None:
     """Cierra las solicitudes que quedaron colgadas.
 
@@ -78,24 +106,33 @@ def _caducar(db: Session) -> None:
         )
     ).all()
     for s in activas:
+        motor = _tipo(s) == ACTUALIZAR_MOTOR
         if s.estado == PENDIENTE:
             creado = _aware(s.creado_en) or ahora
             if ahora - creado > timedelta(minutes=ESPERA_MAX_MIN):
                 s.estado = EXPIRADA
                 s.terminado_en = ahora
                 s.mensaje = (
+                    "Nadie tomó la solicitud. El computador del motor está apagado, sin "
+                    "conexión o sin sesión iniciada."
+                    if motor else
                     "Nadie tomó la solicitud. El computador donde se calcula el "
-                    "sugerido está apagado o sin conexión."
+                    "sugerido está apagado, sin conexión o sin sesión iniciada."
                 )
                 cambios = True
         elif s.estado == EN_CURSO:
             tomado = _aware(s.tomado_en) or _aware(s.creado_en) or ahora
-            if ahora - tomado > timedelta(minutes=CORRIDA_MAX_MIN):
+            plazo = CORRIDA_MAX_MIN.get(_tipo(s), CORRIDA_MAX_MIN[RECALCULAR])
+            if ahora - tomado > timedelta(minutes=plazo):
                 s.estado = ERROR
                 s.terminado_en = ahora
                 s.mensaje = (
-                    "La actualización empezó pero nunca terminó de avisar. Revisa el "
-                    "computador donde se calcula el sugerido."
+                    f"La actualización del motor empezó pero no avisó cómo terminó en "
+                    f"{plazo} minutos. Revisa el computador del motor."
+                    if motor else
+                    f"El recálculo empezó pero no avisó cómo terminó en {plazo} minutos "
+                    "(normalmente tarda entre 25 y 40). Revisa el computador donde se "
+                    "calcula el sugerido."
                 )
                 cambios = True
     if cambios:
@@ -109,6 +146,20 @@ def _ultima(db: Session) -> SolicitudActualizacion | None:
         .order_by(desc(SolicitudActualizacion.creado_en))
         .limit(1)
     ).first()
+
+
+def _vivas(db: Session) -> list[SolicitudActualizacion]:
+    """Las solicitudes pendientes o en curso, la mas antigua primero."""
+    return list(
+        db.scalars(
+            select(SolicitudActualizacion)
+            .where(
+                SolicitudActualizacion.tenant_id == settings.default_tenant_id,
+                SolicitudActualizacion.estado.in_(ACTIVOS),
+            )
+            .order_by(SolicitudActualizacion.creado_en, SolicitudActualizacion.id)
+        ).all()
+    )
 
 
 def _ultima_sincronizacion(db: Session) -> datetime | None:
@@ -127,8 +178,10 @@ def _ultima_sincronizacion(db: Session) -> datetime | None:
 def _payload(db: Session, s: SolicitudActualizacion | None, email: str) -> dict:
     return {
         "id": s.id if s else None,
+        "tipo": _tipo(s) if s else None,
         "estado": s.estado if s else None,
         "mensaje": s.mensaje if s else None,
+        "version": s.version if s else None,
         "solicitado_por": s.solicitado_por if s else None,
         "creado_en": s.creado_en if s else None,
         "terminado_en": s.terminado_en if s else None,
@@ -137,7 +190,26 @@ def _payload(db: Session, s: SolicitudActualizacion | None, email: str) -> dict:
     }
 
 
+def _ocupado(viva: SolicitudActualizacion) -> str:
+    """Por que no se acepta otra solicitud: lo que dice la pantalla con el 409."""
+    hora = a_chile(viva.creado_en).strftime("%H:%M") if viva.creado_en else None
+    desde = f" (pedido a las {hora})" if hora else ""
+    if _tipo(viva) == ACTUALIZAR_MOTOR:
+        que = "una actualización del motor"
+    else:
+        que = "un recálculo"
+    estado = "esperando al computador del motor" if viva.estado == PENDIENTE else "en curso"
+    return (
+        f"Ya hay {que} {estado}{desde}. {DURACION_TEXTO[_tipo(viva)]}: espera a que "
+        "termine para pedir otra cosa."
+    )
+
+
 # ------------------------------- lado de la web ------------------------------- #
+class SolicitarRequest(BaseModel):
+    tipo: Literal["recalcular", "actualizar_motor"] = RECALCULAR
+
+
 @router.get("/estado")
 def estado(db: Session = Depends(get_db), email: str = Depends(requiere_auth)) -> dict:
     """Como va la ultima solicitud. Lo consulta la tarjeta de la web cada pocos
@@ -149,34 +221,58 @@ def estado(db: Session = Depends(get_db), email: str = Depends(requiere_auth)) -
 
 @router.post("/solicitar")
 def solicitar(
-    db: Session = Depends(get_db), email: str = Depends(requiere_actualizar)
+    payload: SolicitarRequest | None = Body(default=None),
+    db: Session = Depends(get_db),
+    email: str = Depends(requiere_actualizar),
 ) -> dict:
-    """Deja pedida una actualizacion. No recalcula nada aca: eso lo hace el agente."""
+    """Deja pedida una actualizacion. No recalcula nada aca: eso lo hace el agente.
+
+    Sin cuerpo es "recalcular" (la web de antes no manda nada). "actualizar_motor"
+    exige admin. Si ya hay una solicitud viva, de cualquier tipo, responde 409: dos
+    corridas del motor encoladas publicarian dos veces, y actualizar el motor mientras
+    calcula le cambiaria el programa a mitad de camino."""
+    tipo = payload.tipo if payload else RECALCULAR
+    if tipo == ACTUALIZAR_MOTOR:
+        user = db.get(Usuario, email)
+        if not user or not user.es_admin or not user.activo:
+            raise HTTPException(
+                status_code=403,
+                detail="Actualizar el motor es solo para administradores.",
+            )
+
     _caducar(db)
-    viva = db.scalars(
-        select(SolicitudActualizacion)
-        .where(
-            SolicitudActualizacion.tenant_id == settings.default_tenant_id,
-            SolicitudActualizacion.estado.in_(ACTIVOS),
-        )
-        .order_by(desc(SolicitudActualizacion.creado_en))
-        .limit(1)
-    ).first()
-    # Dos personas apretando el boton no deben encolar dos corridas del motor: la
-    # segunda se engancha a la que ya va en camino.
-    if viva:
-        return {**_payload(db, viva, email), "ya_en_curso": True}
+    vivas = _vivas(db)
+    if vivas:
+        raise HTTPException(status_code=409, detail=_ocupado(vivas[0]))
 
     s = SolicitudActualizacion(
-        tenant_id=settings.default_tenant_id, estado=PENDIENTE, solicitado_por=email
+        tenant_id=settings.default_tenant_id, estado=PENDIENTE, tipo=tipo,
+        solicitado_por=email,
     )
     db.add(s)
+    db.commit()
+    # Dos clics casi simultaneos pueden pasar los dos el control de arriba (cada
+    # pedido corre en su hilo). Gana la mas antigua; la otra se retira con el mismo
+    # 409 que habria recibido un segundo despues.
+    vivas = _vivas(db)
+    if vivas and vivas[0].id != s.id:
+        db.delete(s)
+        db.commit()
+        raise HTTPException(status_code=409, detail=_ocupado(vivas[0]))
+
     auditoria_service.registrar(
         db,
-        accion="actualizacion_solicitada",
+        accion=(
+            "actualizacion_motor_solicitada" if tipo == ACTUALIZAR_MOTOR
+            else "actualizacion_solicitada"
+        ),
         entidad="sistema",
         usuario_email=email,
-        detalle="Pidio actualizar los datos desde la web",
+        detalle=(
+            "Pidio actualizar el motor del PC titular desde la web"
+            if tipo == ACTUALIZAR_MOTOR
+            else "Pidio actualizar los datos desde la web"
+        ),
     )
     db.commit()
     db.refresh(s)
@@ -188,6 +284,8 @@ class TerminarRequest(BaseModel):
     id: str
     ok: bool
     mensaje: str | None = None
+    # "<sha corto> <rama>" del motor que quedo instalado (lo manda actualizar_motor).
+    version: str | None = None
 
 
 @router.get("/pendiente")
@@ -226,7 +324,7 @@ def pendiente(
     db.commit()
     if not res.rowcount:
         return {"hay": False}  # se la llevo otro agente entremedio
-    return {"hay": True, "id": s.id, "solicitado_por": s.solicitado_por}
+    return {"hay": True, "id": s.id, "tipo": _tipo(s), "solicitado_por": s.solicitado_por}
 
 
 @router.post("/terminar")
@@ -244,5 +342,7 @@ def terminar(
     s.estado = OK if payload.ok else ERROR
     s.terminado_en = _now()
     s.mensaje = payload.mensaje
+    if payload.version is not None:
+        s.version = payload.version.strip()[:200] or None
     db.commit()
     return {"id": s.id, "estado": s.estado}
