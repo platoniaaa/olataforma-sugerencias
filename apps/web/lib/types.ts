@@ -431,6 +431,16 @@ export interface CatalogoOpciones {
   categorias: string[];
 }
 
+/** `GET /api/sugerido/opciones`: los valores distintos de todo el sugerido (con las
+ *  sucursales del usuario), para los desplegables. Unos pocos KB. */
+export interface SugeridoOpciones {
+  proveedores: string[];
+  marcas: string[];
+  tipos_origen: string[];
+  clases_abc: string[];
+  sucursales: { sucursal_id: string; nombre: string | null }[];
+}
+
 export interface StockSucursalRow {
   bodega: string | null;
   sucursal_id: string | null;
@@ -829,14 +839,23 @@ export interface VentasHistoricasResp {
   por_sucursal: { sucursal: string; cantidad: number; neto: number }[];
 }
 
-/** Estado del boton "Actualizar ahora". El recalculo lo corre un agente instalado en
- *  el PC que tiene los Excel; la web solo deja pedido y consulta como va. */
+/** Lo que se le pide al PC del motor por el buzon de /api/actualizacion. */
+export type TipoActualizacion = "recalcular" | "actualizar_motor";
+
+/** Estado de la ultima solicitud del buzon ("Actualizar ahora" o "Actualizar motor").
+ *  Lo atiende un agente instalado en el PC que tiene los Excel; la web solo deja
+ *  pedido y consulta como va. */
 export interface EstadoActualizacion {
   id: string | null;
+  /** recalcular ("Actualizar ahora") o actualizar_motor; null si nunca se ha pedido.
+   *  Una API anterior a "Actualizar motor" no manda el campo: es un recalculo. */
+  tipo?: TipoActualizacion | null;
   /** pendiente | en_curso | ok | error | expirada, o null si nunca se ha pedido. */
   estado: "pendiente" | "en_curso" | "ok" | "error" | "expirada" | null;
   /** Resultado en lenguaje de usuario: se muestra tal cual. */
   mensaje: string | null;
+  /** "<sha corto> <rama>" del motor del PC que atendio la solicitud, si lo informo. */
+  version?: string | null;
   solicitado_por: string | null;
   creado_en: string | null;
   terminado_en: string | null;

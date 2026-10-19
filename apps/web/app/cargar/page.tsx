@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api-client";
 import { getEsAdmin } from "@/lib/auth";
 import { formatoNumero } from "@/lib/formato";
-import { SincronizacionManual } from "@/components/sincronizacion-manual";
+import { ActualizarAhora, useBuzonActualizacion } from "@/components/sincronizacion-manual";
+import { MotorPcTitular } from "@/components/motor-pc-titular";
 import { PanelMotorSombra } from "@/components/panel-motor-sombra";
 import type { CargaResultado } from "@/lib/types";
 
@@ -19,6 +20,9 @@ export default function CargarPage() {
   useEffect(() => {
     if (!getEsAdmin()) router.replace("/");
   }, [router]);
+  // "Actualizar ahora" y "Actualizar motor" pasan por el mismo buzon y no puede haber
+  // dos solicitudes vivas: las dos tarjetas leen el mismo estado.
+  const buzon = useBuzonActualizacion();
   const [file, setFile] = useState<File | null>(null);
   const [cargando, setCargando] = useState(false);
   const [resultado, setResultado] = useState<CargaResultado | null>(null);
@@ -102,13 +106,16 @@ export default function CargarPage() {
             en vez de dejar datos viejos como buenos. En Fuentes de datos se ve qué archivo
             leyó cada día y de qué fecha era.
           </p>
-          <SincronizacionManual />
+          <ActualizarAhora buzon={buzon} />
           <p className="mt-3 text-[11.5px] text-ink-500">
             Log de cada corrida en{" "}
             <code className="font-mono">logs/motor_&lt;fecha&gt;.log</code> del PC del motor.
           </p>
         </CardContent>
       </Card>
+
+      {/* Que version del motor tiene el PC titular y el boton para actualizarlo. */}
+      <MotorPcTitular buzon={buzon} />
 
       {/* Subida manual: SOLO en modo local. En la nube se oculta para evitar que un
           Excel de la tabla base (sin medidas) pise los datos buenos por accidente. */}

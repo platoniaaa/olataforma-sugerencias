@@ -4,16 +4,22 @@
 //
 // El motor no corre en la nube -necesita los Excel, que viven en un PC de la empresa-,
 // asi que este boton NO recalcula: deja pedido el trabajo en la plataforma. Un agente
-// instalado en ese PC lo toma en menos de un minuto, corre el motor (~3 min) y reporta
-// el resultado, que es lo que esta tarjeta va mostrando.
+// instalado en ese PC lo toma en menos de un minuto, corre el motor (22 a 35 min en
+// las corridas de octubre) y reporta el resultado, que es lo que esta tarjeta muestra.
 //
 // Por eso el boton sirve desde cualquier equipo o telefono. Antes abria el protocolo
 // `sugerido://`, que solo funcionaba sentado frente al PC del administrador.
+//
+// Por el mismo buzon pasa "Actualizar motor" (components/motor-pc-titular.tsx, solo
+// admin). Nunca hay dos solicitudes vivas a la vez: mientras una esta pendiente o en
+// curso, el boton de la otra queda desactivado y dice por que. `useBuzonActualizacion`
+// es el estado comun; en /cargar lo comparten las dos tarjetas.
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { formatoFechaHora } from "@/lib/formato";
-import type { EstadoActualizacion } from "@/lib/types";
+import { cuando } from "@/lib/fuentes-datos";
+import type { EstadoActualizacion, TipoActualizacion } from "@/lib/types";
 
 function tiempoRelativo(iso: string | null): string {
   if (!iso) return "—";
@@ -27,17 +33,66 @@ function tiempoRelativo(iso: string | null): string {
   return `hace ${Math.floor(hs / 24)} d`;
 }
 
-function minutosDesde(iso: string | null): number {
+export function minutosDesde(iso: string | null): number {
   if (!iso) return 0;
   return Math.floor(Math.max(0, Date.now() - new Date(iso).getTime()) / 60000);
 }
 
-export function SincronizacionManual({ compacto = false }: { compacto?: boolean }) {
-  const [est, setEst] = useState<EstadoActualizacion | null>(null);
-  const [pidiendo, setPidiendo] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+/** El tipo de una solicitud. Una API anterior a "Actualizar motor" no lo manda: es un
+ *  recalculo, lo unico que sabia pedir. */
+export function tipoDe(est: EstadoActualizacion | null): TipoActualizacion {
+  return est?.tipo ?? "recalcular";
+}
 
-  const enMarcha = est?.estado === "pendiente" || est?.estado === "en_curso";
+/** "hoy a las 09:41", "ayer a las 18:02" (hora de Chile). */
+export function cuandoFue(iso: string | null): string {
+  return iso ? cuando(iso, new Date().toISOString()) : "";
+}
+
+/**
+ * Por que un boton esta desactivado: la otra solicitud sigue viva. El servidor
+ * respondera lo mismo con un 409; esto evita el clic perdido.
+ */
+export function textoBloqueo(viva: EstadoActualizacion): string {
+  // Las mismas palabras que el 409 del servidor (`_ocupado` en routers/actualizacion.py).
+  const motor = tipoDe(viva) === "actualizar_motor";
+  const estado = viva.estado === "pendiente" ? "esperando al computador del motor" : "en curso";
+  const desde = viva.creado_en
+    ? ` (${motor ? "pedida" : "pedido"} ${cuandoFue(viva.creado_en)})`
+    : "";
+  return motor
+    ? `Hay una actualización del motor ${estado}${desde}. Tarda 1 a 2 minutos: cuando ` +
+        "termine se puede recalcular."
+    : `Hay un recálculo ${estado}${desde}. Tarda entre 25 y 40 minutos: cuando termine ` +
+        "se puede actualizar el motor.";
+}
+
+export interface Buzon {
+  /** La ultima solicitud, de cualquier tipo (null mientras carga o si fallo la lectura). */
+  est: EstadoActualizacion | null;
+  /** La solicitud pendiente o en curso, si hay una. Bloquea pedir otra. */
+  viva: EstadoActualizacion | null;
+  /** La API ya distingue tipos. Si no, "Actualizar motor" se convertiria en un recalculo. */
+  conTipos: boolean;
+  /** Lo que se esta pidiendo en este momento (el POST todavia no vuelve). */
+  pidiendo: TipoActualizacion | null;
+  /** Por tipo: por que fallo el ultimo pedido (403, sin servidor...). */
+  error: Partial<Record<TipoActualizacion, string>>;
+  /** Por tipo: el 409 del servidor (habia otra solicitud viva). Se muestra mientras dura. */
+  rechazo: Partial<Record<TipoActualizacion, string>>;
+  /** Deja pedido el trabajo. true si el servidor lo acepto. */
+  pedir: (tipo: TipoActualizacion) => Promise<boolean>;
+}
+
+/** Estado del buzon y como pedir. Consulta cada 5 s solo mientras hay algo vivo. */
+export function useBuzonActualizacion(): Buzon {
+  const [est, setEst] = useState<EstadoActualizacion | null>(null);
+  const [pidiendo, setPidiendo] = useState<TipoActualizacion | null>(null);
+  const [error, setError] = useState<Buzon["error"]>({});
+  const [rechazo, setRechazo] = useState<Buzon["rechazo"]>({});
+
+  const viva = est && (est.estado === "pendiente" || est.estado === "en_curso") ? est : null;
+  const enMarcha = viva !== null;
 
   const cargar = useCallback(async () => {
     try {
@@ -48,7 +103,7 @@ export function SincronizacionManual({ compacto = false }: { compacto?: boolean 
   }, []);
 
   useEffect(() => {
-    cargar();
+    void cargar();
   }, [cargar]);
 
   // Solo se consulta seguido mientras hay algo en marcha: en reposo no tiene sentido
@@ -59,32 +114,65 @@ export function SincronizacionManual({ compacto = false }: { compacto?: boolean 
     return () => clearInterval(id);
   }, [enMarcha, cargar]);
 
-  const pedir = async () => {
-    setPidiendo(true);
-    setError(null);
-    try {
-      setEst(await api.solicitarActualizacion());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo pedir la actualización");
-    } finally {
-      setPidiendo(false);
-    }
-  };
+  const pedir = useCallback(
+    async (tipo: TipoActualizacion) => {
+      setPidiendo(tipo);
+      setError((e) => ({ ...e, [tipo]: undefined }));
+      setRechazo((r) => ({ ...r, [tipo]: undefined }));
+      try {
+        setEst(await api.solicitarActualizacion(tipo));
+        return true;
+      } catch (e) {
+        const mensaje = e instanceof Error ? e.message : "No se pudo pedir la actualización";
+        if ((e as { status?: number }).status === 409) {
+          setRechazo((r) => ({ ...r, [tipo]: mensaje }));
+        } else {
+          setError((prev) => ({ ...prev, [tipo]: mensaje }));
+        }
+        // Otra persona (u otra pestania) pudo pedir algo que esta no conocia: se lee
+        // el estado para mostrarlo y seguirlo.
+        void cargar();
+        return false;
+      } finally {
+        setPidiendo(null);
+      }
+    },
+    [cargar]
+  );
+
+  return { est, viva, conTipos: est !== null && "tipo" in est, pidiendo, error, rechazo, pedir };
+}
+
+/** "Actualizar ahora" con su propio estado. Es la de la portada. */
+export function SincronizacionManual({ compacto = false }: { compacto?: boolean }) {
+  const buzon = useBuzonActualizacion();
+  return <ActualizarAhora buzon={buzon} compacto={compacto} />;
+}
+
+/** "Actualizar ahora" sobre un buzon compartido (en /cargar, con "Actualizar motor"). */
+export function ActualizarAhora({ buzon, compacto = false }: { buzon: Buzon; compacto?: boolean }) {
+  const { est, viva, pidiendo } = buzon;
+  const mia = tipoDe(est) === "recalcular";
+  const enCursoMia = viva !== null && mia;
+  const bloqueada = viva !== null && !mia;
+  const rechazo = buzon.rechazo.recalcular;
+  const error = buzon.error.recalcular;
 
   const boton = (
     <button
       type="button"
-      onClick={pedir}
-      disabled={pidiendo || enMarcha}
+      onClick={() => void buzon.pedir("recalcular")}
+      disabled={pidiendo !== null || viva !== null}
+      aria-describedby={bloqueada ? "bloqueo-recalcular" : undefined}
       className="inline-flex items-center gap-2 rounded-sm bg-ink-900 px-4 py-2 text-[13px] font-semibold uppercase tracking-wider text-paper transition-colors hover:bg-accent-700 disabled:cursor-not-allowed disabled:opacity-60"
     >
-      {pidiendo || enMarcha ? (
+      {pidiendo === "recalcular" || enCursoMia ? (
         <>
-          <Loader2 size={14} className="animate-spin" /> Actualizando…
+          <Loader2 size={14} className="animate-spin" aria-hidden="true" /> Actualizando…
         </>
       ) : (
         <>
-          <RefreshCw size={14} /> Actualizar ahora
+          <RefreshCw size={14} aria-hidden="true" /> Actualizar ahora
         </>
       )}
     </button>
@@ -92,36 +180,51 @@ export function SincronizacionManual({ compacto = false }: { compacto?: boolean 
 
   const avisos = (
     <>
-      {est?.estado === "pendiente" && (
-        <p className="rounded-sm bg-brand-50 px-3 py-2 text-[12px] text-brand-800">
+      {enCursoMia && est?.estado === "pendiente" && (
+        <p role="status" className="rounded-sm bg-brand-50 px-3 py-2 text-[12px] text-brand-800">
           Pedido enviado. Esperando al computador que calcula el sugerido…
         </p>
       )}
 
-      {est?.estado === "en_curso" && (
-        <p className="rounded-sm bg-brand-50 px-3 py-2 text-[12px] text-brand-800">
-          Recalculando con los Excel de <b>Bases de datos</b>. Tarda unos 3 minutos
+      {enCursoMia && est?.estado === "en_curso" && (
+        <p role="status" className="rounded-sm bg-brand-50 px-3 py-2 text-[12px] text-brand-800">
+          Recalculando con los Excel de las carpetas de <b>Fuentes de datos</b>. Tarda entre
+          25 y 40 minutos
           {minutosDesde(est.creado_en) > 0 && ` (van ${minutosDesde(est.creado_en)})`}. Puedes
           cerrar esta página: el trabajo sigue igual.
         </p>
       )}
 
-      {est?.estado === "ok" && (
-        <p className="inline-flex items-start gap-1.5 rounded-sm bg-emerald-50 px-3 py-2 text-[12.5px] font-medium text-emerald-700">
-          <CheckCircle2 size={14} className="mt-px shrink-0" />
+      {/* La otra solicitud sigue viva: el texto del 409 si el servidor lo dio, o el
+          mismo motivo armado aca para no esperar al clic perdido. */}
+      {bloqueada && viva && (
+        <p
+          id="bloqueo-recalcular"
+          role="status"
+          className="rounded-sm bg-paper-100 px-3 py-2 text-[12px] text-ink-700"
+        >
+          {rechazo ?? textoBloqueo(viva)}
+        </p>
+      )}
+
+      {!viva && mia && est?.estado === "ok" && (
+        <p role="status" className="inline-flex items-start gap-1.5 rounded-sm bg-emerald-50 px-3 py-2 text-[12.5px] font-medium text-emerald-700">
+          <CheckCircle2 size={14} className="mt-px shrink-0" aria-hidden="true" />
           <span>Listo — el equipo ya ve los datos actualizados. {est.mensaje}</span>
         </p>
       )}
 
-      {(est?.estado === "error" || est?.estado === "expirada") && (
-        <p className="inline-flex items-start gap-1.5 rounded-sm bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
-          <AlertTriangle size={14} className="mt-px shrink-0" />
+      {!viva && mia && (est?.estado === "error" || est?.estado === "expirada") && (
+        <p role="alert" className="inline-flex items-start gap-1.5 rounded-sm bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+          <AlertTriangle size={14} className="mt-px shrink-0" aria-hidden="true" />
           <span>{est.mensaje ?? "La actualización no se pudo completar."}</span>
         </p>
       )}
 
       {error && (
-        <p className="rounded-sm bg-amber-50 px-3 py-2 text-[12px] text-amber-800">{error}</p>
+        <p role="alert" className="rounded-sm bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+          {error}
+        </p>
       )}
     </>
   );
@@ -144,7 +247,7 @@ export function SincronizacionManual({ compacto = false }: { compacto?: boolean 
             <span className="text-ink-500">sin registros aún</span>
           )}
         </span>
-        <div className="w-full empty:hidden">{avisos}</div>
+        <div className="w-full space-y-2 empty:hidden">{avisos}</div>
       </div>
     );
   }
@@ -156,7 +259,7 @@ export function SincronizacionManual({ compacto = false }: { compacto?: boolean 
         <p className="mt-1.5 text-[12.5px] text-ink-700">
           Si la tarea de las 09:30 no corrió, esto la ejecuta a mano: el motor recalcula
           con los Excel de las carpetas de <b>Fuentes de datos</b> y publica para todo el
-          equipo. Tarda unos 3 minutos.
+          equipo. Tarda entre 25 y 40 minutos.
         </p>
       </div>
 
@@ -177,8 +280,8 @@ export function SincronizacionManual({ compacto = false }: { compacto?: boolean 
       {avisos}
 
       <p className="text-[11px] text-ink-500">
-        El cálculo corre en el computador donde están los Excel. Si está apagado, el
-        pedido caduca y esta tarjeta lo avisa.
+        El cálculo corre en el computador donde están los Excel. Si está apagado o sin
+        sesión iniciada, el pedido caduca a los 5 minutos y esta tarjeta lo avisa.
       </p>
     </div>
   );

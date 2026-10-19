@@ -32,7 +32,9 @@ import type {
   SugeridoFiltros,
   RequerimientoResponse,
   SugeridoKpis,
+  SugeridoOpciones,
   SugeridoPage,
+  TipoActualizacion,
   Recurrente,
   RecurrenteCreate,
   VentasResponse,
@@ -79,6 +81,15 @@ function errorCargaSinConfirmar(): Error {
 /** Lo que se le dice a la persona cuando el servidor no contesta. */
 export const MENSAJE_SIN_SERVIDOR =
   "No se pudo conectar con el servidor. Puede estar reiniciándose: espera un minuto y vuelve a intentar.";
+
+/** Error de una solicitud al buzon del PC del motor, con el codigo HTTP (0 = sin
+ *  respuesta). La tarjeta distingue el 409: ya hay otra solicitud viva. */
+export class ErrorSolicitud extends Error {
+  constructor(public status: number, mensaje: string) {
+    super(mensaje);
+    this.name = "ErrorSolicitud";
+  }
+}
 
 // Cuánto se espera antes de cada reintento. Render (plan gratis) tarda hasta un
 // minuto en volver cuando se reinicia, y suma ~76 s en total.
@@ -254,6 +265,13 @@ export const api = {
     p.set("limit", String(opts.limit ?? 1000));
     if (opts.sort) p.set("sort", opts.sort);
     return getJSON(`/api/sugerido?${p.toString()}`);
+  },
+
+  /** Proveedores, marcas, tipos de origen, clases y sucursales distintos de TODO el
+   *  sugerido (con las sucursales del usuario). Para los desplegables: pocos KB, en
+   *  vez de bajar 5.000 filas y sacarlos de ahi (dejaba fuera a 57 de 142). */
+  async sugeridoOpciones(): Promise<SugeridoOpciones> {
+    return getJSON("/api/sugerido/opciones");
   },
 
   async kpis(f: SugeridoFiltros): Promise<SugeridoKpis> {
@@ -772,17 +790,44 @@ export const api = {
     return getJSON("/api/ultima-sincronizacion");
   },
 
-  /** Como va la ultima solicitud de "Actualizar ahora". Lo puede consultar cualquiera. */
+  /** Como va la ultima solicitud del buzon ("Actualizar ahora" o "Actualizar motor").
+   *  Lo puede consultar cualquiera. */
   async actualizacionEstado(): Promise<EstadoActualizacion> {
     return getJSON("/api/actualizacion/estado");
   },
 
-  /** Deja pedido el recalculo. No recalcula aca: lo toma el agente del PC con los Excel. */
-  async solicitarActualizacion(): Promise<EstadoActualizacion & { ya_en_curso: boolean }> {
-    const res = await req("/api/actualizacion/solicitar", { method: "POST" });
+  /**
+   * Deja pedido un trabajo al PC del motor. No hace nada aca: lo toma el agente.
+   * - recalcular ("Actualizar ahora") va SIN cuerpo, como siempre: lo entiende
+   *   cualquier version de la API.
+   * - actualizar_motor ("Actualizar motor", solo admin) manda el tipo.
+   * El error trae `status`: 409 = ya hay otra solicitud viva (el texto del servidor
+   * dice cual y desde que hora), 0 = el servidor no contesto.
+   */
+  async solicitarActualizacion(
+    tipo: TipoActualizacion = "recalcular"
+  ): Promise<EstadoActualizacion & { ya_en_curso: boolean }> {
+    const init: RequestInit =
+      tipo === "recalcular"
+        ? { method: "POST" }
+        : {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tipo }),
+          };
+    let res: Response;
+    try {
+      res = await req("/api/actualizacion/solicitar", init);
+    } catch (e) {
+      if (e instanceof TypeError) throw new ErrorSolicitud(0, MENSAJE_SIN_SERVIDOR);
+      throw e;
+    }
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail ?? "No se pudo pedir la actualización");
+      const porDefecto =
+        tipo === "actualizar_motor"
+          ? "No se pudo pedir la actualización del motor"
+          : "No se pudo pedir la actualización";
+      throw new ErrorSolicitud(res.status, await mensajeError(res, porDefecto));
     }
     return res.json();
   },
