@@ -181,21 +181,24 @@ export default function DashboardPage() {
       });
   }, []);
 
-  // Cargar catalogos una vez (sucursales + proveedores).
+  // Cargar catalogos una vez (sucursales + proveedores), cada uno por su lado: si
+  // falla uno, el otro igual llega.
   useEffect(() => {
-    (async () => {
-      try {
-        const sucs = await api.sucursales();
-        setSucursales(sucs);
-        // Proveedores: distinct de un fetch amplio sin filtro.
-        const todo = await api.sugerido({ solo_pedir: false }, { limit: 5000 });
-        const set = new Set<string>();
-        todo.items.forEach((r) => r.proveedor && set.add(r.proveedor));
-        setProveedores([...set].sort());
-      } catch {
+    api
+      .sucursales()
+      .then(setSucursales)
+      .catch(() => {
         /* el backend puede no estar arriba todavia */
-      }
-    })();
+      });
+    // Proveedores del modal de sugerencia manual ("Varios productos"): los distintos
+    // de TODO el sugerido, en pocos KB. Antes se sacaban de 5.000 filas (12 MB) que
+    // dejaban fuera a 57 de los 142 proveedores y ponian lenta la carga de la tabla.
+    api
+      .sugeridoOpciones()
+      .then((o) => setProveedores(o.proveedores))
+      .catch(() => {
+        /* el backend puede no estar arriba todavia */
+      });
   }, []);
 
   // Filas: dependen SOLO de los filtros server-side. Los de columna NO recargan las

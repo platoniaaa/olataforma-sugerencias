@@ -43,7 +43,9 @@ interface Props {
   onClose: () => void;
   onGuardado: () => void;
   sucursales: Sucursal[];
-  /** Lista de proveedores distintos (pestaña Varios productos). */
+  /** Lista de proveedores distintos (pestaña Varios productos). La portada la trae de
+   *  `GET /api/sugerido/opciones`: todos los del sugerido, no solo los de las filas
+   *  cargadas en la grilla. */
   proveedores?: string[];
   productoInicial?: string;
   sucursalInicial?: string;
