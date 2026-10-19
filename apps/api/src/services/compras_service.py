@@ -24,6 +24,9 @@ Lo que sigue igual que antes:
 """
 from __future__ import annotations
 
+from sqlalchemy import select
+
+from ..models import Sugerido
 from ..schemas import CarroProveedor, CarrosResponse, LineaCarro, SugeridoFiltros
 from . import sugerido_service
 
@@ -46,7 +49,22 @@ def _normalizar(texto: str | None) -> str:
     return sugerido_service._sin_tildes((texto or "").strip().upper())
 
 
-def _sintetica_pasa_filtros(fila: dict, proveedor: str, f: SugeridoFiltros) -> bool:
+def _ids_de_sucursales(db, nombres: list[str] | None) -> set[str]:
+    """Los `sucursal_id` de las sucursales elegidas en el filtro, normalizados.
+
+    El filtro llega con el nombre del BI y una fila fabricada trae el id tambien en
+    `nombre_sucursal`. Casi siempre difieren solo en tildes y mayusculas ("Curicó" /
+    "CURICO"), pero el CD no: "Centro Distribución Repuestos" es "CD REPUESTOS". Se
+    traducen con la misma tabla y la misma columna que filtra `_apply_filters`."""
+    if not nombres:
+        return set()
+    stmt = select(Sugerido.sucursal_id).where(Sugerido.nombre_sucursal.in_(nombres))
+    return {_normalizar(s) for s in db.scalars(stmt.distinct()).all()}
+
+
+def _sintetica_pasa_filtros(
+    fila: dict, proveedor: str, f: SugeridoFiltros, ids_elegidos: set[str]
+) -> bool:
     """Los filtros de la pantalla, aplicados a una fila fabricada.
 
     Las filas que vienen de la tabla ya pasaron el WHERE de `_apply_filters`. Las
@@ -54,6 +72,7 @@ def _sintetica_pasa_filtros(fila: dict, proveedor: str, f: SugeridoFiltros) -> b
     En la grilla se ven igual; en un carro, filtrar por un proveedor y recibir lineas
     de otro seria un error, asi que aca se filtran con lo que la fila trae despues de
     completarse (el proveedor puede venir de otra sucursal o de las OC historicas).
+    `ids_elegidos` son los `sucursal_id` de las sucursales del filtro.
     """
     if f.proveedor and f.proveedor.strip().lower() not in proveedor.lower():
         return False
@@ -66,7 +85,7 @@ def _sintetica_pasa_filtros(fila: dict, proveedor: str, f: SugeridoFiltros) -> b
     if f.abc and fila.get("clasificacion_abc") not in f.abc:
         return False
     if f.sucursales:
-        elegidas = {_normalizar(s) for s in f.sucursales}
+        elegidas = {_normalizar(s) for s in f.sucursales} | ids_elegidos
         if (_normalizar(fila.get("sucursal_id")) not in elegidas
                 and _normalizar(fila.get("nombre_sucursal")) not in elegidas):
             return False
@@ -84,6 +103,7 @@ def _mayor(actual, nuevo):
 
 def carros_por_proveedor(db, f: SugeridoFiltros) -> CarrosResponse:
     items, _total = sugerido_service.listar(db, f, page=1, limit=LIMITE_FILAS)
+    ids_elegidos = _ids_de_sucursales(db, f.sucursales)
 
     # (proveedor, producto) -> acumulado de la linea.
     lineas: dict[tuple[str, str], dict] = {}
@@ -97,7 +117,7 @@ def carros_por_proveedor(db, f: SugeridoFiltros) -> CarrosResponse:
             if not sintetica:
                 continue
             proveedor = SIN_PROVEEDOR
-        if sintetica and not _sintetica_pasa_filtros(fila, proveedor, f):
+        if sintetica and not _sintetica_pasa_filtros(fila, proveedor, f, ids_elegidos):
             continue
         costo = fila.get("costo_unitario")
         acc = lineas.setdefault(

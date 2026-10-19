@@ -186,6 +186,49 @@ def test_filtrar_por_proveedor_no_trae_filas_fabricadas_de_otro(client, db_sessi
     assert _cantidad(ford, "17 PAUTA1") == 20
 
 
+def test_manual_suelta_del_cd_aparece_al_filtrar_por_el_nombre_del_cd(
+    client, db_session, en_catalogo
+):
+    """El filtro de sucursal llega con el nombre del BI ("Centro Distribución
+    Repuestos") y la fila fabricada trae el id ("CD REPUESTOS") en los dos campos. Las
+    demas sucursales solo difieren en tildes y mayusculas; el CD tiene otro nombre, y la
+    linea desaparecia del carro aunque la grilla con el mismo filtro la mostraba."""
+    cd = "Centro Distribución Repuestos"
+    db_session.add(Sugerido(
+        tenant_id="curifor", producto="30 OTRO", descripcion="Otro",
+        sucursal_id="CD REPUESTOS", nombre_sucursal=cd, proveedor=FORD,
+        pedir="Si", pedir_flag="Si", total_sugerido_suc=2, sugerido_compra_neto=2,
+        costo_unitario=100,
+    ))
+    db_session.commit()
+    en_catalogo("99 SOLOCD", costo=500)
+    r = client.post(
+        "/api/sugerencias-manuales",
+        json={"producto": "99 SOLOCD", "sucursal_id": "CD REPUESTOS", "unidades": 4},
+    )
+    assert r.status_code in (200, 201), r.text
+
+    grilla = sum(
+        _neto(f) for f in _grilla(client, sucursal=[cd]) if f["producto"] == "99 SOLOCD"
+    )
+    assert grilla == 4
+    assert _cantidad(_carros(client, sucursal=[cd]), "99 SOLOCD") == 4
+    # Y no se cuela al filtrar por otra sucursal.
+    assert _cantidad(_carros(client, sucursal=["Linderos"]), "99 SOLOCD") == 0
+    # Lo mismo en la orden de compra en Excel con ese filtro.
+    r = client.post(
+        "/api/compras/export-excel",
+        json={"filtros": {"sucursales": [cd]}, "proveedor": "Sin proveedor asignado"},
+    )
+    assert r.status_code == 200
+    ws = load_workbook(io.BytesIO(r.content)).active
+    cantidades = {
+        ws.cell(row=fila, column=1).value: ws.cell(row=fila, column=4).value
+        for fila in range(7, ws.max_row + 1)
+    }
+    assert cantidades.get("99 SOLOCD") == 4
+
+
 def test_la_orden_de_compra_en_excel_trae_el_minimo_instock(client, db_session):
     _pauta(db_session, "17 PAUTA1")
     r = client.post(
