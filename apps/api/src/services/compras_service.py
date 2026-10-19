@@ -1,125 +1,134 @@
 """Agente comprador (Nivel 1): arma carros de compra agrupando el sugerido por proveedor.
 
 La cantidad a pedir a cada proveedor es la "compra neta" (lo que no se cubre con traslado
-desde el CD): coalesce(sugerido_compra_neto, total_sugerido_suc). Se suma por producto a
-traves de las sucursales -> una linea por producto por proveedor.
+desde el CD): sugerido_compra_neto, o total_sugerido_suc si el neto viene vacio. Se suma
+por producto a traves de las sucursales -> una linea por producto por proveedor.
+
+Las filas salen de `sugerido_service.listar`, la MISMA resolucion que usa la grilla del
+sugerido. Hasta oct-2026 este modulo tenia su propio SELECT sobre la tabla `sugerido` y
+solo le sumaba las manuales por JOIN: se perdia todo lo que `listar` agrega en Python.
+La orden de compra traia menos que la grilla en tres casos (auditoria del 17-10):
+
+- el minimo InStock (repuesto de pauta con minimo 5 y el modelo pide 3: carro 3);
+- una manual sobre una sucursal sin fila para ese producto, si el producto tenia fila
+  en OTRA sucursal (se miraba si el producto existia, no el par);
+- una manual sobre una fila con pedir = No (el "solo pedir" de la pantalla la sacaba).
+
+Lo que sigue igual que antes:
+- Una fila del sugerido del BI sin proveedor no entra a ningun carro.
+- Las filas que `listar` fabrica para pares sin fila en el BI (manual o InStock) van
+  al carro de su proveedor si `listar` lo encontro en otra fuente, y si no, a "Sin
+  proveedor asignado".
+- Las filas del catalogo que la busqueda agrega (sin sucursal ni cantidad) no son
+  compra.
 """
 from __future__ import annotations
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
-
-from ..models import ProductoCatalogo, Sugerido, SugerenciaManual
 from ..schemas import CarroProveedor, CarrosResponse, LineaCarro, SugeridoFiltros
-from .sugerido_service import _apply_filters, _no_vencida
+from . import sugerido_service
+
+SIN_PROVEEDOR = "Sin proveedor asignado"
+# Mismo tope que el Excel de la grilla (routers/sugerido.py): todas las filas.
+LIMITE_FILAS = 100_000
+# Filas que `listar` fabrica porque el par no tiene fila en el sugerido del BI.
+_SINTETICAS = ("manual", "instock")
 
 
-def _manuales_vigentes_subq():
-    """Suma de unidades manuales vigentes (no archivadas) por producto x sucursal."""
-    return (
-        select(
-            SugerenciaManual.producto.label("producto"),
-            SugerenciaManual.sucursal_id.label("sucursal_id"),
-            func.sum(SugerenciaManual.unidades).label("manual"),
+def _cantidad_compra(fila: dict) -> float:
+    """La compra neta de la fila, ya con las manuales y el minimo InStock sumados."""
+    neto = fila.get("sugerido_compra_neto")
+    if neto is None:
+        neto = fila.get("total_sugerido_suc")
+    return float(neto or 0)
+
+
+def _normalizar(texto: str | None) -> str:
+    return sugerido_service._sin_tildes((texto or "").strip().upper())
+
+
+def _sintetica_pasa_filtros(fila: dict, proveedor: str, f: SugeridoFiltros) -> bool:
+    """Los filtros de la pantalla, aplicados a una fila fabricada.
+
+    Las filas que vienen de la tabla ya pasaron el WHERE de `_apply_filters`. Las
+    fabricadas no: `listar` las agrega sin mirar proveedor, marca, clase ni sucursal.
+    En la grilla se ven igual; en un carro, filtrar por un proveedor y recibir lineas
+    de otro seria un error, asi que aca se filtran con lo que la fila trae despues de
+    completarse (el proveedor puede venir de otra sucursal o de las OC historicas).
+    """
+    if f.proveedor and f.proveedor.strip().lower() not in proveedor.lower():
+        return False
+    if f.proveedores and proveedor not in f.proveedores:
+        return False
+    if f.filtro1 and fila.get("filtro1_final") not in f.filtro1:
+        return False
+    if f.tipo_origen and fila.get("tipo_origen") not in f.tipo_origen:
+        return False
+    if f.abc and fila.get("clasificacion_abc") not in f.abc:
+        return False
+    if f.sucursales:
+        elegidas = {_normalizar(s) for s in f.sucursales}
+        if (_normalizar(fila.get("sucursal_id")) not in elegidas
+                and _normalizar(fila.get("nombre_sucursal")) not in elegidas):
+            return False
+    return True
+
+
+def _mayor(actual, nuevo):
+    """El mayor de los dos sin perder un valor por un None (como MAX() en SQL)."""
+    if actual is None:
+        return nuevo
+    if nuevo is None:
+        return actual
+    return max(actual, nuevo)
+
+
+def carros_por_proveedor(db, f: SugeridoFiltros) -> CarrosResponse:
+    items, _total = sugerido_service.listar(db, f, page=1, limit=LIMITE_FILAS)
+
+    # (proveedor, producto) -> acumulado de la linea.
+    lineas: dict[tuple[str, str], dict] = {}
+    for fila in items:
+        producto = fila.get("producto")
+        if not producto or not fila.get("sucursal_id"):
+            continue  # fila del catalogo: aparece al buscar, pero no es compra
+        proveedor = fila.get("proveedor")
+        sintetica = fila.get("origen") in _SINTETICAS
+        if not proveedor:
+            if not sintetica:
+                continue
+            proveedor = SIN_PROVEEDOR
+        if sintetica and not _sintetica_pasa_filtros(fila, proveedor, f):
+            continue
+        costo = fila.get("costo_unitario")
+        acc = lineas.setdefault(
+            (proveedor, producto),
+            {"descripcion": None, "abc": None, "costo": None, "cantidad": 0.0},
         )
-        .where(SugerenciaManual.archivada.is_(False), _no_vencida())
-        .group_by(SugerenciaManual.producto, SugerenciaManual.sucursal_id)
-        .subquery()
-    )
+        acc["cantidad"] += _cantidad_compra(fila)
+        acc["descripcion"] = _mayor(acc["descripcion"], fila.get("descripcion"))
+        acc["abc"] = _mayor(acc["abc"], fila.get("clasificacion_abc"))
+        acc["costo"] = _mayor(acc["costo"], float(costo) if costo is not None else None)
 
-
-def carros_por_proveedor(db: Session, f: SugeridoFiltros) -> CarrosResponse:
-    man = _manuales_vigentes_subq()
-    # Cantidad a comprar = compra neta del sistema + ajuste manual vigente del usuario.
-    cant = func.coalesce(Sugerido.sugerido_compra_neto, Sugerido.total_sugerido_suc, 0) + func.coalesce(
-        man.c.manual, 0
-    )
-    stmt = (
-        _apply_filters(
-            select(
-                Sugerido.proveedor.label("proveedor"),
-                Sugerido.producto.label("producto"),
-                func.max(Sugerido.descripcion).label("descripcion"),
-                func.max(Sugerido.clasificacion_abc).label("abc"),
-                func.max(Sugerido.costo_unitario).label("costo"),
-                func.sum(cant).label("cantidad"),
-            ),
-            f,
-        )
-        .join(
-            man,
-            (man.c.producto == Sugerido.producto) & (man.c.sucursal_id == Sugerido.sucursal_id),
-            isouter=True,
-        )
-        .where(Sugerido.proveedor.isnot(None))
-        .group_by(Sugerido.proveedor, Sugerido.producto)
-        .having(func.sum(cant) > 0)
-    )
-
-    # Agrupar en Python por proveedor.
     carros: dict[str, CarroProveedor] = {}
-    for row in db.execute(stmt).all():
-        cantidad = float(row.cantidad or 0)
-        costo = float(row.costo) if row.costo is not None else None
-        subtotal = cantidad * (costo or 0)
-        carro = carros.get(row.proveedor)
+    for (proveedor, producto), acc in lineas.items():
+        cantidad = acc["cantidad"]
+        if cantidad <= 0:
+            continue
+        costo = acc["costo"]
+        carro = carros.get(proveedor)
         if carro is None:
-            carro = CarroProveedor(proveedor=row.proveedor, lineas=[])
-            carros[row.proveedor] = carro
+            carro = CarroProveedor(proveedor=proveedor, lineas=[])
+            carros[proveedor] = carro
         carro.lineas.append(
             LineaCarro(
-                producto=row.producto,
-                descripcion=row.descripcion,
-                clasificacion_abc=row.abc,
+                producto=producto,
+                descripcion=acc["descripcion"],
+                clasificacion_abc=acc["abc"],
                 cantidad=cantidad,
                 costo_unitario=costo,
-                subtotal_clp=subtotal,
+                subtotal_clp=cantidad * (costo or 0),
             )
         )
-
-    # Manuales-puras: pares (producto, sucursal) que tienen sugerencia manual vigente
-    # pero NO existen en el sugerido del BI. Se agrupan bajo "Sin proveedor asignado"
-    # con el costo del catalogo si esta disponible. Solo aplica cuando no hay filtros
-    # de proveedor/marca/tipo_origen (en esos casos el comprador esta acotando).
-    if not (f.proveedor or f.filtro1 or f.tipo_origen or f.abc):
-        productos_sug = set(db.scalars(select(Sugerido.producto).distinct()).all())
-        manual_rows = db.execute(
-            select(
-                SugerenciaManual.producto,
-                func.sum(SugerenciaManual.unidades).label("manual"),
-            )
-            .where(SugerenciaManual.archivada.is_(False), _no_vencida())
-            .group_by(SugerenciaManual.producto)
-            .having(func.sum(SugerenciaManual.unidades) > 0)
-        ).all()
-        manual_solas = [(p, int(m)) for p, m in manual_rows if p not in productos_sug]
-        if manual_solas:
-            cat_map = {
-                c.producto: c
-                for c in db.scalars(
-                    select(ProductoCatalogo).where(
-                        ProductoCatalogo.producto.in_({p for p, _ in manual_solas})
-                    )
-                ).all()
-            }
-            proveedor_etq = "Sin proveedor asignado"
-            carro_sp = carros.get(proveedor_etq) or CarroProveedor(
-                proveedor=proveedor_etq, lineas=[]
-            )
-            carros[proveedor_etq] = carro_sp
-            for prod, cantidad in manual_solas:
-                cat = cat_map.get(prod)
-                costo = float(cat.costo) if cat and cat.costo else None
-                carro_sp.lineas.append(
-                    LineaCarro(
-                        producto=prod,
-                        descripcion=cat.glosa if cat else None,
-                        clasificacion_abc=None,
-                        cantidad=float(cantidad),
-                        costo_unitario=costo,
-                        subtotal_clp=float(cantidad) * (costo or 0),
-                    )
-                )
 
     # Totales y orden.
     lista: list[CarroProveedor] = []

@@ -583,13 +583,21 @@ def _aplicar_manuales_a_fila(d: dict, manual_unidades: int) -> None:
     """Suma una sugerencia manual vigente a la fila dict del sugerido del BI.
 
     Muta `d` in-place. Misma logica usada en `listar` y `listar_por_ids` para que
-    la grilla y el export devuelvan exactamente los mismos numeros.
+    la grilla y el export devuelvan exactamente los mismos numeros. Los carros de
+    compra salen de estas mismas filas, asi que tambien cuadran con ellas.
+
+    El neto de compra base se toma ANTES de sumar la manual al total, y un neto 0 es
+    un neto (todo lo cubre el traslado desde el CD), no un dato que falta: solo si
+    viene vacio se usa el total. Antes se leia `neto or total` despues de subir el
+    total, y una manual de 5 sobre una fila con neto 0 dejaba el neto en 10: el carro
+    de compra pedia el doble de lo cargado.
     """
     if not manual_unidades:
         return
     base_total = float(d.get("total_sugerido_suc") or 0)
+    neto = d.get("sugerido_compra_neto")
+    base_compra = float(neto) if neto is not None else base_total
     d["total_sugerido_suc"] = base_total + manual_unidades
-    base_compra = float(d.get("sugerido_compra_neto") or d.get("total_sugerido_suc") or 0)
     d["sugerido_compra_neto"] = base_compra + manual_unidades
     if d.get("costo_unitario"):
         d["total_valor_sugerido_clp"] = (
