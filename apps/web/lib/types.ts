@@ -856,6 +856,9 @@ export interface EstadoActualizacion {
   mensaje: string | null;
   /** "<sha corto> <rama>" del motor del PC que atendio la solicitud, si lo informo. */
   version?: string | null;
+  /** Nombre del PC (COMPUTERNAME) cuyo agente tomo la solicitud; null si nadie la tomo.
+   *  Una API anterior no lo manda. */
+  agente?: string | null;
   solicitado_por: string | null;
   creado_en: string | null;
   terminado_en: string | null;

@@ -7,14 +7,17 @@
  * - "Actualizar motor" pide confirmacion con el texto acordado; Cancelar no pide nada.
  *   Al confirmar pide `actualizar_motor` y sigue el estado como "Actualizar ahora".
  * - Las dos tarjetas leen el mismo buzon: lo vivo de una desactiva la otra y dice por
- *   que; un 409 se muestra con el mensaje del servidor.
+ *   que; un 409 se muestra con el mensaje del servidor mientras describa la solicitud
+ *   viva de ahora (no reaparece en una posterior).
  * - Con la API de antes (sin "tipo") el boton no se puede usar: esa API recalcularia.
- * - El resultado muestra el mensaje del PC y la version que quedo.
+ * - Si no se pudo leer el estado, lo dice y se reintenta solo.
+ * - El resultado muestra el mensaje del PC, la version que quedo y que PC lo atendio;
+ *   si no fue el titular, lo avisa.
  */
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import CargarPage from "@/app/cargar/page";
 import { TEXTO_CONFIRMAR_MOTOR } from "@/components/motor-pc-titular";
@@ -111,6 +114,10 @@ beforeEach(() => {
   mocks.esAdmin = true;
   mocks.actualizacionEstado.mockResolvedValue(ESTADO);
   mocks.panel.mockResolvedValue(panel());
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("Motor del PC titular", () => {
@@ -279,5 +286,155 @@ describe("Motor del PC titular", () => {
     const alerta = await within(tarjeta).findByRole("alert");
     expect(alerta).toHaveTextContent(motivo);
     expect(alerta).toHaveTextContent("Versión en ese PC: d3f556c arreglar-job-diario");
+  });
+
+  it("si no se pudo leer el estado, lo dice y se reintenta solo hasta poder", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    // Render se esta reiniciando: la primera lectura falla, la API vuelve despues.
+    mocks.actualizacionEstado.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    render(<CargarPage />);
+    const tarjeta = await tarjetaMotor();
+    const boton = within(tarjeta).getByRole("button", { name: "Actualizar motor" });
+    const aviso = await within(tarjeta).findByText(
+      "No se pudo leer el estado del PC del motor. Se reintenta solo."
+    );
+    expect(boton).toBeDisabled();
+    expect(boton).toHaveAccessibleDescription(aviso.textContent ?? "");
+    expect(mocks.actualizacionEstado).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    await waitFor(() => expect(boton).toBeEnabled());
+    expect(within(tarjeta).queryByText(/No se pudo leer el estado/)).not.toBeInTheDocument();
+    expect(mocks.actualizacionEstado).toHaveBeenCalledTimes(2);
+    // Leido el estado, en reposo no se sigue consultando.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(mocks.actualizacionEstado).toHaveBeenCalledTimes(2);
+  });
+
+  it("un 409 viejo no explica el bloqueo de una solicitud posterior", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    mocks.actualizacionEstado.mockResolvedValue(
+      estado({ id: "s0", tipo: "recalcular", estado: "ok", creado_en: haceMin(120), terminado_en: haceMin(90) })
+    );
+    mocks.solicitarActualizacion.mockRejectedValueOnce(Object.assign(new Error(MSG_409), { status: 409 }));
+    render(<CargarPage />);
+    const tarjeta = await tarjetaMotor();
+    const boton = within(tarjeta).getByRole("button", { name: "Actualizar motor" });
+    await waitFor(() => expect(boton).toBeEnabled());
+
+    // Otra persona pidio recalcular; esta pagina no lo sabia: 409.
+    mocks.actualizacionEstado.mockResolvedValue(
+      estado({ id: "s1", tipo: "recalcular", estado: "en_curso", creado_en: haceMin(5) })
+    );
+    fireEvent.click(boton);
+    const dialogo = screen.getByRole("dialog");
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Actualizar motor" }));
+    expect(await within(dialogo).findByRole("alert")).toHaveTextContent(MSG_409);
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Cancelar" }));
+    expect(within(tarjeta).getByText(MSG_409)).toBeInTheDocument();
+
+    // Ese recalculo termina (lo trae la consulta de cada 5 s).
+    mocks.actualizacionEstado.mockResolvedValue(
+      estado({ id: "s1", tipo: "recalcular", estado: "ok", creado_en: haceMin(40), terminado_en: haceMin(0) })
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    await waitFor(() => expect(within(tarjeta).queryByText(MSG_409)).not.toBeInTheDocument());
+
+    // Mas tarde, en la misma pestania, "Actualizar ahora": un recalculo NUEVO, pendiente.
+    const nuevo = estado({ id: "s2", tipo: "recalcular", estado: "pendiente", creado_en: haceMin(0) });
+    mocks.solicitarActualizacion.mockResolvedValueOnce({ ...nuevo, ya_en_curso: false });
+    mocks.actualizacionEstado.mockResolvedValue(nuevo);
+    fireEvent.click(screen.getByRole("button", { name: /Actualizar ahora/ }));
+
+    const motivo = await within(tarjeta).findByText(/^Hay un recálculo esperando al computador del motor/);
+    expect(motivo).toHaveTextContent(/\(pedido hoy a las \d\d:\d\d\)/);
+    expect(within(tarjeta).queryByText(MSG_409)).not.toBeInTheDocument();
+  });
+
+  it("el 409 de 'Actualizar ahora' tampoco reaparece en una solicitud posterior", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const msg409Motor =
+      "Ya hay una actualización del motor en curso (pedida a las 09:41). Tarda 1 a 2 minutos: " +
+      "espera a que termine para pedir otra cosa.";
+    mocks.solicitarActualizacion.mockRejectedValueOnce(
+      Object.assign(new Error(msg409Motor), { status: 409 })
+    );
+    render(<CargarPage />);
+    const tarjeta = await tarjetaMotor();
+    const ahora = screen.getByRole("button", { name: /Actualizar ahora/ });
+    await waitFor(() => expect(ahora).toBeEnabled());
+    mocks.actualizacionEstado.mockResolvedValue(
+      estado({ id: "s1", tipo: "actualizar_motor", estado: "en_curso", creado_en: haceMin(1) })
+    );
+    fireEvent.click(ahora);
+    expect(await screen.findByText(msg409Motor)).toBeInTheDocument();
+
+    // Termina esa actualizacion y el admin pide otra desde esta misma pagina.
+    mocks.actualizacionEstado.mockResolvedValue(
+      estado({ id: "s1", tipo: "actualizar_motor", estado: "ok", creado_en: haceMin(2), terminado_en: haceMin(0) })
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    await waitFor(() => expect(screen.queryByText(msg409Motor)).not.toBeInTheDocument());
+    const nueva = estado({ id: "s2", tipo: "actualizar_motor", estado: "pendiente", creado_en: haceMin(0) });
+    mocks.solicitarActualizacion.mockResolvedValueOnce({ ...nueva, ya_en_curso: false });
+    mocks.actualizacionEstado.mockResolvedValue(nueva);
+    const boton = within(tarjeta).getByRole("button", { name: "Actualizar motor" });
+    await waitFor(() => expect(boton).toBeEnabled());
+    fireEvent.click(boton);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Actualizar motor" }));
+
+    expect(
+      await screen.findByText(/^Hay una actualización del motor esperando al computador del motor/)
+    ).toBeInTheDocument();
+    expect(screen.queryByText(msg409Motor)).not.toBeInTheDocument();
+  });
+
+  it("dice que PC atendio la actualizacion", async () => {
+    mocks.actualizacionEstado.mockResolvedValue(
+      estado({
+        tipo: "actualizar_motor", estado: "ok", agente: "pc-titular",
+        mensaje: "Motor actualizado de d3f556c a e50c697 (4 cambios).",
+        version: "e50c697 arreglar-job-diario", creado_en: haceMin(3), terminado_en: haceMin(2),
+      })
+    );
+    render(<CargarPage />);
+    const tarjeta = await tarjetaMotor();
+    expect(await within(tarjeta).findByText("Lo atendió PC de la jefa.")).toBeInTheDocument();
+    expect(within(tarjeta).queryByText(/que no es el titular/)).not.toBeInTheDocument();
+  });
+
+  it("si la atendio un PC que no es el titular, avisa que el titular no cambio", async () => {
+    // El titular sigue siendo el notebook del duenio; el agente esta en el PC de la jefa.
+    const p = panel(corrida({ pc: "NB-DUENO", alias: "Notebook del dueño" }));
+    p.pc_titular = "NB-DUENO";
+    p.pc_titular_alias = "Notebook del dueño";
+    p.carpetas_por_pc = [
+      { pc: "PC-JEFA", alias: "PC de la jefa", es_titular: false, corrida_id: "c9", tipo: "prueba",
+        iniciada_en: "2026-10-16T11:00:00Z", carpetas: [] },
+    ];
+    mocks.panel.mockResolvedValue(p);
+    mocks.actualizacionEstado.mockResolvedValue(
+      estado({
+        tipo: "actualizar_motor", estado: "ok", agente: "PC-JEFA",
+        mensaje: "Motor actualizado de d3f556c a e50c697 (4 cambios).",
+        version: "e50c697 arreglar-job-diario", creado_en: haceMin(3), terminado_en: haceMin(2),
+      })
+    );
+    render(<CargarPage />);
+    const tarjeta = await tarjetaMotor();
+    expect(await within(tarjeta).findByText("Lo atendió PC de la jefa.")).toBeInTheDocument();
+    expect(
+      await within(tarjeta).findByText(
+        "Se actualizó PC de la jefa, que no es el titular. El titular sigue con d3f556c arreglar-job-diario."
+      )
+    ).toBeInTheDocument();
   });
 });

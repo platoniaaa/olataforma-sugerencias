@@ -183,6 +183,8 @@ def _payload(db: Session, s: SolicitudActualizacion | None, email: str) -> dict:
         "estado": s.estado if s else None,
         "mensaje": s.mensaje if s else None,
         "version": s.version if s else None,
+        # Que PC la tomo: puede no ser el titular (la tarjeta del motor lo avisa).
+        "agente": s.agente if s else None,
         "solicitado_por": s.solicitado_por if s else None,
         "creado_en": s.creado_en if s else None,
         "terminado_en": s.terminado_en if s else None,

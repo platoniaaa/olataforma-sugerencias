@@ -12,6 +12,9 @@
 //   cambios locales, y lo dice en el mensaje que se muestra aca.
 // - Nunca hay dos solicitudes vivas: mientras corre un recalculo el boton queda
 //   desactivado, y al reves.
+// - La toma el agente que pregunte primero, que puede no ser el del PC titular (el PC
+//   de la jefa tiene agente antes de pasar a ser titular). El resultado dice que PC la
+//   atendio y, si no fue el titular, que el titular sigue con su version.
 import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, CloudDownload, Cpu, Loader2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -19,13 +22,15 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { getEsAdmin } from "@/lib/auth";
 import { cuando, de, fuentesApi, nombrePc, type Panel } from "@/lib/fuentes-datos";
-import {
-  cuandoFue,
-  minutosDesde,
-  textoBloqueo,
-  tipoDe,
-  type Buzon,
-} from "@/components/sincronizacion-manual";
+import { cuandoFue, minutosDesde, tipoDe, type Buzon } from "@/components/sincronizacion-manual";
+
+/** El alias de un PC si el panel lo conoce (el titular o uno que ya corrio el motor). */
+function aliasDe(panel: Panel | null, pc: string): string | null {
+  if (!panel) return null;
+  const mismo = (otro: string | null | undefined) => !!otro && otro.toUpperCase() === pc.toUpperCase();
+  if (mismo(panel.pc_titular)) return panel.pc_titular_alias;
+  return panel.carpetas_por_pc.find((p) => mismo(p.pc))?.alias ?? null;
+}
 
 /** Lo que dice la confirmacion antes de pedir. */
 export const TEXTO_CONFIRMAR_MOTOR =
@@ -68,7 +73,7 @@ export function MotorPcTitular({ buzon }: { buzon: Buzon }) {
   // real es el 403 del servidor). /cargar ya manda al inicio a quien no lo es.
   if (!esAdmin) return null;
 
-  const { est, viva, pidiendo, conTipos } = buzon;
+  const { est, viva, pidiendo, conTipos, errorEstado } = buzon;
   const mia = tipoDe(est) === "actualizar_motor";
   const enCursoMia = viva !== null && mia;
   const bloqueada = viva !== null && !mia;
@@ -84,6 +89,18 @@ export function MotorPcTitular({ buzon }: { buzon: Buzon }) {
   const titular = panel?.pc_titular ?? null;
   const nombreTitular = titular ? nombrePc(titular, panel?.pc_titular_alias) : null;
   const ahora = panel?.ahora ?? new Date().toISOString();
+  // Que PC atendio la ultima actualizacion, y si era el titular. Sin el dato (API de
+  // antes) o sin titular conocido, no se puede decir que no lo fuera.
+  const agente = mia ? est?.agente ?? null : null;
+  const nombreAgente = agente ? nombrePc(agente, aliasDe(panel, agente)) : null;
+  const atendioOtroPc = !!agente && !!titular && agente.toUpperCase() !== titular.toUpperCase();
+  const motivoBoton = bloqueada
+    ? "bloqueo-motor"
+    : sinSoporte
+      ? "motor-sin-soporte"
+      : errorEstado
+        ? "motor-sin-estado"
+        : undefined;
 
   const abrir = () => {
     setIntentado(false);
@@ -163,7 +180,7 @@ export function MotorPcTitular({ buzon }: { buzon: Buzon }) {
           variant="outline"
           onClick={abrir}
           disabled={pidiendo !== null || viva !== null || !conTipos}
-          aria-describedby={bloqueada ? "bloqueo-motor" : sinSoporte ? "motor-sin-soporte" : undefined}
+          aria-describedby={motivoBoton}
         >
           {pidiendoMia || enCursoMia ? (
             <>
@@ -180,6 +197,14 @@ export function MotorPcTitular({ buzon }: { buzon: Buzon }) {
           <p id="motor-sin-soporte" className="rounded-sm bg-paper-100 px-3 py-2 text-[12px] text-ink-700">
             La plataforma todavía no tiene publicada esta función. Recarga la página en unos
             minutos.
+          </p>
+        )}
+
+        {/* La API no contesto al abrir la pagina (Render reiniciandose): sin estado no se
+            sabe si hay algo vivo, asi que el boton espera y dice por que. */}
+        {errorEstado && (
+          <p id="motor-sin-estado" role="status" className="rounded-sm bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+            No se pudo leer el estado del PC del motor. Se reintenta solo.
           </p>
         )}
 
@@ -204,7 +229,7 @@ export function MotorPcTitular({ buzon }: { buzon: Buzon }) {
             role="status"
             className="rounded-sm bg-paper-100 px-3 py-2 text-[12px] text-ink-700"
           >
-            {rechazo ?? textoBloqueo(viva)}
+            {buzon.motivoBloqueo("actualizar_motor", viva)}
           </p>
         )}
 
@@ -217,14 +242,23 @@ export function MotorPcTitular({ buzon }: { buzon: Buzon }) {
                 {est.terminado_en && ` Terminó ${cuandoFue(est.terminado_en)}.`}
               </span>
             </p>
+            {nombreAgente && <p>Lo atendió {nombreAgente}.</p>}
             {est.version && (
               <p>
                 Versión en ese PC: <b className="font-mono">{est.version}</b>
-                {est.version !== versionInstalada &&
+                {est.version !== versionInstalada && !atendioOtroPc &&
                   ". La versión instalada de arriba cambia con la próxima corrida del motor."}
               </p>
             )}
           </div>
+        )}
+
+        {/* La tomo el agente de otro PC: ese se actualizo, el titular no. */}
+        {!viva && mia && est?.estado === "ok" && atendioOtroPc && (
+          <p role="status" className="rounded-sm bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+            Se actualizó {nombreAgente}, que no es el titular. El titular sigue con{" "}
+            {versionInstalada ?? "la versión de su última corrida"}.
+          </p>
         )}
 
         {!viva && mia && (est?.estado === "error" || est?.estado === "expirada") && (
@@ -233,6 +267,7 @@ export function MotorPcTitular({ buzon }: { buzon: Buzon }) {
               <AlertTriangle size={14} className="mt-px shrink-0" aria-hidden="true" />
               <span>{est.mensaje ?? "No se pudo actualizar el motor."}</span>
             </p>
+            {nombreAgente && <p>Lo atendió {nombreAgente}.</p>}
             {est.version && (
               <p>
                 Versión en ese PC: <b className="font-mono">{est.version}</b>

@@ -195,6 +195,24 @@ def test_ciclo_de_actualizar_el_motor_con_su_version(client, agente):
     assert estado["mensaje"] == "Motor actualizado de 9f8e7d6 a a1b2c3d (3 cambios)"
 
 
+def test_el_estado_dice_que_pc_atendio_la_solicitud(client, agente):
+    """Lo toma el agente que pregunte primero, que puede no ser el del PC titular (el
+    PC de la jefa tiene agente antes de ser titular). La tarjeta lo tiene que poder
+    decir: si no, mostraba en verde, como del titular, una actualizacion de otro PC."""
+    pedido = _pedir(client, "actualizar_motor").json()
+    assert pedido["agente"] is None
+    assert client.get("/api/actualizacion/estado").json()["agente"] is None
+
+    client.get("/api/actualizacion/pendiente?agente=PC-JEFA", headers=agente)
+    assert client.get("/api/actualizacion/estado").json()["agente"] == "PC-JEFA"
+    client.post(
+        "/api/actualizacion/terminar",
+        json={"id": pedido["id"], "ok": True, "version": "e50c697 arreglar-job-diario"},
+        headers=agente,
+    )
+    assert client.get("/api/actualizacion/estado").json()["agente"] == "PC-JEFA"
+
+
 def test_terminar_sin_version_sigue_sirviendo(client, agente):
     """El agente que recalcula no manda version: no puede romperse por eso."""
     pedido = _pedir(client).json()

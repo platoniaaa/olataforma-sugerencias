@@ -74,31 +74,60 @@ export interface Buzon {
   viva: EstadoActualizacion | null;
   /** La API ya distingue tipos. Si no, "Actualizar motor" se convertiria en un recalculo. */
   conTipos: boolean;
+  /** No se pudo leer el estado y no hay ninguno leido: se reintenta solo cada 15 s. */
+  errorEstado: boolean;
   /** Lo que se esta pidiendo en este momento (el POST todavia no vuelve). */
   pidiendo: TipoActualizacion | null;
   /** Por tipo: por que fallo el ultimo pedido (403, sin servidor...). */
   error: Partial<Record<TipoActualizacion, string>>;
-  /** Por tipo: el 409 del servidor (habia otra solicitud viva). Se muestra mientras dura. */
+  /** Por tipo: el 409 del ultimo intento (habia otra solicitud viva). Lo muestra el
+   *  dialogo de ese intento. */
   rechazo: Partial<Record<TipoActualizacion, string>>;
+  /** Por que no se puede pedir `tipo` mientras dura `viva`. El texto del 409 solo si
+   *  habla de esa misma solicitud en su mismo estado; si no, se arma con la de ahora.
+   *  Un 409 viejo decia "en curso" y otra hora sobre una solicitud posterior. */
+  motivoBloqueo: (tipo: TipoActualizacion, viva: EstadoActualizacion) => string;
   /** Deja pedido el trabajo. true si el servidor lo acepto. */
   pedir: (tipo: TipoActualizacion) => Promise<boolean>;
+}
+
+/** Cada cuanto se reintenta leer el estado si la lectura fallo y no hay ninguno. */
+export const REINTENTO_ESTADO_MS = 15_000;
+
+/** La solicitud viva y su estado: un 409 vale mientras sigan siendo los mismos. */
+function claveViva(e: EstadoActualizacion | null): string | null {
+  return e && (e.estado === "pendiente" || e.estado === "en_curso") ? `${e.id}|${e.estado}` : null;
+}
+
+interface Rechazo {
+  texto: string;
+  /** `claveViva` del estado leido justo despues del 409 (null si no se pudo leer). */
+  de: string | null;
 }
 
 /** Estado del buzon y como pedir. Consulta cada 5 s solo mientras hay algo vivo. */
 export function useBuzonActualizacion(): Buzon {
   const [est, setEst] = useState<EstadoActualizacion | null>(null);
+  const [fallo, setFallo] = useState(false);
   const [pidiendo, setPidiendo] = useState<TipoActualizacion | null>(null);
   const [error, setError] = useState<Buzon["error"]>({});
-  const [rechazo, setRechazo] = useState<Buzon["rechazo"]>({});
+  const [rechazos, setRechazos] = useState<Partial<Record<TipoActualizacion, Rechazo>>>({});
 
   const viva = est && (est.estado === "pendiente" || est.estado === "en_curso") ? est : null;
   const enMarcha = viva !== null;
+  const errorEstado = est === null && fallo;
 
-  const cargar = useCallback(async () => {
+  const cargar = useCallback(async (): Promise<EstadoActualizacion | null> => {
     try {
-      setEst(await api.actualizacionEstado());
+      const leido = await api.actualizacionEstado();
+      setEst(leido);
+      setFallo(false);
+      return leido;
     } catch {
-      /* el backend puede estar despertando (cold start); se reintenta al siguiente ciclo */
+      // El backend puede estar reiniciandose (deploy, cold start). Con algo vivo lo
+      // repite la consulta de cada 5 s; sin nada leido, la de REINTENTO_ESTADO_MS.
+      setFallo(true);
+      return null;
     }
   }, []);
 
@@ -114,24 +143,33 @@ export function useBuzonActualizacion(): Buzon {
     return () => clearInterval(id);
   }, [enMarcha, cargar]);
 
+  // Si la primera lectura fallo no hay nada en marcha que la repita: sin esto,
+  // "Actualizar motor" quedaba desactivado sin motivo hasta recargar la pagina.
+  useEffect(() => {
+    if (!errorEstado) return;
+    const id = setInterval(cargar, REINTENTO_ESTADO_MS);
+    return () => clearInterval(id);
+  }, [errorEstado, cargar]);
+
   const pedir = useCallback(
     async (tipo: TipoActualizacion) => {
       setPidiendo(tipo);
       setError((e) => ({ ...e, [tipo]: undefined }));
-      setRechazo((r) => ({ ...r, [tipo]: undefined }));
+      setRechazos((r) => ({ ...r, [tipo]: undefined }));
       try {
         setEst(await api.solicitarActualizacion(tipo));
         return true;
       } catch (e) {
         const mensaje = e instanceof Error ? e.message : "No se pudo pedir la actualización";
-        if ((e as { status?: number }).status === 409) {
-          setRechazo((r) => ({ ...r, [tipo]: mensaje }));
-        } else {
-          setError((prev) => ({ ...prev, [tipo]: mensaje }));
-        }
         // Otra persona (u otra pestania) pudo pedir algo que esta no conocia: se lee
         // el estado para mostrarlo y seguirlo.
-        void cargar();
+        if ((e as { status?: number }).status === 409) {
+          const leido = await cargar();
+          setRechazos((r) => ({ ...r, [tipo]: { texto: mensaje, de: claveViva(leido) } }));
+        } else {
+          setError((prev) => ({ ...prev, [tipo]: mensaje }));
+          void cargar();
+        }
         return false;
       } finally {
         setPidiendo(null);
@@ -140,7 +178,19 @@ export function useBuzonActualizacion(): Buzon {
     [cargar]
   );
 
-  return { est, viva, conTipos: est !== null && "tipo" in est, pidiendo, error, rechazo, pedir };
+  const rechazo: Buzon["rechazo"] = {
+    recalcular: rechazos.recalcular?.texto,
+    actualizar_motor: rechazos.actualizar_motor?.texto,
+  };
+  const motivoBloqueo = (tipo: TipoActualizacion, v: EstadoActualizacion) => {
+    const r = rechazos[tipo];
+    return r && r.de !== null && r.de === claveViva(v) ? r.texto : textoBloqueo(v);
+  };
+
+  return {
+    est, viva, conTipos: est !== null && "tipo" in est, errorEstado, pidiendo, error, rechazo,
+    motivoBloqueo, pedir,
+  };
 }
 
 /** "Actualizar ahora" con su propio estado. Es la de la portada. */
@@ -155,7 +205,6 @@ export function ActualizarAhora({ buzon, compacto = false }: { buzon: Buzon; com
   const mia = tipoDe(est) === "recalcular";
   const enCursoMia = viva !== null && mia;
   const bloqueada = viva !== null && !mia;
-  const rechazo = buzon.rechazo.recalcular;
   const error = buzon.error.recalcular;
 
   const boton = (
@@ -195,15 +244,16 @@ export function ActualizarAhora({ buzon, compacto = false }: { buzon: Buzon; com
         </p>
       )}
 
-      {/* La otra solicitud sigue viva: el texto del 409 si el servidor lo dio, o el
-          mismo motivo armado aca para no esperar al clic perdido. */}
+      {/* La otra solicitud sigue viva: el texto del 409 si el servidor lo dio sobre
+          esta misma solicitud, o el mismo motivo armado aca para no esperar al clic
+          perdido. */}
       {bloqueada && viva && (
         <p
           id="bloqueo-recalcular"
           role="status"
           className="rounded-sm bg-paper-100 px-3 py-2 text-[12px] text-ink-700"
         >
-          {rechazo ?? textoBloqueo(viva)}
+          {buzon.motivoBloqueo("recalcular", viva)}
         </p>
       )}
 
