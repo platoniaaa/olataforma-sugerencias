@@ -24,7 +24,7 @@ Estados:
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, String, Text
+from sqlalchemy import DateTime, Index, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
@@ -51,8 +51,22 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# La condicion del indice de abajo: los mismos estados de ACTIVOS.
+_VIVA = text("estado IN ('pendiente', 'en_curso')")
+
+
 class SolicitudActualizacion(Base):
     __tablename__ = "solicitud_actualizacion"
+    __table_args__ = (
+        # Una sola solicitud viva por tenant, garantizado por la base. El control del
+        # router no basta: dos clics casi simultaneos pasan los dos antes de que el otro
+        # guarde. Indice parcial: sirve igual en Postgres y en SQLite (tests). En la
+        # tabla que ya existe en produccion lo crea la migracion de db.py.
+        Index(
+            "ux_solicitud_viva", "tenant_id", unique=True,
+            sqlite_where=_VIVA, postgresql_where=_VIVA,
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     tenant_id: Mapped[str] = mapped_column(String, nullable=False, default="curifor", index=True)

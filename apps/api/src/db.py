@@ -193,6 +193,10 @@ def create_all() -> None:
         # (boton "Actualizar motor"); las solicitudes de antes eran todas recalcular.
         "ALTER TABLE solicitud_actualizacion ADD COLUMN IF NOT EXISTS tipo VARCHAR NOT NULL DEFAULT 'recalcular'",
         "ALTER TABLE solicitud_actualizacion ADD COLUMN IF NOT EXISTS version VARCHAR",
+        # 2026-10: una sola solicitud viva a la vez, garantizado por la base (dos clics
+        # simultaneos pasaban los dos el control del router).
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_solicitud_viva ON solicitud_actualizacion "
+        "(tenant_id) WHERE estado IN ('pendiente', 'en_curso')",
     ]
     # SQLite NO soporta "ADD COLUMN IF NOT EXISTS" (error de sintaxis que se
     # tragaba el try, dejando bases locales viejas sin las columnas nuevas):

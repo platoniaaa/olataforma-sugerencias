@@ -274,6 +274,49 @@ def test_dos_clics_simultaneos_dejan_una_sola_solicitud(client, db_session, monk
     assert [s.id for s in vivas] == [otra.id]
 
 
+def test_dos_clics_simultaneos_aunque_la_otra_guarde_una_hora_posterior(
+    client, db_session, monkeypatch
+):
+    """`creado_en` se calcula en Python antes de escribir la fila: la que guarda
+    despues puede llevar una hora anterior. Con el desempate por `creado_en` las dos
+    se quedaban vivas (dos 200). Lo garantiza la base: una sola viva por tenant."""
+    otra = SolicitudActualizacion(
+        tenant_id="curifor", estado="pendiente", tipo="recalcular",
+        solicitado_por="otra@curifor.com",
+        creado_en=datetime.now(timezone.utc) + timedelta(seconds=1),
+    )
+    db_session.add(otra)
+    db_session.commit()
+    real = router_actualizacion._vivas
+    llamadas = {"n": 0}
+
+    def _vivas_con_carrera(db):
+        llamadas["n"] += 1
+        return [] if llamadas["n"] == 1 else real(db)
+
+    monkeypatch.setattr(router_actualizacion, "_vivas", _vivas_con_carrera)
+    r = _pedir(client, "actualizar_motor")
+    assert r.status_code == 409
+    assert "Ya hay un recálculo esperando al computador del motor" in r.json()["detail"]
+    db_session.expire_all()
+    vivas = db_session.query(SolicitudActualizacion).all()
+    assert [s.id for s in vivas] == [otra.id]
+
+
+def test_la_base_no_admite_dos_solicitudes_vivas(db_session):
+    """El indice unico parcial: aunque un camino del codigo se salte el control, la
+    base rechaza la segunda viva. Las terminadas no cuentan."""
+    from sqlalchemy.exc import IntegrityError
+
+    for estado in ("ok", "error", "expirada", "pendiente"):
+        db_session.add(SolicitudActualizacion(tenant_id="curifor", estado=estado))
+        db_session.commit()
+    db_session.add(SolicitudActualizacion(tenant_id="curifor", estado="en_curso"))
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+    db_session.rollback()
+
+
 def test_el_409_dice_si_el_pedido_ya_lo_tomo_el_pc(client, agente):
     _pedir(client, "actualizar_motor")
     assert "esperando al computador" in _pedir(client).json()["detail"]
@@ -365,3 +408,7 @@ def test_la_migracion_agrega_tipo_y_version_a_la_tabla_de_antes(monkeypatch):
         assert cx.execute(
             text("SELECT tipo FROM solicitud_actualizacion WHERE id = 'vieja'")
         ).scalar() == "recalcular"
+    # La tabla de produccion tampoco tiene el indice de "una sola viva": create_all()
+    # no agrega indices a una tabla que ya existe.
+    indices = {i["name"] for i in inspect(eng).get_indexes("solicitud_actualizacion")}
+    assert "ux_solicitud_viva" in indices

@@ -31,6 +31,7 @@ from typing import Literal
 from fastapi import APIRouter, Body, Depends, Header, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import desc, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -250,15 +251,22 @@ def solicitar(
         solicitado_por=email,
     )
     db.add(s)
-    db.commit()
-    # Dos clics casi simultaneos pueden pasar los dos el control de arriba (cada
-    # pedido corre en su hilo). Gana la mas antigua; la otra se retira con el mismo
-    # 409 que habria recibido un segundo despues.
-    vivas = _vivas(db)
-    if vivas and vivas[0].id != s.id:
-        db.delete(s)
+    try:
         db.commit()
-        raise HTTPException(status_code=409, detail=_ocupado(vivas[0]))
+    except IntegrityError:
+        # Dos clics casi simultaneos pueden pasar los dos el control de arriba (cada
+        # pedido corre en su hilo). La base admite una sola viva (indice
+        # ux_solicitud_viva): la que guarda segunda recibe el mismo 409 que habria
+        # recibido un segundo despues.
+        db.rollback()
+        vivas = _vivas(db)
+        raise HTTPException(
+            status_code=409,
+            detail=_ocupado(vivas[0]) if vivas else (
+                "Otra persona pidió algo al computador del motor en este mismo momento. "
+                "Revisa el estado y vuelve a intentar si hace falta."
+            ),
+        )
 
     auditoria_service.registrar(
         db,
