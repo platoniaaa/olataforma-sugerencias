@@ -51,9 +51,10 @@ export default function ComprasPage() {
             <ShoppingCart size={20} className="text-brand" /> Carros de compra
           </h1>
           <p className="text-[13px] text-slate-500">
-            El sugerido agrupado por proveedor, listo para ordenar. La cantidad es la
-            compra neta (descontando lo que se cubre con traslado desde el CD) más los
-            ajustes manuales vigentes.
+            El sugerido agrupado por proveedor, listo para ordenar. Sale de las mismas
+            filas que la grilla del sugerido: la compra neta (descontando lo que se cubre
+            con traslado desde el CD) más los ajustes manuales vigentes y el mínimo
+            InStock de los repuestos de pauta.
           </p>
         </div>
         {data && data.carros.length > 0 && (
