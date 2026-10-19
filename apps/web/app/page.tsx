@@ -110,6 +110,9 @@ export default function DashboardPage() {
 
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
   const [proveedores, setProveedores] = useState<string[]>([]);
+  // GET /api/sugerido/opciones fallo: un 404 de la API de antes mientras Render
+  // termina el deploy (Vercel publica primero), o un 502 mientras se reinicia.
+  const [sinOpciones, setSinOpciones] = useState(false);
 
   const vista = filtros.vista ?? "todas";
   const [colsVisibles, setColsVisibles] = useState<string[]>(() =>
@@ -197,7 +200,9 @@ export default function DashboardPage() {
       .sugeridoOpciones()
       .then((o) => setProveedores(o.proveedores))
       .catch(() => {
-        /* el backend puede no estar arriba todavia */
+        // Sin la lista, el modal usa los proveedores de las filas de la grilla (ver
+        // `proveedoresModal`): menos, pero no "Sin opciones".
+        setSinOpciones(true);
       });
   }, []);
 
@@ -258,6 +263,15 @@ export default function DashboardPage() {
     () => sucursales.map((s) => s.nombre ?? s.sucursal_id),
     [sucursales]
   );
+
+  // Respaldo si fallo la lista de opciones: los proveedores de las filas que la grilla
+  // ya bajo (no pide nada extra). Sin esto el desplegable quedaba en "Sin opciones".
+  const proveedoresModal = useMemo(() => {
+    if (!sinOpciones) return proveedores;
+    const vistos = new Set<string>();
+    rows.forEach((r) => r.proveedor && vistos.add(r.proveedor));
+    return [...vistos].sort();
+  }, [sinOpciones, proveedores, rows]);
 
   // Conteo a mostrar: con filtro de columna, el conteo EXACTO del backend (n_filas);
   // si no, el total del set server-side.
@@ -449,7 +463,7 @@ export default function DashboardPage() {
         onClose={() => setModalManual(false)}
         onGuardado={cargar}
         sucursales={sucursales}
-        proveedores={proveedores}
+        proveedores={proveedoresModal}
       />
     </div>
   );

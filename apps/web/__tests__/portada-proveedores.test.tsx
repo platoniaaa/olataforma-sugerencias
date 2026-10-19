@@ -101,10 +101,34 @@ describe("Portada: proveedores del modal de sugerencia manual", () => {
     await waitFor(() => expect(proveedoresDelModal()).toEqual(PROVEEDORES));
   });
 
-  it("si falla la lista de opciones, la pantalla sigue y el modal queda sin proveedores", async () => {
-    mocks.sugeridoOpciones.mockRejectedValue(new Error("Error 502 en /api/sugerido/opciones"));
+  it.each([
+    // La API de antes no tiene la ruta: pasa mientras Render termina el deploy y
+    // Vercel ya publico la web nueva.
+    ["404 (API de antes)", new Error("Error 404 en /api/sugerido/opciones")],
+    ["502 (Render reiniciandose)", new Error("Error 502 en /api/sugerido/opciones")],
+  ])(
+    "si falla la lista de opciones con %s, el modal usa los proveedores de la grilla",
+    async (_caso, falla) => {
+      mocks.sugeridoOpciones.mockRejectedValue(falla);
+      mocks.sugerido.mockResolvedValue({
+        items: [
+          { proveedor: "GILDEMEISTER" }, { proveedor: "AGUACOL SpA" }, { proveedor: null },
+          { proveedor: "GILDEMEISTER" },
+        ],
+        total: 4, page: 1, limit: 5000,
+      });
+      render(<DashboardPage />);
+      await waitFor(() => expect(proveedoresDelModal()).toEqual(["AGUACOL SpA", "GILDEMEISTER"]));
+      // No baja nada extra: la unica lectura de filas es la de la grilla.
+      expect(mocks.sugerido).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it("si la lista de opciones llega, manda ella aunque la grilla traiga menos", async () => {
+    mocks.sugerido.mockResolvedValue({
+      items: [{ proveedor: "GILDEMEISTER" }], total: 1, page: 1, limit: 5000,
+    });
     render(<DashboardPage />);
-    await waitFor(() => expect(mocks.sugerido).toHaveBeenCalled());
-    expect(proveedoresDelModal()).toEqual([]);
+    await waitFor(() => expect(proveedoresDelModal()).toEqual(PROVEEDORES));
   });
 });
