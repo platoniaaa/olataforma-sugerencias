@@ -644,6 +644,11 @@ def crear_recurrente(
         raise HTTPException(
             status_code=400, detail="Falta unidades, dias_inventario o stock_objetivo."
         )
+    # Antes de reemplazar nada: una fecha invalida no puede dejar cerrado lo que habia.
+    try:
+        recurrentes_service.validar_fecha_fin(payload.fecha_fin)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
     if payload.modo == "individual" and payload.reemplazar:
         recurrentes_service.reemplazar_par(db, payload.producto, payload.sucursal_id, email)
     rec = recurrentes_service.crear(db, payload, usuario_email=email)

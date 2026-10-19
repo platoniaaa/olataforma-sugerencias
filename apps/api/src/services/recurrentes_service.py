@@ -2,6 +2,15 @@
 
 Comportamiento "mantener vigente": cada vez que una regla se ejecuta, archiva la
 instancia que ella misma creó antes y crea una nueva, así no se acumulan.
+
+Una regla con fecha de término ("repetir cada N días hasta el X") deja de sumar al
+terminar el día X, hora de Chile. Hasta oct-2026 la regla se apagaba sola pero su
+última instancia quedaba vigente, sin vencimiento y sin que ninguna pestaña la
+mostrara: una de 15 u en TALCA seguía sumando en octubre por una regla que terminó
+el 07-06. Ahora (1) las instancias de una regla con fecha de término nacen con
+`expira_en` en el fin de ese día, así que dejan de sumar a la hora exacta, y (2)
+`procesar` archiva las instancias que sigan vigentes de reglas ya apagadas, que es
+lo que limpia las que se crearon antes de este cambio.
 """
 from __future__ import annotations
 
@@ -15,6 +24,7 @@ from ..config import get_settings
 from ..models import SugerenciaManual, SugerenciaRecurrente
 from ..schemas import SugeridoFiltros
 from . import auditoria_service
+from .calendario import hoy_chile, inicio_del_dia_chile
 from .sugerido_service import (
     pares_filtrados,
     unidades_desde_dias,
@@ -26,12 +36,23 @@ from .sugerido_service import (
 settings = get_settings()
 
 
-def _archivar_instancias(db: Session, rec_id: str) -> None:
-    db.execute(
+def _archivar_instancias(db: Session, rec_id: str) -> int:
+    res = db.execute(
         update(SugerenciaManual)
         .where(SugerenciaManual.recurrente_id == rec_id, SugerenciaManual.archivada.is_(False))
         .values(archivada=True)
     )
+    return res.rowcount or 0
+
+
+def fin_de_vigencia(fecha_fin: date | None) -> datetime | None:
+    """Cuando dejan de sumar las instancias de una regla que termina el `fecha_fin`.
+
+    La regla vale todo ese dia (hora de Chile) y deja de sumar al empezar el
+    siguiente: el mismo criterio que la fecha limite de una sugerencia manual."""
+    if not fecha_fin:
+        return None
+    return inicio_del_dia_chile(fecha_fin + timedelta(days=1))
 
 
 def _crear_instancias(db: Session, rec: SugerenciaRecurrente) -> int:
@@ -95,6 +116,12 @@ def _crear_instancias(db: Session, rec: SugerenciaRecurrente) -> int:
                         creado_por="recurrente", tenant_id=tenant, recurrente_id=rec.id,
                     )
                 )
+    # Con fecha de termino, cada instancia deja de sumar sola al terminar ese dia:
+    # no depende de que alguien (o el cron) la archive.
+    fin = fin_de_vigencia(rec.fecha_fin)
+    if fin is not None:
+        for s in nuevas:
+            s.expira_en = fin
     db.add_all(nuevas)
     return len(nuevas)
 
@@ -106,11 +133,26 @@ def _avanzar(rec: SugerenciaRecurrente, hoy: date) -> None:
         prox = prox + timedelta(days=rec.cada_dias)
     rec.proxima_ejecucion = prox
     if rec.fecha_fin and prox > rec.fecha_fin:
+        # No le toca otra ejecucion antes de terminar: se apaga. La instancia que se
+        # acaba de crear NO se archiva aca, a proposito: es la ultima y tiene que
+        # sumar hasta que termine el dia `fecha_fin` (vence sola por `expira_en`).
+        # Archivarla dejaria sin efecto la ultima ejecucion de toda regla, y a la
+        # regla que termina antes de su segundo ciclo sin ningun efecto. Pasado ese
+        # dia, `procesar` la archiva.
         rec.activa = False
+
+
+def validar_fecha_fin(fecha_fin: date | None) -> None:
+    """Una regla que termina en el pasado nacia apagada y, igual, dejaba una instancia
+    sumando sin que ninguna pestana la mostrara. Se compara con el dia de Chile: en
+    UTC, desde las 21:00 ya es manana y "hoy" se rechazaria."""
+    if fecha_fin and fecha_fin < hoy_chile():
+        raise ValueError("La fecha de término ya pasó: elige hoy o una fecha futura.")
 
 
 def crear(db: Session, payload, usuario_email: str | None = None) -> SugerenciaRecurrente:
     hoy = date.today()
+    validar_fecha_fin(payload.fecha_fin)
     filtros_json = None
     if payload.modo == "grupo":
         filtros_json = json.dumps((payload.filtros or SugeridoFiltros()).model_dump())
@@ -215,7 +257,9 @@ def procesar(db: Session, hoy: date | None = None) -> dict:
     procesadas = 0
     for rec in recs:
         if rec.fecha_fin and hoy > rec.fecha_fin:
+            # Termino: se apaga y lo que dejo vigente deja de sumar.
             rec.activa = False
+            _archivar_instancias(db, rec.id)
             continue
         n = _crear_instancias(db, rec)
         creadas += n
@@ -228,8 +272,50 @@ def procesar(db: Session, hoy: date | None = None) -> dict:
             unidades=rec.unidades, dias_inventario=rec.dias_inventario,
             detalle=f"Ejecucion automatica: {n} instancia(s) creada(s)",
         )
+    huerfanas = _archivar_de_reglas_apagadas(db, hoy)
     db.commit()
-    return {"recurrencias_procesadas": procesadas, "sugerencias_creadas": creadas}
+    return {
+        "recurrencias_procesadas": procesadas,
+        "sugerencias_creadas": creadas,
+        "instancias_de_reglas_apagadas": huerfanas,
+    }
+
+
+def _archivar_de_reglas_apagadas(db: Session, hoy: date) -> int:
+    """Archiva lo que sigue vigente de reglas que ya no corren.
+
+    Una regla apagada no recalcula su instancia, y como las instancias de una regla
+    no se cierran por OC (`oc_service`, a proposito: la regla se recalcula), nadie
+    mas la iba a sacar. Hasta oct-2026 quedaban asi las de toda regla que terminaba
+    por fecha: en produccion, 15 u en TALCA desde el 01-06.
+
+    Quedan fuera las que se apagaron porque no les toca otra ejecucion pero cuyo
+    ultimo dia (`fecha_fin`) es hoy o despues: su ultima instancia sigue valiendo
+    hasta el fin de ese dia. Pausar y eliminar ya archivan por su cuenta; aca se
+    repite sin efecto.
+    """
+    apagadas = select(SugerenciaRecurrente.id).where(
+        SugerenciaRecurrente.activa.is_(False),
+        or_(
+            SugerenciaRecurrente.fecha_fin.is_(None),
+            SugerenciaRecurrente.fecha_fin < hoy,
+        ),
+    )
+    n = db.execute(
+        update(SugerenciaManual)
+        .where(
+            SugerenciaManual.recurrente_id.in_(apagadas),
+            SugerenciaManual.archivada.is_(False),
+        )
+        .values(archivada=True)
+    ).rowcount or 0
+    if n:
+        auditoria_service.registrar(
+            db, accion="instancias_archivadas", entidad="sugerencia_manual",
+            usuario_email="cron",
+            detalle=f"{n} sugerencia(s) de reglas recurrentes que ya terminaron dejaron de sumar",
+        )
+    return n
 
 
 def archivar_expiradas(db: Session, ahora: datetime | None = None) -> int:
