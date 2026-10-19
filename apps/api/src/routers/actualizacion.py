@@ -193,11 +193,11 @@ def _payload(db: Session, s: SolicitudActualizacion | None, email: str) -> dict:
 def _ocupado(viva: SolicitudActualizacion) -> str:
     """Por que no se acepta otra solicitud: lo que dice la pantalla con el 409."""
     hora = a_chile(viva.creado_en).strftime("%H:%M") if viva.creado_en else None
-    desde = f" (pedido a las {hora})" if hora else ""
     if _tipo(viva) == ACTUALIZAR_MOTOR:
-        que = "una actualización del motor"
+        que, pedido = "una actualización del motor", "pedida"
     else:
-        que = "un recálculo"
+        que, pedido = "un recálculo", "pedido"
+    desde = f" ({pedido} a las {hora})" if hora else ""
     estado = "esperando al computador del motor" if viva.estado == PENDIENTE else "en curso"
     return (
         f"Ya hay {que} {estado}{desde}. {DURACION_TEXTO[_tipo(viva)]}: espera a que "

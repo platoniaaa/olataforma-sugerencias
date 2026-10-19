@@ -79,6 +79,10 @@ variable en Render.
 | Ver los accesos en Auditoria | `EMAILS_VER_ACCESOS` | `auth.requiere_ver_accesos` |
 | Pedir "Actualizar ahora" | `EMAILS_ACTUALIZAR` | `auth.puede_actualizar` |
 
+"Actualizar motor" (que el PC del motor baje la ultima version desde GitHub) es solo
+de admin: estar en `EMAILS_ACTUALIZAR` no alcanza, porque cambia el programa que
+calcula para todo el equipo (`routers/actualizacion.py`, `solicitar`).
+
 La API los devuelve en `permisos_especiales` con la misma comparacion (correo en
 minusculas contra la lista), sin el "o es admin": un admin ya los tiene todos.
 `tests/test_usuarios_pantalla.py` compara las dos evaluaciones para que no se

@@ -156,6 +156,21 @@ def test_sin_cuerpo_es_recalcular_como_antes(client, agente):
     assert client.get("/api/actualizacion/estado").json()["tipo"] == "recalcular"
 
 
+def test_cuerpo_vacio_o_sin_tipo_tambien_es_recalcular(client, agente):
+    r = client.post(
+        "/api/actualizacion/solicitar", headers={"Content-Type": "application/json"}
+    )
+    assert r.status_code == 200
+    assert r.json()["tipo"] == "recalcular"
+    client.get("/api/actualizacion/pendiente", headers=agente)
+    client.post(
+        "/api/actualizacion/terminar", json={"id": r.json()["id"], "ok": True}, headers=agente
+    )
+    r = client.post("/api/actualizacion/solicitar", json={})
+    assert r.status_code == 200
+    assert r.json()["tipo"] == "recalcular"
+
+
 def test_ciclo_de_actualizar_el_motor_con_su_version(client, agente):
     pedido = _pedir(client, "actualizar_motor")
     assert pedido.status_code == 200
@@ -264,7 +279,7 @@ def test_el_409_dice_si_el_pedido_ya_lo_tomo_el_pc(client, agente):
     assert "esperando al computador" in _pedir(client).json()["detail"]
     client.get("/api/actualizacion/pendiente", headers=agente)
     detalle = _pedir(client).json()["detail"]
-    assert "en curso" in detalle
+    assert "en curso (pedida a las " in detalle
     assert "Tarda 1 a 2 minutos" in detalle
 
 
