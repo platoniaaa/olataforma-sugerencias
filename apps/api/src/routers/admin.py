@@ -242,9 +242,17 @@ def cargar_instock(db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/cargar-sugerido")
-async def cargar_sugerido(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    """Recibe el Excel/CSV exportado del Power BI y reemplaza la tabla `sugerido`."""
-    content = await file.read()
+def cargar_sugerido(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Recibe el Excel/CSV exportado del Power BI y reemplaza la tabla `sugerido`.
+
+    `def` y no `async def`, a proposito: todo lo que hace es sincrono (leer el CSV,
+    18 mil filas de INSERT, la foto del dia). Como corrutina corria dentro del loop
+    de eventos y lo dejaba tomado entera la carga: ni /api/health ni ninguna
+    pantalla respondia durante los ~6 minutos que tarda en Render, todos los dias
+    hacia las 09:43 (auditoria del 17-10). Con `def` FastAPI la corre en su pool de
+    hilos y el resto de la API sigue atendiendo. Dos cargas encimadas las pone en
+    fila `excel_loader.CARGA_SUGERIDO`."""
+    content = file.file.read()
     if not content:
         raise HTTPException(status_code=400, detail="El archivo esta vacio")
     try:
@@ -265,7 +273,7 @@ async def cargar_sugerido(file: UploadFile = File(...), db: Session = Depends(ge
 
 
 @router.post("/motor/comparar")
-async def comparar_motor(
+def comparar_motor(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     email: str = Depends(requiere_admin),
@@ -273,8 +281,10 @@ async def comparar_motor(
     """Contrasta el sugerido que produjo el motor propio contra el vivo (Power BI).
 
     NO escribe en `sugerido`: solo compara y guarda el reporte. Asi se puede
-    validar el motor todos los dias sin exponer a los compradores a sus datos."""
-    content = await file.read()
+    validar el motor todos los dias sin exponer a los compradores a sus datos.
+    `def` por lo mismo que `cargar_sugerido`: es trabajo sincrono y como corrutina
+    congelaba la API mientras comparaba."""
+    content = file.file.read()
     if not content:
         raise HTTPException(status_code=400, detail="El archivo esta vacio")
     try:

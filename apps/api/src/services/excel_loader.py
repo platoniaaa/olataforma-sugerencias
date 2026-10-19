@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import csv
 import io
+import threading
 import unicodedata
 from typing import Any
 
@@ -19,6 +20,17 @@ from ..models import DimProducto, DimSucursal, Sugerido
 from . import config_modelo_service, nivel_maximo
 
 settings = get_settings()
+
+# Una carga a la vez. Mientras el endpoint era `async def` el loop bloqueado las
+# ponia en fila sin querer; corriendo en el pool de hilos, dos cargas que se pisan
+# (el reintento del motor sobre una carga que sigue en curso) hacen DELETE+INSERT
+# en paralelo y la tabla queda con las filas DOBLES: `sugerido` no tiene ninguna
+# restriccion de unicidad por (producto, sucursal). Reproducido en Postgres en la
+# auditoria del 17-10. La segunda espera a la primera y despues reemplaza, igual que
+# antes. RLock porque `cargar_sugerido` lo toma y llama a `persistir_filas`, que
+# tambien lo toma (lo usa directo la carga desde Power BI). La API corre con un
+# solo proceso en Render, asi que un candado del proceso alcanza.
+CARGA_SUGERIDO = threading.RLock()
 
 # --- Normalizacion de cabeceras -------------------------------------------------
 
@@ -317,8 +329,47 @@ def persistir_filas(
     """Reemplaza el snapshot de `sugerido` (y los catalogos) con las filas dadas.
 
     Cada fila es un dict {campo_modelo: valor_casteado}. Debe incluir al menos
-    `producto` y `sucursal_id`.
+    `producto` y `sucursal_id`. Una sola carga a la vez (ver `CARGA_SUGERIDO`).
     """
+    with CARGA_SUGERIDO:
+        return _persistir_filas(db, filas, detectadas, ignoradas)
+
+
+def _insertar_en_lote(db: Session, model, registros: list[dict]) -> None:
+    """INSERT de muchas filas que se compila UNA vez.
+
+    Antes se armaba `insert(model).values(lote)` por cada lote de ~365 filas: un
+    INSERT con miles de parametros que SQLAlchemy compilaba de cero cada vez (~1 s
+    por lote, la mayor parte de los 2 a 6 minutos que duraba la carga). Ahora va
+    un solo INSERT de una fila con la lista de valores; con RETURNING, SQLAlchemy
+    lo manda en lotes multi-fila ("insertmanyvalues") armando el texto sin volver
+    a compilar, y cuidando el tope de parametros del driver. Sin el RETURNING,
+    pg8000 haria un viaje a la base por fila. Medido con el CSV real del motor
+    (18.252 filas): 126 s -> 5 s en SQLite y 203 s -> 56 s en Postgres 16 con
+    pg8000 (local, el 19-10).
+
+    Todas las filas tienen que traer las MISMAS claves: el INSERT se arma con las
+    de la primera. Los servicios que enriquecen la carga (nivel_maximo, instock)
+    tocan solo algunas filas, asi que es facil dejar la lista dispareja sin darse
+    cuenta: ya rompio la tarea diaria del 31-jul al 03-ago-2026 con un 500 sin
+    detalle. Se nivela aca en vez de confiar en que cada servicio se acuerde.
+    """
+    if not registros:
+        return
+    claves = set().union(*(r.keys() for r in registros))
+    if any(len(r) != len(claves) for r in registros):
+        registros = [{k: r.get(k) for k in claves} for r in registros]
+    tabla = model.__table__
+    pk = list(tabla.primary_key.columns)
+    db.connection().execute(insert(tabla).returning(*pk), registros)
+
+
+def _persistir_filas(
+    db: Session,
+    filas: list[dict[str, Any]],
+    detectadas: list[str],
+    ignoradas: list[str],
+) -> dict:
     campos = set().union(*[f.keys() for f in filas]) if filas else set()
     if "producto" not in campos:
         raise ValueError("No se encontro la columna 'producto' en los datos.")
@@ -401,44 +452,15 @@ def persistir_filas(
             f"(${reposicion['clp_extra']:,.0f})."
         )
 
-    # Inserts en multi-fila (un INSERT con muchas VALUES por lote). Con pg8000 esto es
-    # MUCHO mas rapido que executemany (que iria fila por fila por la red). chunk=500
-    # mantiene los parametros por debajo del limite de Postgres (~65k).
-    def _bulk(model, registros: list[dict], chunk: int | None = None) -> None:
-        # El tope de parametros por sentencia lo pone el driver (Postgres ~65k,
-        # SQLite ~32k) y se gasta en columnas x filas. Con un lote fijo de 500 el
-        # margen se comia solo al agregar columnas: con 67 columnas son 33.500
-        # parametros y SQLite ya revienta con "too many SQL variables". Se calcula
-        # segun el ancho real de la fila en vez de confiar en un numero magico.
-        if chunk is None:
-            columnas = max((len(r) for r in registros), default=1)
-            chunk = max(1, 30_000 // max(columnas, 1))
-        for i in range(0, len(registros), chunk):
-            lote = registros[i : i + chunk]
-            if not lote:
-                continue
-            # Todas las filas del lote tienen que traer las MISMAS claves: el
-            # INSERT multi-fila arma un unico VALUES y SQLAlchemy no sabe que
-            # poner donde a una fila le falta una columna (CompileError). Los
-            # servicios que enriquecen la carga (nivel_maximo, instock) tocan
-            # solo algunas filas, asi que es facil dejar el lote disparejo sin
-            # darse cuenta: ya rompio la tarea diaria del 31-jul al 03-ago-2026
-            # con un 500 sin detalle. Se nivela aca en vez de confiar en que
-            # cada servicio se acuerde.
-            claves = set().union(*(r.keys() for r in lote))
-            if any(len(r) != len(claves) for r in lote):
-                lote = [{k: r.get(k) for k in claves} for r in lote]
-            db.execute(insert(model).values(lote))
-
     # Reemplazo total (snapshot) en una sola transaccion: si cualquier insert falla
     # (corte de red, timeout del pooler), el rollback conserva el snapshot anterior.
     try:
         db.execute(delete(Sugerido).where(Sugerido.tenant_id == tenant))
-        _bulk(Sugerido, registros_sugerido)
+        _insertar_en_lote(db, Sugerido, registros_sugerido)
         db.execute(delete(DimProducto).where(DimProducto.tenant_id == tenant))
         db.execute(delete(DimSucursal).where(DimSucursal.tenant_id == tenant))
-        _bulk(DimProducto, list(productos_vistos.values()))
-        _bulk(DimSucursal, list(sucursales_vistas.values()))
+        _insertar_en_lote(db, DimProducto, list(productos_vistos.values()))
+        _insertar_en_lote(db, DimSucursal, list(sucursales_vistas.values()))
         db.commit()
     except Exception:
         db.rollback()
@@ -492,11 +514,14 @@ def cargar_sugerido(db: Session, filename: str, content: bytes) -> dict:
 
     registros = [dict(zip(headers, raw)) for raw in data]
     filas, detectadas, ignoradas = procesar_registros(registros)
-    resumen = persistir_filas(db, filas, detectadas, ignoradas)
 
-    # Historia + alertas. Va DESPUES del commit de la carga y no propaga errores:
-    # un problema guardando la foto del dia no puede dejar la plataforma sin datos.
     from . import snapshot_service
 
-    resumen["post_carga"] = snapshot_service.post_carga(db)
+    # El candado cubre tambien la foto del dia: tambien es DELETE+INSERT, y dos
+    # cargas encimadas la dejarian doble.
+    with CARGA_SUGERIDO:
+        resumen = persistir_filas(db, filas, detectadas, ignoradas)
+        # Historia + alertas. Va DESPUES del commit de la carga y no propaga errores:
+        # un problema guardando la foto del dia no puede dejar la plataforma sin datos.
+        resumen["post_carga"] = snapshot_service.post_carga(db)
     return resumen

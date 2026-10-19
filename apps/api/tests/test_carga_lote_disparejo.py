@@ -45,12 +45,8 @@ def test_la_carga_soporta_un_lote_con_claves_dispares(db_session):
         {"tenant_id": "curifor", "producto": "LOTE-2", "sucursal_id": "LINDEROS",
          "total_sugerido_suc": 2.0},
     ]
-    # Se usa el mismo helper que la carga real.
-    from sqlalchemy import insert
-
-    claves = set().union(*(r.keys() for r in filas))
-    lote = [{k: r.get(k) for k in claves} for r in filas]
-    db_session.execute(insert(Sugerido).values(lote))
+    # Se usa el mismo helper que la carga real (sin nivelar antes: lo hace el).
+    excel_loader._insertar_en_lote(db_session, Sugerido, filas)
     db_session.commit()
 
     n = db_session.scalar(
