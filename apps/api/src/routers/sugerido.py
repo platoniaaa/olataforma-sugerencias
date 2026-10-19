@@ -22,6 +22,7 @@ from ..services import (
     excel_export,
     instock_service,
     margen,
+    operacion_pesada,
     snapshot_service,
     sugerido_service,
 )
@@ -189,12 +190,21 @@ def export_excel(
     # usuario aplico en las columnas del AG Grid). Sino, usamos filtros server-side.
     # La restriccion por usuario (permitidas) se aplica SIEMPRE del lado servidor,
     # ignorando lo que venga en el body.
-    if req.ids:
-        items = sugerido_service.listar_por_ids(db, req.ids, sucursales_permitidas=permitidas)
-    else:
-        req.filtros.sucursales_permitidas = permitidas
-        items, _ = sugerido_service.listar(db, req.filtros, page=1, limit=100000, sort=req.sort)
-    contenido = excel_export.generar_excel(items, req.columnas)
+    # La grilla completa sube el proceso ~130 MB: no se arma durante la carga del
+    # sugerido ni junto a otra descarga grande (ver services/operacion_pesada.py).
+    with operacion_pesada.descarga_pesada():
+        if req.ids:
+            items = sugerido_service.listar_por_ids(
+                db, req.ids, sucursales_permitidas=permitidas
+            )
+        else:
+            req.filtros.sucursales_permitidas = permitidas
+            items, _ = sugerido_service.listar(
+                db, req.filtros, page=1, limit=100000, sort=req.sort
+            )
+        contenido = excel_export.generar_excel(items, req.columnas)
+        del items  # se libera antes de ceder el turno, no al volver
+
     nombre = excel_export.nombre_archivo()
     return StreamingResponse(
         iter([contenido]),

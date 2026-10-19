@@ -214,7 +214,8 @@ async function descargar(path: string, body: unknown, fallbackNombre: string): P
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error("No se pudo generar el archivo");
+  // El motivo del servidor si lo dio: un 503 dice que se esta cargando el sugerido.
+  if (!res.ok) throw new Error(await mensajeError(res, "No se pudo generar el archivo"));
   const blob = await res.blob();
   const dispo = res.headers.get("Content-Disposition") ?? "";
   const match = dispo.match(/filename="?([^"]+)"?/);

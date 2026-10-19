@@ -34,6 +34,7 @@ from ..schemas.precios import (
     RubrosIn,
     VistosIn,
 )
+from ..services import operacion_pesada
 from ..services import politica_precio_service as politica
 from ..services import precios_carga_service as carga
 from ..services import precios_service
@@ -113,11 +114,16 @@ def exportar(
 ):
     """El archivo para bajar. `erp` es el Excel de 3 columnas que el ERP acepta
     (SKU | Precio_Optimo | Descuento); `completa` es la lista entera en CSV, para
-    revisar: en Excel tardaba 83 s y el navegador cortaba la descarga."""
-    contenido, nombre, n = precios_service.exportar(
-        db, solo_diferencias=solo_diferencias, registrar=registrar and formato == "erp",
-        usuario=email, formato=formato, lote_id=lote,
-    )
+    revisar: en Excel tardaba 83 s y el navegador cortaba la descarga.
+
+    Sube el proceso 190 a 230 MB: no se arma durante la carga del sugerido ni junto
+    a otra descarga grande (services/operacion_pesada.py). Si le toca esperar de
+    mas responde 503, que la web reintenta sola (`reqConReintentos`)."""
+    with operacion_pesada.descarga_pesada():
+        contenido, nombre, n = precios_service.exportar(
+            db, solo_diferencias=solo_diferencias, registrar=registrar and formato == "erp",
+            usuario=email, formato=formato, lote_id=lote,
+        )
     tipo = "text/csv; charset=utf-8" if nombre.endswith(".csv") else _XLSX
     return StreamingResponse(
         iter([contenido]), media_type=tipo,

@@ -15,6 +15,7 @@ from ..services import (
     lead_time_service,
     motor_comparacion,
     oc_service,
+    operacion_pesada,
     politica_precio_service,
     powerbi_desktop_loader,
     powerbi_loader,
@@ -251,24 +252,27 @@ def cargar_sugerido(file: UploadFile = File(...), db: Session = Depends(get_db))
     pantalla respondia durante los ~6 minutos que tarda en Render, todos los dias
     hacia las 09:43 (auditoria del 17-10). Con `def` FastAPI la corre en su pool de
     hilos y el resto de la API sigue atendiendo. Dos cargas encimadas las pone en
-    fila `excel_loader.CARGA_SUGERIDO`."""
-    content = file.file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="El archivo esta vacio")
-    try:
-        resumen = excel_loader.cargar_sugerido(db, file.filename or "", content)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    # Sello de "datos actualizados": lo lee la etiqueta de la web. Antes solo lo
-    # dejaba el job del Power BI, asi que con el motor la fecha quedaba congelada
-    # en la ultima corrida del BI aunque los datos fueran de hoy.
-    auditoria_service.registrar(
-        db,
-        accion="datos_sincronizados",
-        entidad="sistema",
-        detalle=f"Sugerido cargado: {resumen.get('filas_cargadas')} filas",
-    )
-    db.commit()
+    fila `excel_loader.CARGA_SUGERIDO`, y una descarga grande pedida durante la
+    carga espera su turno (`operacion_pesada`): las dos juntas pasaban los 512 MB
+    de Render."""
+    with operacion_pesada.carga_del_sugerido():
+        content = file.file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="El archivo esta vacio")
+        try:
+            resumen = excel_loader.cargar_sugerido(db, file.filename or "", content)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        # Sello de "datos actualizados": lo lee la etiqueta de la web. Antes solo lo
+        # dejaba el job del Power BI, asi que con el motor la fecha quedaba congelada
+        # en la ultima corrida del BI aunque los datos fueran de hoy.
+        auditoria_service.registrar(
+            db,
+            accion="datos_sincronizados",
+            entidad="sistema",
+            detalle=f"Sugerido cargado: {resumen.get('filas_cargadas')} filas",
+        )
+        db.commit()
     return resumen
 
 
