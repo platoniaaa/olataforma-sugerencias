@@ -227,9 +227,13 @@ redundante y vive en otro repositorio):
   `vence_7d` (vigente con el Hasta entre hoy y hoy + 7, ambos incluidos). Usa el marcador
   guardado, que el barrido deja al dia antes de consultar. Un valor que no existe da 422.
 - `GET /api/precios/resumen` suma `vigencias`: `{hoy, vigentes, programadas, vencidas,
-  vencen_7_dias, por_aplicar}`. `hoy` viene del servidor para que los atajos de la ficha (30/60/90
+  vencen_7_dias, por_aplicar, vencidas_sin_precio}`. `hoy` viene del servidor para que los atajos de la ficha (30/60/90
   dias, fin de mes) no dependan del reloj del navegador. `por_aplicar` son los vencimientos que
   el tope dejo pendientes. `pendientes_envio` ya incluye lo que acaba de vencer.
+  `vencidas_sin_precio` cuenta los productos con periodo vencido que quedaron SIN precio (falta
+  factor o costo, o NO PRODUCTO) y que ya se habian enviado al ERP: el archivo no lleva precios
+  vacios, asi que el ERP sigue con el de la campana y nadie se entera. La lista muestra un recuadro
+  «Vencidos sin precio» cuando hay alguno; hay que revisarlos a mano (ponerles factor o costo).
 - `POST /api/admin/precios/vigencias/aplicar` (admin; cuerpo opcional `{"previsualizar": true}`).
   Responde `{hoy, con_periodo, al_dia, pendientes, vencieron, comenzaron, recalculados,
   precios_cambiados, omitido, previsualizar, ejemplos}`, con hasta 20 ejemplos (`producto`,
@@ -358,7 +362,7 @@ que sigue) y el **Excel corto** para pocos productos (una plantilla de cinco col
   margen fijo `(1 - 1/f) x 100`), `Precio final` (precio fijo), `Obs`, `Congelar` y `No
   es producto` (Sí/No), y las nuevas `Precio fijo`, `Margen fijo %`, `Desde` y `Hasta`
   (ver "Precio fijo, margen y periodo"). Las otras 13 son de solo lectura y si se editan,
-  no se cargan: `Producto`, `Glosa` y `Rubro` vienen del maestro del ERP; `Costo`,
+  no se cargan (la vista previa del completo lo recuerda con una nota fija): `Producto`, `Glosa` y `Rubro` vienen del maestro del ERP; `Costo`,
   `Precio ERP`, `Stock` y `En transito` los pisa el feed de cada día; `Estado`, `Precio
   calculado` y los dos descuentos son el resultado de la regla y de la política (se
   cambian en `/precios/politicas`); `Vigencia` es el texto del estado del periodo ("Fijo
@@ -446,7 +450,8 @@ que sigue) y el **Excel corto** para pocos productos (una plantilla de cinco col
   1,1429 como 1,14 o 1,143: si el factor del archivo es el de la referencia redondeado
   a 2 o a 3 decimales (mitad hacia arriba, como Excel), no cuenta como edición. Se
   compara con el valor ya canónico, sin ceros finales: 1,4993 mostrado como `1,50`
-  llega como `1.5`. Costo conocido: escribir a propósito el valor redondeado tampoco
+  llega como `1.5`. El margen fijo (que se baja con 2 decimales) tiene la misma
+  tolerancia a 0 o 1 decimal: 33,33 que llega como 33,3 o 33 no es una edición. Costo conocido: escribir a propósito el valor redondeado tampoco
   se distingue; por eso la vista previa cuenta esos productos y los lista
   (`factor_redondeado_total`, `factor_redondeado`) en un aviso amarillo.
 - **Carga**: `POST /api/precios/carga/vista-previa` lee y compara sin guardar;

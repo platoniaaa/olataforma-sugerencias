@@ -476,14 +476,15 @@ def test_el_resumen_aplica_el_barrido_sube_los_pendientes_y_trae_el_bloque_vigen
     r = client.get("/api/precios/resumen").json()
     assert r["pendientes_envio"] == 0
     assert r["vigencias"] == {"hoy": "2026-10-20", "vigentes": 1, "programadas": 0, "vencidas": 0,
-                              "vencen_7_dias": 1, "por_aplicar": 0}
+                              "vencen_7_dias": 1, "por_aplicar": 0,
+                              "vencidas_sin_precio": 0}
     reloj(_dias(3))
 
     r = client.get("/api/precios/resumen").json()
 
     assert r["pendientes_envio"] == 1                    # vuelve a la regla y el ERP no lo sabe
     assert r["vigencias"] == {"hoy": "2026-10-23", "vigentes": 0, "programadas": 0, "vencidas": 1,
-                              "vencen_7_dias": 0, "por_aplicar": 0}
+                              "vencen_7_dias": 0, "por_aplicar": 0, "vencidas_sin_precio": 0}
     assert r["por_estado"].get("FIJO") == 1              # solo 13 BBB2, el permanente
 
 
@@ -686,14 +687,36 @@ def test_el_resumen_cuenta_cada_estado_y_los_que_vencen_pronto(client, escenario
     v = client.get("/api/precios/resumen").json()["vigencias"]
 
     assert v == {"hoy": "2026-10-22", "vigentes": 5, "programadas": 1, "vencidas": 1,
-                 "vencen_7_dias": 3, "por_aplicar": 0}
+                 "vencen_7_dias": 3, "por_aplicar": 0, "vencidas_sin_precio": 0}
 
 
 def test_el_resumen_sin_periodos_trae_el_bloque_en_ceros(client, lista, reloj):
     v = client.get("/api/precios/resumen").json()["vigencias"]
 
     assert v == {"hoy": "2026-10-20", "vigentes": 0, "programadas": 0, "vencidas": 0,
-                 "vencen_7_dias": 0, "por_aplicar": 0}
+                 "vencen_7_dias": 0, "por_aplicar": 0, "vencidas_sin_precio": 0}
+
+
+def test_un_vencido_que_queda_sin_precio_y_ya_se_envio_aparece_en_el_resumen(client, lista, reloj):
+    # Sin factor ni regla, al vencer el precio fijo el producto queda SIN precio y el archivo del ERP
+    # (que no lleva precios vacios) ya no lo manda: el ERP seguiria con el de la campana.
+    db = lista
+    _nuevo(db, "71 SINP")
+    _fijo(db, "71 SINP", hasta=_dias(2))
+    db.add(PrecioEnvio(tenant_id="curifor", producto="71 SINP", precio=990.0, costo=10000.0,
+                       lote_id="L1", enviado_por="test"))
+    p = db.query(PrecioProducto).filter_by(producto="71 SINP").one()
+    p.costo = None                       # la regla ya no puede calcular
+    db.commit()
+    reloj(_dias(3))                      # el Hasta paso ayer
+
+    svc.aplicar_vigencias(db)
+    v = client.get("/api/precios/resumen").json()["vigencias"]
+
+    db.expire_all()
+    p = db.query(PrecioProducto).filter_by(producto="71 SINP").one()
+    assert p.precio_final is None
+    assert v["vencidas_sin_precio"] == 1
 
 
 # =========================================================== 5. el endpoint admin

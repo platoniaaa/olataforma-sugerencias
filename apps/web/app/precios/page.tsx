@@ -264,6 +264,12 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
                  activo={porRevisar}
                  deshabilitado={!porRevisar && resumen.vigencias.vencen_7_dias === 0 && resumen.vigencias.vencidas === 0} />
           )}
+          {(resumen.vigencias?.vencidas_sin_precio ?? 0) > 0 && resumen.vigencias && (
+            // Al vencer, el producto quedo sin precio (falta factor o costo): el archivo del ERP no lo
+            // manda y el ERP seguiria con el precio de la campana. Hay que revisarlo a mano.
+            <Kpi etiqueta="Vencidos sin precio" valor={formatoNumero(resumen.vigencias.vencidas_sin_precio ?? 0)}
+                 nota="el ERP sigue con el precio de la campaña" destacar />
+          )}
           <Kpi etiqueta="Último recálculo" valor={resumen.ultimo_recalculo ? formatoFechaHora(resumen.ultimo_recalculo) : "—"} />
         </div>
       )}

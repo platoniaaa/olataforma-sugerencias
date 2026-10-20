@@ -100,6 +100,25 @@ describe("recuadro «Vencen en 7 días»", () => {
     expect(recuadro).toHaveTextContent("Clic para filtrar");
   });
 
+  it("avisa los vencidos que quedaron sin precio y el ERP sigue con el de la campaña", async () => {
+    mocks.resumen.mockResolvedValue({
+      ...RESUMEN, vigencias: vigencias({ vigentes: 1, vencidas: 2, vencidas_sin_precio: 2 }),
+    });
+    await abrir();
+
+    const aviso = (await screen.findByText("Vencidos sin precio")).closest("div, button") as HTMLElement;
+    expect(aviso).toHaveTextContent("2");
+    expect(aviso).toHaveTextContent("el ERP sigue con el precio de la campaña");
+  });
+
+  it("sin vencidos sin precio no muestra ese recuadro", async () => {
+    mocks.resumen.mockResolvedValue({ ...RESUMEN, vigencias: vigencias({ vigentes: 12, vencidas: 2, vencen_7_dias: 3 }) });
+    await abrir();
+
+    await screen.findByText("Vencen en 7 días");
+    expect(screen.queryByText("Vencidos sin precio")).not.toBeInTheDocument();
+  });
+
   it("un clic filtra lo que vence pronto y lo ya vencido; otro clic lo quita", async () => {
     mocks.resumen.mockResolvedValue({ ...RESUMEN, vigencias: vigencias({ vigentes: 12, vencidas: 2, vencen_7_dias: 3 }) });
     await abrir();

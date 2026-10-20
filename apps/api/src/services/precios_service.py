@@ -1158,10 +1158,21 @@ def _resumen_vigencias(db: Session, hoy: date) -> dict:
         select(func.count()).select_from(PrecioProducto)
         .where(PrecioProducto.tenant_id == tenant, _cond_vence_pronto(hoy))
     ) or 0
+    # Un periodo vencido que dejo al producto sin precio (sin factor o costo, o NO PRODUCTO) ya no
+    # entra al archivo del ERP, que no lleva precios vacios: el ERP conserva el de la campana
+    # y nadie se entera. Se cuentan aqui para que alguien los revise.
+    e = _sub_ultimo_envio(tenant)
+    sin_precio = db.scalar(
+        select(func.count()).select_from(PrecioProducto)
+        .join(e, e.c.producto == PrecioProducto.producto)
+        .where(PrecioProducto.tenant_id == tenant, PrecioProducto.vigencia_aplicada == VENCIDA,
+               PrecioProducto.precio_final.is_(None))
+    ) or 0
     return {
         "hoy": hoy.isoformat(), "vigentes": por.get(VIGENTE, 0),
         "programadas": por.get(PROGRAMADA, 0), "vencidas": por.get(VENCIDA, 0),
         "vencen_7_dias": vencen, "por_aplicar": vigencias_por_aplicar(db, hoy),
+        "vencidas_sin_precio": sin_precio,
     }
 
 
@@ -1547,7 +1558,8 @@ def resumen(db: Session) -> dict:
         return {"productos": 0, "con_cambios": 0, "por_estado": {}, "ultimo_recalculo": None,
                 "ultimo_envio": None, "overrides": 0, "pendientes_envio": 0,
                 "vigencias": {"hoy": hoy.isoformat(), "vigentes": 0, "programadas": 0,
-                              "vencidas": 0, "vencen_7_dias": 0, "por_aplicar": 0}}
+                              "vencidas": 0, "vencen_7_dias": 0, "por_aplicar": 0,
+                              "vencidas_sin_precio": 0}}
     return {
         "productos": total, "con_cambios": con_cambios,
         "por_estado": {k or "(sin estado)": v for k, v in por_estado.items()},

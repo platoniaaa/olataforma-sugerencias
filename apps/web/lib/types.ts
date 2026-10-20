@@ -1455,6 +1455,9 @@ export interface PrecioVigencias {
   vencen_7_dias: number;
   /** Productos cuyo precio todavia no refleja el cambio de estado de su periodo. */
   por_aplicar: number;
+  /** Periodos vencidos que dejaron al producto sin precio y que ya se habian enviado al ERP:
+   * el ERP conserva el de la campana porque el archivo no lleva precios vacios. */
+  vencidas_sin_precio?: number;
 }
 
 /** Lo que una persona decide sobre un precio. Solo viajan los campos que se tocan. */
