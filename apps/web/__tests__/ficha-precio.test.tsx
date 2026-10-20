@@ -805,6 +805,26 @@ describe("Ficha: guardar con vigencia", () => {
   });
 });
 
+describe("Ficha: si el detalle no carga", () => {
+  it("dice el error con un boton Reintentar en vez de quedarse en Cargando", async () => {
+    mocks.detalle.mockRejectedValueOnce(new Error("El servidor no responde."));
+    render(
+      <ModalProducto producto={CODIGO} puedeEditar tipos={["Liviano"]} onCerrar={vi.fn()}
+                     onGuardado={vi.fn().mockResolvedValue(undefined)} hoy={HOY} />,
+    );
+
+    const aviso = await screen.findByRole("alert");
+    expect(aviso).toHaveTextContent("El servidor no responde.");
+    expect(screen.queryByText("Cargando…")).not.toBeInTheDocument();
+
+    mocks.detalle.mockResolvedValue(SIN_DECISION);
+    fireEvent.click(screen.getByRole("button", { name: "Reintentar" }));
+
+    expect(await screen.findByText("Precio final")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
+
 describe("Ficha: errores de la vigencia", () => {
   it("Hasta antes del Desde: no llama a la API, dice el error junto al campo y enfoca el Hasta", async () => {
     const { onGuardado } = await abrir(SIN_DECISION, { hoy: HOY });
@@ -843,6 +863,17 @@ describe("Ficha: errores de la vigencia", () => {
     expect(screen.queryByText(/Ese Hasta ya pasó/)).not.toBeInTheDocument();
     // Lo que si dice es que ya vencio y como seguir.
     expect(screen.getByText(/Venció el 12-10-2026 y hoy sigue la regla/)).toBeInTheDocument();
+  });
+
+  it("tocar el Desde de un vencido y devolverlo a lo guardado no cuenta como cambio", async () => {
+    // La API compara contra lo guardado: si el valor vuelve a ser el mismo, no rechaza.
+    await abrir(FIJO_VENCIDO, { hoy: HOY });
+
+    fireEvent.change(desdeCampo(), { target: { value: "2026-10-01" } });
+    fireEvent.change(desdeCampo(), { target: { value: "" } });
+
+    expect(screen.queryByText(/Ese Hasta ya pasó/)).not.toBeInTheDocument();
+    expect(hastaCampo()).not.toHaveAttribute("aria-invalid");
   });
 
   it("cambiar el precio de un vencido sin renovar el Hasta se rechaza antes de ir al servidor", async () => {

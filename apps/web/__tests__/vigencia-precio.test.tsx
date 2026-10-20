@@ -59,6 +59,15 @@ describe("VigenciaPrecio: los campos", () => {
     expect(desde()).toHaveAccessibleDescription("Vacío: desde que guardes");
   });
 
+  it("la ayuda de los campos tiene contraste suficiente (ink-500 o más oscuro, no ink-400)", () => {
+    render(<Arnes />);
+
+    for (const ayuda of [screen.getByText("Vacío: desde que guardes"), screen.getByText(/Último día en que rige/)]) {
+      expect(ayuda.className).toContain("text-ink-500");
+      expect(ayuda.className).not.toContain("text-ink-400");
+    }
+  });
+
   it("escribir una fecha avisa el cambio con el campo que se tocó", () => {
     const onCambiar = vi.fn();
     render(

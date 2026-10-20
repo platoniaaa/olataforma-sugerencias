@@ -229,7 +229,8 @@ const PASOS: Paso[] = [
         </ol>
         <p>
           El <b>stock</b> que se mira es el de todas las bodegas de Curifor menos las de{" "}
-          <b>dañados, devolución y scrap</b>. En la ficha, el desglose por bodega muestra con
+          <b>dañados, devolución y scrap</b>, y menos el stock que el ERP no ubica en ninguna
+          bodega (la bodega sin nombre). En la ficha, el desglose por bodega muestra con
           tachado lo que no cuenta.
         </p>
         <p>
@@ -416,8 +417,9 @@ const PASOS: Paso[] = [
           no existen y los precios fijos que quedan sin fecha de término.
         </p>
         <Nota>
-          Una celda <b>vacía no cambia nada</b>. Para quitar un precio o una fecha escribe{" "}
-          <b>QUITAR</b>. Las fechas van como <span className="font-mono">dd-mm-aaaa</span>
+          En el <b>Excel corto</b>, una celda <b>vacía no cambia nada</b>: para quitar un precio
+          o una fecha escribe <b>QUITAR</b>. En el <b>Excel completo</b> es al revés: una celda{" "}
+          <b>vacía quita</b> la decisión de ese producto. Las fechas van como <span className="font-mono">dd-mm-aaaa</span>
           : 10/11/2026 es el 10 de noviembre.
         </Nota>
       </>

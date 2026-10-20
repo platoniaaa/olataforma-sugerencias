@@ -73,7 +73,7 @@ export function VigenciaPrecio({ desde, hasta, onCambiar, hoy, habilitado, motiv
             aria-invalid={errores.desde ? true : undefined}
             aria-describedby={describe(ids.desdeAyuda, errores.desde && ids.desdeError)}
           />
-          <p id={ids.desdeAyuda} className="mt-0.5 text-[11px] text-ink-400">Vacío: desde que guardes</p>
+          <p id={ids.desdeAyuda} className="mt-0.5 text-[11px] text-ink-500">Vacío: desde que guardes</p>
           {errores.desde && <ErrorCampo id={ids.desdeError}>{errores.desde}</ErrorCampo>}
         </div>
         <div>
@@ -84,7 +84,7 @@ export function VigenciaPrecio({ desde, hasta, onCambiar, hoy, habilitado, motiv
             aria-invalid={errores.hasta ? true : undefined}
             aria-describedby={describe(ids.hastaAyuda, errores.hasta && ids.hastaError, errores.aviso && ids.hastaAviso)}
           />
-          <p id={ids.hastaAyuda} className="mt-0.5 text-[11px] text-ink-400">
+          <p id={ids.hastaAyuda} className="mt-0.5 text-[11px] text-ink-500">
             Último día en que rige. Vacío: sin vencimiento
           </p>
           {errores.hasta && <ErrorCampo id={ids.hastaError}>{errores.hasta}</ErrorCampo>}

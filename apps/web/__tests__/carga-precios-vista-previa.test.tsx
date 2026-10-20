@@ -412,6 +412,12 @@ describe("VistaPrevia y el periodo (Desde y Hasta)", () => {
       .toBeInTheDocument();
     expect(screen.getByText(/por ejemplo Precio final o Factor/)).toBeInTheDocument();
   });
+
+  it("los tipos, procedencias y «No es producto» puestos en bloque se nombran en el aviso", () => {
+    dibujar({ ...BASE, fijan_total: 230, fijan: { tipo: 200, procedencia: 20, no_producto: 10 } });
+    expect(screen.getByText(/Esta carga deja 230 decisiones de precio nuevas: 200 tipos manuales, 20 procedencias manuales, 10 «No es producto»\./))
+      .toBeInTheDocument();
+  });
 });
 
 describe("inicioProgramado", () => {

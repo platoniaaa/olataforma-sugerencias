@@ -35,6 +35,9 @@ const FIJAN: Record<string, [string, string]> = {
   congelar: ["congelado", "congelados"],
   desde: ["fecha Desde", "fechas Desde"],
   hasta: ["fecha Hasta", "fechas Hasta"],
+  tipo: ["tipo manual", "tipos manuales"],
+  procedencia: ["procedencia manual", "procedencias manuales"],
+  no_producto: ["«No es producto»", "«No es producto»"],
 };
 
 const pesos = (n: number | null) => (n == null ? "sin precio" : `$${formatoNumero(n)}`);

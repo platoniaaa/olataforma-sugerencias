@@ -238,9 +238,14 @@ describe("Tutorial de la lista de precios", () => {
       fireEvent.click(screen.getByRole("button", { name: /Siguiente/i }));
       expect(screen.getByText(`Paso ${PASO_EXCEL} de ${TOTAL_PASOS}`)).toBeInTheDocument();
       expect(screen.getByRole("heading", { name: "Editar con Excel" })).toBeInTheDocument();
-      expect(screen.getByText(/Excel corto/)).toBeInTheDocument();
-      expect(screen.getByText(/Excel completo/)).toBeInTheDocument();
+      // Los dos modos aparecen en la lista y otra vez en la nota de las celdas vacías.
+      expect(screen.getAllByText(/Excel corto/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Excel completo/).length).toBeGreaterThan(0);
       expect(screen.getByText("QUITAR")).toBeInTheDocument();
+      // Vacío no cambia nada SOLO en el corto; en el completo quita la decisión.
+      const nota = screen.getByText("QUITAR").closest("div,p") as HTMLElement;
+      expect(nota.textContent).toMatch(/Excel corto.*vacía no cambia nada/s);
+      expect(nota.textContent).toMatch(/Excel completo.*vacía quita/s);
 
       // El recorte envuelve al boton real, con 8 px de aire por lado.
       const recorte = screen.getByTestId("recorrido-recorte");

@@ -11,10 +11,10 @@ describe("columnas de la lista de precios", () => {
     }
   });
 
-  it("la ayuda del stock dice la regla de bodegas de hoy: todas menos dañados, devolución y scrap", () => {
+  it("la ayuda del stock dice la regla de bodegas de hoy: todas menos dañados, devolución y scrap, y la bodega sin nombre", () => {
     const ayuda = COLUMNAS_PRECIOS.find((c) => c.key === "stock")?.ayuda ?? "";
     expect(ayuda).toMatch(/todas las bodegas de curifor/i);
-    for (const excluida of ["dañados", "devolución", "scrap"]) expect(ayuda).toContain(excluida);
+    for (const excluida of ["dañados", "devolución", "scrap", "sin nombre"]) expect(ayuda).toContain(excluida);
     // La regla anterior (solo las REAL) dejaba sin precio lo que si se vende.
     expect(ayuda).not.toMatch(/solo bodegas reales/i);
   });

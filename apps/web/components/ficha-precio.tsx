@@ -64,6 +64,7 @@ export function ModalProducto({ producto, puedeEditar, tipos, onCerrar, onGuarda
   const [intentoGuardar, setIntentoGuardar] = useState(false);
 
   const cargar = useCallback(async () => {
+    setError(null);
     try {
       const det = await api.precioDetalle(producto);
       setD(det);
@@ -103,10 +104,14 @@ export function ModalProducto({ producto, puedeEditar, tipos, onCerrar, onGuarda
     || (congelar && !d.congelar));
   // Congelar toma el precio de hoy: solo molesta un Desde futuro si es una decision nueva o
   // la persona lo acaba de tocar (lo ya guardado no se re-juzga).
-  const congelarNuevo = congelar && d !== null && (!d.congelar || desdeTocado);
+  // «Tocado» es «distinto de lo guardado»: la API compara contra lo guardado, así que escribir
+  // otro Desde y devolverlo al original no es un cambio y no debe exigir renovar el Hasta.
+  const desdeCambiado = desdeTocado && desde !== cargado.desde;
+  const hastaCambiado = hastaTocado && hasta !== cargado.hasta;
+  const congelarNuevo = congelar && d !== null && (!d.congelar || desdeCambiado);
   const errores: ErroresPeriodo = hayDecision
     ? validarPeriodo(periodo, hoyFicha, {
-      desdeTocado, hastaTocado, decisionCambiada, congelar: congelarNuevo, estricto: intentoGuardar,
+      desdeTocado: desdeCambiado, hastaTocado: hastaCambiado, decisionCambiada, congelar: congelarNuevo, estricto: intentoGuardar,
     })
     : SIN_ERRORES;
 
@@ -131,7 +136,7 @@ export function ModalProducto({ producto, puedeEditar, tipos, onCerrar, onGuarda
     // foco va ahi, en vez de un rechazo de la API que la persona tiene que ubicar.
     if (hayDecision) {
       const final = validarPeriodo(periodo, hoyFicha, {
-        desdeTocado, hastaTocado, decisionCambiada, congelar: congelarNuevo, estricto: true,
+        desdeTocado: desdeCambiado, hastaTocado: hastaCambiado, decisionCambiada, congelar: congelarNuevo, estricto: true,
       });
       if (hayErrores(final)) {
         setIntentoGuardar(true);
@@ -222,7 +227,12 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
 
   return (
     <Dialog open onClose={onCerrar} title={producto} description={d?.glosa ?? undefined} className="max-w-3xl">
-      {!d ? (
+      {!d && error ? (
+        <div role="alert" className="space-y-3">
+          <p className="text-sm text-rose-700">{error}</p>
+          <Button type="button" variant="outline" className="[@media(pointer:coarse)]:h-11" onClick={() => void cargar()}>Reintentar</Button>
+        </div>
+      ) : !d ? (
         <p className="flex items-center gap-2 text-sm text-ink-500"><Loader2 className="h-4 w-4 animate-spin" /> Cargando…</p>
       ) : (
         <div className="space-y-4">
