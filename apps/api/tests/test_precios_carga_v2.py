@@ -625,6 +625,19 @@ def test_un_margen_con_decimales_se_guarda_con_2_y_baja_y_sube_sin_cambios(clien
     assert _vista(client, filas)["a_cambiar"] == 0
 
 
+def test_un_margen_que_excel_redondeo_a_menos_decimales_no_cuenta_como_edicion(client, lista):
+    # Se baja "33,33"; con "disminuir decimales" Excel lo guarda como 33,3 (o 33). Nadie edito nada.
+    _poner(lista, "71 AAA1", margen_fijo=33.33333333)
+    _recalcular(lista)
+    base = _bajar(client)
+
+    for redondeado in ("33,3", "33"):
+        v = _vista(client, _editar(base, "71 AAA1", **{"Margen fijo %": redondeado}))
+        assert v["a_cambiar"] == 0, redondeado
+    # Y un margen realmente distinto sigue siendo una edicion.
+    assert _vista(client, _editar(base, "71 AAA1", **{"Margen fijo %": "33,4"}))["a_cambiar"] == 1
+
+
 def test_el_atajo_del_factor_sigue_dando_un_margen_y_la_columna_nueva_lo_muestra(client, lista):
     _subir(client, _a_csv(_editar(_bajar(client), "71 AAA1", Factor="2")), aplicar=True)
 

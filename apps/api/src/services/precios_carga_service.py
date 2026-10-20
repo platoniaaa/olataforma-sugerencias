@@ -479,11 +479,12 @@ def _igual(campo: str, valor: str, base: str, base_ansi: str = "") -> bool:
         return _h(valor) in (base, base_ansi)
     if campo in ("tipo", "procedencia"):
         return valor.casefold() == base.casefold()
-    return valor == base or (campo == "factor" and _redondeo_de_excel(valor, base))
+    return valor == base or (campo in ("factor", "margen") and _redondeo_de_excel(valor, base, campo))
 
 
-def _redondeo_de_excel(valor: str, base: str) -> bool:
-    """El factor del archivo es el de la referencia redondeado a 2 o 3 decimales.
+def _redondeo_de_excel(valor: str, base: str, campo: str = "factor") -> bool:
+    """El factor del archivo es el de la referencia redondeado a 2 o 3 decimales; el margen
+    (que se baja con 2) llega redondeado a 0 o 1 decimal.
 
     Excel con "disminuir decimales" guarda 1,1429 como 1,14 o 1,143: si lo unico que
     cambio es ese redondeo (mitad hacia arriba, como Excel y no como el round de Python),
@@ -494,7 +495,8 @@ def _redondeo_de_excel(valor: str, base: str) -> bool:
         return False
     try:
         v, b = Decimal(valor), Decimal(base)
-        return any(v == b.quantize(Decimal(1).scaleb(-k), rounding=ROUND_HALF_UP) for k in (2, 3))
+        decimales = (0, 1) if campo == "margen" else (2, 3)
+        return any(v == b.quantize(Decimal(1).scaleb(-k), rounding=ROUND_HALF_UP) for k in decimales)
     except (ArithmeticError, ValueError):
         return False
 
