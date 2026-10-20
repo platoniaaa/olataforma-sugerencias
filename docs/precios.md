@@ -193,6 +193,15 @@ corre cuando se aprieta el boton (el cron de GitHub que debia hacerlo falla con 
    cambio de verdad. Si otro barrido tiene el candado y no lo suelta en el plazo, responde
    `omitido` y no hace nada. Si fueran mas de 5.000 y mas de la mitad de la lista, `recalcular`
    lee la lista entera, como siempre hizo.
+
+   **El recalculo hecho a mano toma el mismo candado (20-10-2026).** El boton Recalcular y el
+   guardado de las politicas llaman a `recalcular_a_solas`: espera a que termine un barrido en
+   curso (segundos) y, mientras corre, el barrido de las lecturas se salta (`omitido`, sin
+   esperar los 20 s), porque el propio recalculo ya lleva al precio los periodos vencidos. Antes
+   el barrido podia correr en medio de un recalculo de 4-5 minutos: el recalculo medía contra la
+   foto vieja, repetia las filas de `precio_cambio` que el barrido ya habia dejado y pisaba
+   `cambios_pendientes`. Esto pasaba la primera mañana despues de cada vencimiento, no solo a
+   medianoche. `aplicar_vigencias` sigue llamando a `recalcular` (ya con el candado puesto).
 4. **Nunca escribe `precio_override`**: es solo de personas (`editado_por` y `editado_en` no se
    mueven), por eso el vencimiento tampoco mueve la huella de la carga por Excel.
 
@@ -466,7 +475,10 @@ que sigue) y el **Excel corto** para pocos productos (una plantilla de cinco col
   confirmación y el servidor exige `confirmar_masiva=true`. Ordenar una sola columna
   (Precio final, Factor, Precio fijo, Hasta) deja cada valor en la fila de otro producto,
   y cada fila parece una edición válida: la Referencia detecta el código, pero no que un
-  valor cambió de dueño. **Congelar = Sí cuenta** (clave `congelar`) desde el 20-10-2026:
+  valor cambió de dueño. **Tipo, Procedencia y «No es producto» también cuentan** (claves
+  `tipo`, `procedencia`, `no_producto`; solo cuando el valor es nuevo, no cuando se quita)
+  desde la revisión final del 20-10-2026: ordenar solo la columna Tipo dejaba miles de
+  tipos manuales (y por lo tanto de factores) sin ningún aviso. **Congelar = Sí cuenta** (clave `congelar`) desde el 20-10-2026:
   antes ordenar solo esa columna no disparaba ningún freno. La vista previa trae
   `fijan_total`, `fijan` (con las claves `precio_fijo`, `factor`, `congelar`, `desde` y
   `hasta`), `umbral_masiva`, y también `programados_total` (cuántos quedan con un Desde
@@ -621,6 +633,8 @@ sabado, domingo y feriado. Si el barrido falla y quedan vencimientos sin aplicar
 ERP responde 503 (la web reintenta sola) en vez de salir con un precio que ya no rige y quedar
 registrado como enviado; la lista completa y la editable salen igual. Los nombres de los archivos
 llevan la fecha de Chile: de 21:00 a 24:00 la del servidor, que corre en UTC, ya es la de manana.
+Esto cambia el nombre del archivo del ERP (antes usaba `date.today()` del servidor): una descarga
+entre las 21:00 y las 24:00 antes salia con la fecha del dia siguiente; el contenido no cambia.
 
 **Que pasa si la descarga se corta (09-10-2026).** El navegador manda `lote=<uuid>`
 en cada descarga del archivo del ERP. Si ese lote ya quedo registrado -el servidor
@@ -661,5 +675,10 @@ rompe nada; son mejoras que se pueden pedir despues:
   `scripts/precios/bodegas_tipo.py`; no hay una pantalla para editarla.
 - **Margen fijo y congelar en el Excel corto.** Solo se leen precio fijo, periodo y observacion;
   margen y congelar se cargan con el completo o desde la ficha.
+- **Costo de leer la lista con periodos (V2).** La consulta de candidatos del barrido
+  escanea `precio_producto` con un `OR` entre dos tablas y trae todas las filas con periodo para
+  clasificarlas en Python; `resumen()` la corre 2 o 3 veces. Medido en SQLite con 3.000 productos
+  con periodo: ~130 ms por consulta. No hay defecto funcional; si pesa, partirla en dos consultas
+  con indice parcial o resolver el estado esperado en SQL.
 - **Cambiar el ERP.** Nada de esto cambia el precio en el ERP por si solo: la plataforma recalcula,
   y el ERP se entera cuando alguien sube el archivo de «Solo diferencias».
