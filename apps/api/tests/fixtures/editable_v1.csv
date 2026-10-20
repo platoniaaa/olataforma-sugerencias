@@ -1,0 +1,4 @@
+﻿Producto;Glosa;Rubro;Tipo;Procedencia;Factor;Costo;Precio ERP;Precio calculado;Precio final;Estado;Stock;En transito;Ultima venta;Descuento máximo;Descuento+1;Obs;Congelar;No es producto;Referencia
+71  DOBLE;REPUESTO;71;Liviano;Nacional;1,78;1000;;1780;1780;OK;5;;;;;;No;No;27efb40f|Liviano|Nacional|1.78|1780|da39a3ee|da39a3ee|0|0|eed06f35
+71 AAA1;AMORT DEL;71;Pesado;Nacional;2,16;10000;15000;21600;21600;OK;5;0;2026-05-01;;;revisar;No;No;16b87a05|Pesado|Nacional|2.16|21600|4275a675|4275a675|0|0|2e98333c
+71 CCC3;BUJIA;71;Pesado;Nacional;2,16;1000;2000;2160;2160;CONGELADO;2;0;;;;;Sí;No;269e2af0|Pesado|Nacional|2.16|2160|da39a3ee|da39a3ee|1|0|d91e8a02

@@ -238,6 +238,32 @@ def vigencia_dias(vigencia: str | None, desde: date | None, hasta: date | None,
     return None
 
 
+def texto_vigencia(ov: dict | None, hoy: date | None = None) -> str:
+    """El estado del periodo en una frase, para la columna Vigencia del Excel: "Fijo hasta
+    31-10-2026", "Programado desde 01-11-2026", "Vencido el 30-09-2026". Vacio si no hay
+    periodo, o si esta vigente sin Hasta (queda rigiendo hasta que alguien lo cambie).
+
+    La decision se nombra como en el chip de la pantalla: precio fijo > congelado > margen."""
+    estado = vigencia_de(ov, hoy)
+    if estado is None:
+        return ""
+    ov = ov or {}
+    desde, hasta = _fecha(ov.get("vigente_desde")), _fecha(ov.get("vigente_hasta"))
+    if estado == PROGRAMADA:
+        return f"Programado desde {_fmt_dia(desde)}" if desde else ""
+    if estado == VENCIDA:
+        return f"Vencido el {_fmt_dia(hasta)}" if hasta else "Vencido"
+    if hasta is None:
+        return ""
+    if ov.get("precio_fijo") is not None:
+        decision = "Fijo"
+    elif ov.get("congelar"):
+        decision = "Congelado"
+    else:
+        decision = "Margen"
+    return f"{decision} hasta {_fmt_dia(hasta)}"
+
+
 class ErrorVigencia(NamedTuple):
     """Un problema del periodo, en palabras para la persona.
 
@@ -1649,6 +1675,39 @@ def _aplicar_override(o: PrecioOverride, precio_vigente: float | None, datos: di
     o.editado_por = usuario
     o.editado_en = _now()
     return detalle_
+
+
+_CAMPOS_OVERRIDE = ("precio_fijo", "margen_fijo", "congelado_precio", "vigente_desde",
+                    "vigente_hasta", "tipo_manual", "procedencia_manual", "obs")
+
+
+def override_despues(ov: dict | None, datos: dict, precio_vigente: float | None,
+                     hoy: date | None = None) -> dict:
+    """La decision de un producto tal como QUEDARIA al aplicar `datos` sobre `ov`, sin
+    tocar la base. Es la misma `_aplicar_override` que la escribe, corrida sobre una copia
+    suelta: la vista previa de la carga por Excel calcula el precio de "despues" con esto, y
+    no con una copia aparte de las reglas (que el dia que cambiaran, mostraria un precio
+    distinto del que se guarda)."""
+    ov = ov or {}
+    copia = PrecioOverride()
+    for campo in _CAMPOS_OVERRIDE:
+        setattr(copia, campo, ov.get(campo))
+    copia.congelar = bool(ov.get("congelar"))
+    copia.no_producto = bool(ov.get("no_producto"))
+    _aplicar_override(copia, precio_vigente, datos, None, hoy)
+    return _override_dict(copia)
+
+
+def precio_de_hoy(fila: dict, precio_final: float | None, ov: dict | None,
+                  fact: dict, rub: dict, hoy: date) -> float | None:
+    """El precio que tiene el producto HOY, que es el que queda congelado al congelar.
+
+    Es el de la fila, salvo que la decision guardada tenga el periodo vencido o programado:
+    la fila puede seguir mostrando el precio de esa decision hasta el proximo recalculo, y
+    el de hoy es el que da la regla sin ella (igual que en `guardar_override`)."""
+    if vigencia_de(ov, hoy) in (PROGRAMADA, VENCIDA):
+        return calcular(fila, ov, fact, rub, hoy)["precio_final"]
+    return precio_final
 
 
 def _fila_regla(p: PrecioProducto) -> dict:

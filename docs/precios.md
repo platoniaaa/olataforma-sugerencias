@@ -138,7 +138,7 @@ precios fijos de produccion no tienen fecha y ninguna nota dice si eran temporal
 
 **Guardar un periodo** (`PUT /api/precios/{producto}/override`). `vigente_desde` y
 `vigente_hasta` van como `aaaa-mm-dd`: ausente = no tocar, `null` = quitar ese extremo (otro
-formato da 422). Las reglas viven en `validar_vigencia`, una funcion pura que tambien va a usar
+formato da 422). Las reglas viven en `validar_vigencia`, una funcion pura que tambien usa
 la carga por Excel:
 
 - El Desde no puede ser posterior al Hasta.
@@ -223,10 +223,11 @@ redundante y vive en otro repositorio):
 precio de la campana hasta que alguien suba el archivo**. Nada se empuja solo. El producto que
 vence entra a "solo diferencias" y suma en `pendientes_envio` desde la primera lectura del dia
 (solo si el ERP tenia el precio anterior; si nunca se envio, no aparece). Tampoco hay aviso
-previo en la campanita, ni columnas de Desde y Hasta en los archivos de descarga ni en la carga
-por Excel: si se sube un archivo que edita el `Precio final` de un producto con la decision
-vencida, el precio queda guardado pero no rige hasta renovar el periodo. Los vencidos se quedan
-visibles hasta que alguien los renueve o los quite.
+previo en la campanita. El archivo para editar de Excel SI trae `Precio fijo`, `Margen fijo %`,
+`Desde`, `Hasta` y `Vigencia`, y la carga las lee (ver "Editar la lista con Excel"); "Exportar
+completa" y el archivo del ERP no. Cambiar el precio de un producto con la decision vencida
+desde el Excel da un error ("El periodo ya terminó") hasta que se renueve el Hasta en la misma
+fila. Los vencidos se quedan visibles hasta que alguien los renueve o los quite.
 
 **Migracion.** `db.py` agrega `precio_override.vigente_desde`, `precio_override.vigente_hasta` y
 `precio_producto.vigencia_aplicada` (las tres nullable, sin relleno: ningun precio cambia al
@@ -314,24 +315,88 @@ Botón "Editar con Excel" en `/precios` (solo quien puede editar precios). Se ba
 archivo, se edita y se vuelve a cargar; antes de guardar se ve que cambia, producto
 por producto.
 
-- **Descarga**: `GET /api/precios/exportar?formato=editable` es la lista completa (CSV,
-  `;`, BOM) más las columnas `Obs`, `Congelar`, `No es producto` y `Referencia`. El
-  factor sale con hasta 4 decimales (un margen fijo da 1,5385). `Obs`, `Glosa`,
-  `Rubro` y `Tipo` que empiezan con `=`, `+`, `-` o `@` salen con un apóstrofe delante
-  (Excel las abriría como fórmula: "-5% convenio" salía `#NOMBRE?` y un
-  `=HYPERLINK(...)` se ejecutaba); al leer, se quita.
-- **Lo que se edita** (cada columna hace lo mismo que su equivalente en la ficha; vacío
-  quita la decisión): `Tipo` y `Procedencia` (escritos a mano; el tipo se acepta con o
-  sin tildes y con los alias de la política), `Factor` (factor propio = margen fijo
-  `(1 - 1/f) x 100`), `Precio final` (precio fijo), `Obs`, `Congelar` y `No es
-  producto` (Sí/No). Lo demás (costo, stock, precio ERP, estado, descuento) viene del
-  ERP y del motor, y si se edita, no se carga. Precio fijo y factor propio no
-  conviven: la fila con los dos es un error.
+- **Descarga** (20-10-2026): `GET /api/precios/exportar?formato=editable` son **25
+  columnas** (CSV, `;`, BOM), en este orden: las 16 de "Exportar completa" (`Producto`,
+  `Glosa`, `Rubro`, `Tipo`, `Procedencia`, `Factor`, `Costo`, `Precio ERP`, `Precio
+  calculado`, `Precio final`, `Estado`, `Stock`, `En transito`, `Ultima venta`,
+  `Descuento máximo`, `Descuento+1`) y después `Obs`, `Congelar`, `No es producto`,
+  `Precio fijo`, `Margen fijo %`, `Desde`, `Hasta`, `Vigencia` y `Referencia`. Las 16
+  primeras son **idénticas, en el mismo orden y contenido**, a las de "Exportar completa"
+  (que no cambia: sigue con sus 16): lo ata un test y salen de la misma lista
+  (`COLUMNAS_ARCHIVO`, en `services/precios_carga_service.py`, que también arma el
+  encabezado y la lista de editables y de solo lectura). Antes eran 20; los archivos
+  bajados antes siguen cargando (ver "Archivos bajados antes"). El factor sale con hasta 4
+  decimales (un margen fijo da 1,5385) y el margen con hasta 2, con coma. `Desde` y
+  `Hasta` salen en ISO (`2026-10-31`): Excel en Chile las convierte a fecha y al guardar
+  como CSV las escribe `31-10-2026`; el lector acepta las dos. `Obs`, `Glosa`, `Rubro` y
+  `Tipo` que empiezan con `=`, `+`, `-` o `@` salen con un apóstrofe delante (Excel las
+  abriría como fórmula: "-5% convenio" salía `#NOMBRE?` y un `=HYPERLINK(...)` se
+  ejecutaba); al leer, se quita.
+- **Lo que se edita**: 11 columnas (cada una hace lo mismo que su equivalente en la
+  ficha; vacío quita la decisión): `Tipo` y `Procedencia` (escritos a mano; el tipo se
+  acepta con o sin tildes y con los alias de la política), `Factor` (factor propio =
+  margen fijo `(1 - 1/f) x 100`), `Precio final` (precio fijo), `Obs`, `Congelar` y `No
+  es producto` (Sí/No), y las nuevas `Precio fijo`, `Margen fijo %`, `Desde` y `Hasta`
+  (ver "Precio fijo, margen y periodo"). Las otras 13 son de solo lectura y si se editan,
+  no se cargan: `Producto`, `Glosa` y `Rubro` vienen del maestro del ERP; `Costo`,
+  `Precio ERP`, `Stock` y `En transito` los pisa el feed de cada día; `Estado`, `Precio
+  calculado` y los dos descuentos son el resultado de la regla y de la política (se
+  cambian en `/precios/politicas`); `Vigencia` es el texto del estado del periodo ("Fijo
+  hasta 31-10-2026", "Programado desde 01-11-2026", "Vencido el 30-09-2026", vacío si no
+  hay periodo o rige sin Hasta). Precio fijo y factor propio no conviven: la fila con los
+  dos es un error.
+- **Precio fijo, margen y periodo** (20-10-2026). `Precio final` y `Factor` siguen siendo
+  atajos y muestran lo que **rige hoy**; `Precio fijo` y `Margen fijo %` son la misma
+  decisión pero con lo **guardado**, aunque su periodo esté programado o vencido (sin
+  ellas, un precio de campaña vencido no se vería en el archivo y se escribiría de nuevo
+  sin saber que ya existe). Reglas:
+  - Si cambia solo una de las dos columnas, vale esa. Si cambian las dos y dicen lo mismo
+    (el factor de ese margen a 4 decimales; o el mismo precio) se aplica **una vez**; si
+    discrepan, es un error del archivo que bloquea todo. Vacío en una de las dos y valor
+    en la otra también es error; los dos vacíos quitan la decisión.
+  - `Margen fijo %` es en % sobre la venta: `35` es 35 %. **Menor que 1 es error** ("escribe
+    35 para 35 %, no 0,35": una celda con formato de porcentaje entrega 0,35) y 100 o más
+    también. `Precio fijo` negativo es error.
+  - `Desde` y `Hasta` son el periodo de las **tres** decisiones (precio fijo, margen y
+    congelar), inclusivos y cada uno opcional. Las reglas son las de la ficha
+    (`validar_vigencia`, la misma función): el Desde no puede ser posterior al Hasta;
+    ninguna fecha a más de 3 años de hoy; el periodo no puede nacer vencido (un Hasta
+    anterior a hoy, en hora de Chile, es error); Congelar con un Desde futuro es error
+    (congelar toma el precio de hoy); fechas sin ninguna decisión que las use son un
+    error, salvo que la propia carga quite la última decisión, y entonces las fechas se
+    borran solas. **Renovar un vencido es cambiar solo el Hasta.** Editar solo la nota de
+    un vencido se guarda, como en la ficha.
+  - Los errores que dependen de lo que **ya estaba guardado** (un periodo que otra
+    persona dejó vencido, precio fijo y margen a la vez) y no de lo que trae el archivo,
+    son un **conflicto** de esa fila si el producto cambió después de bajar el archivo, y
+    un error si no. Los del propio archivo (un Desde mayor que el Hasta que escribió la
+    carga, una fecha que no se entiende) bloquean todo, hayan editado el producto o no.
+  - Si el aviso es por precio fijo y margen a la vez y lo que estorba está vencido o
+    programado, el mensaje lo dice ("el margen fijo guardado está vencido: bórralo o
+    renuévalo").
+  - Un congelado que **pasa a regir** (se congela o se renueva uno vencido) toma el precio
+    de hoy, el que da la regla, no el que pueda mostrar la fila.
+- **Fechas aceptadas**: `date` y `datetime` de un `.xlsx`, el número de serie de Excel (entre
+  2000 y 2100), ISO (`2026-10-31`), `dd-mm-aaaa` y `dd/mm/aaaa`, y el año de 2 dígitos como
+  20aa. **Nunca mes/día**: `10/11/2026` es el 10 de noviembre, y `10/13/2026` es un error.
+  Un mes con nombre (`31-oct`) o una fecha que no existe (`31-02-2026`) es un error con el
+  texto "usa dd-mm-aaaa". La vista previa muestra la vigencia ya interpretada ("Rige del
+  20-10-2026 al 31-10-2026", en `cambios[].vigencia`), que es la forma de notar un día y
+  un mes cambiados.
+- **Archivos bajados antes**: uno con la Referencia v1 (10 partes, 20 columnas) sigue
+  cargando. Lee solo las 7 columnas de antes; si trae `Precio fijo`, `Margen fijo %`,
+  `Desde` o `Hasta` en esas filas, no se leen, y las filas con Referencia v1 se cuentan en
+  `archivo_viejo_total` de la vista previa. Un archivo que baja con Referencia v2 (14
+  partes) y al que le faltan esas cuatro columnas es un error global ("Faltan las
+  columnas: ...") porque se las tomaría por vacías, o sea, por quitas. Un archivo v2 en un
+  servidor viejo falla seguro: "referencia dañada", sin escribir nada.
 - **La columna `Referencia`** guarda, por producto, lo que mostraba el archivo al
-  bajarlo, en 10 partes ASCII (sobreviven a cualquier página de códigos):
-  `huella del código|tipo|procedencia|factor|precio|huella de la obs|la misma como la
-  deja Excel (cp1252)|congelar|no es producto|huella de las decisiones`. Empieza con un
-  hash para que Excel nunca la lea como fórmula. Se carga SOLO lo que la persona cambió respecto de esa
+  bajarlo, en 14 partes ASCII (sobreviven a cualquier página de códigos):
+  `huella del código|tipo|procedencia|factor|precio final|huella de la obs|la misma como
+  la deja Excel (cp1252)|congelar|no es producto|precio fijo|margen fijo|desde|hasta|huella
+  de las decisiones`. (La v1 eran 10: las mismas sin las cuatro del medio. Cualquier otro
+  largo es "referencia dañada".) Empieza con un hash para que Excel nunca la lea como
+  fórmula. Se carga SOLO lo que la persona cambió respecto de esa
   referencia, no lo que difiere de lo que hay hoy: el motor recalcula los precios cada
   noche y eso no es una edición (compararlo contra hoy habría vuelto precio fijo cada
   precio que se movió). Tres huellas la protegen:
@@ -339,7 +404,11 @@ por producto.
     el archivo edita ese producto, es **conflicto** y se omite, porque cargarlo
     desharía en silencio lo que otra persona hizo en la ficha. Si lo que dice el
     archivo ya es lo que hay (el mismo archivo subido dos veces, o una carga cuya
-    respuesta se perdió), es "sin cambios", no conflicto;
+    respuesta se perdió), es "sin cambios", no conflicto. El periodo entra a la huella
+    SOLO si el producto tiene alguna fecha: para los que no tienen (los 3.163 de hoy) vale
+    lo mismo de siempre, que es lo que viaja en cada archivo ya bajado. Tampoco depende de
+    la fecha de hoy: un periodo que vence no escribe en `precio_override`, así que no
+    mueve la huella ni crea conflictos falsos de noche;
   - la del **código** ata la referencia a su producto: ordenar o pegar solo esa
     columna la dejaba en otra fila, y los precios de esa fila se volvían precio fijo
     sin que nada avisara. Ahora es un error;
@@ -378,13 +447,19 @@ por producto.
   error (`#N/D`, `#REF!`) las entrega vacías (calamine no distingue). Si una carga
   quita 10 decisiones o más (`UMBRAL_QUITAS`), la pantalla pide marcar una
   confirmación y el servidor exige `confirmar_quitas=true`: un BUSCARV roto no puede
-  borrar precios fijos en silencio.
-- **Poner muchos a la vez**: si una carga deja más de 200 precios fijos o factores
-  propios nuevos (`UMBRAL_MASIVA`), la pantalla pide otra confirmación y el servidor
-  exige `confirmar_masiva=true`. Ordenar una sola columna (Precio final, Factor) deja
-  cada valor en la fila de otro producto, y cada fila parece una edición válida: la
-  Referencia detecta el código, pero no que un valor cambió de dueño. La vista previa
-  trae `fijan_total`, `fijan` y `umbral_masiva`.
+  borrar precios fijos en silencio. **Vaciar `Desde` o `Hasta` cuenta como quita** (clave
+  `desde` / `hasta` en `quitan`): vuelve permanente un precio temporal, que es la dirección
+  peligrosa si un BUSCARV roto vacía las celdas.
+- **Poner muchos a la vez**: si una carga deja más de 200 precios fijos, factores
+  propios, congelados o fechas de periodo nuevos (`UMBRAL_MASIVA`), la pantalla pide otra
+  confirmación y el servidor exige `confirmar_masiva=true`. Ordenar una sola columna
+  (Precio final, Factor, Precio fijo, Hasta) deja cada valor en la fila de otro producto,
+  y cada fila parece una edición válida: la Referencia detecta el código, pero no que un
+  valor cambió de dueño. **Congelar = Sí cuenta** (clave `congelar`) desde el 20-10-2026:
+  antes ordenar solo esa columna no disparaba ningún freno. La vista previa trae
+  `fijan_total`, `fijan` (con las claves `precio_fijo`, `factor`, `congelar`, `desde` y
+  `hasta`), `umbral_masiva`, y también `programados_total` (cuántos quedan con un Desde
+  futuro: hoy su precio no cambia) y `archivo_viejo_total`.
 - **Qué deja**: una fila de auditoría `precio_override` por producto ("(carga desde
   Excel)") y una de resumen `precios_carga_excel`, más una notificación. Recalcula SOLO
   los productos editados, con la política cargada una vez y leída ANTES de escribir

@@ -1,18 +1,24 @@
 """Editar la lista de precios en Excel: bajar el archivo, editarlo y volver a cargarlo.
 
-El archivo "para editar" es la lista completa con tres columnas mas: Obs, Congelar,
-No es producto, y una columna `Referencia` que NO se toca. Se pueden editar siete
-columnas, y cada una hace lo mismo que su equivalente en la ficha del producto:
+El archivo "para editar" son las 16 columnas de "Exportar completa" (identicas y en el
+mismo orden) mas Obs, Congelar, No es producto, Precio fijo, Margen fijo %, Desde, Hasta,
+Vigencia y una columna `Referencia` que NO se toca: 25 en total. Se pueden editar once,
+y cada una hace lo mismo que su equivalente en la ficha del producto:
 
   Tipo, Procedencia  -> el tipo / la procedencia escritos a mano. Vacio = vuelve a
                         seguir al rubro / a la regla.
   Factor             -> factor propio del producto (margen fijo). Vacio = lo quita.
   Precio final       -> precio fijo. Vacio = lo quita.
+  Precio fijo, Margen fijo % -> la MISMA decision que Precio final y Factor, pero con lo
+                        que hay GUARDADO aunque su periodo no rija (programado o vencido).
+                        Precio final y Factor muestran lo que rige hoy.
+  Desde, Hasta       -> el periodo en que rigen el precio fijo, el margen fijo y el
+                        congelado (inclusivos, cada uno opcional). Vacio = sin limite.
   Obs                -> la observacion.
   Congelar, No es producto -> Si / No.
 
-Todo lo demas (costo, stock, precio ERP, estado...) viene del ERP y del motor, y se
-recalcula todos los dias: si se edita, no se carga.
+Todo lo demas (costo, stock, precio ERP, estado, vigencia...) viene del ERP, del motor o de
+la regla, y se recalcula todos los dias: si se edita, no se carga.
 
 ## Por que existe la columna Referencia
 
@@ -46,20 +52,38 @@ import unicodedata
 import zipfile
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import insert, select
 
 from ..config import get_settings
 from ..models import AuditoriaLog, PrecioOverride, PrecioProducto
-from . import auditoria_service, politica_precio_service as politica
+from . import auditoria_service, calendario, politica_precio_service as politica
 from . import precios_service as ps
 
 settings = get_settings()
 
 SEP = "|"      # ASCII: sobrevive a cualquier pagina de codigos (cp850, cp1252, UTF-16...)
 COL_REFERENCIA = "Referencia"
-CAB_EXTRA = ["Obs", "Congelar", "No es producto", COL_REFERENCIA]
+
+# Las columnas del archivo para editar, en orden, con su marca. Una sola definicion: de aca
+# salen el encabezado de la descarga, el dialogo de la pantalla (las que se editan y las que
+# no) y el test que exige que las primeras 16 sean las de "Exportar completa". Las 16
+# primeras NO se declaran a mano: son `ps.COLUMNAS_COMPLETA` + `ps.CAB_DESCUENTO`, para que
+# nunca se separen de la descarga completa.
+_EDITABLES_DE_LA_LISTA = {"Tipo", "Procedencia", "Factor", "Precio final"}
+COLUMNAS_ARCHIVO: tuple[tuple[str, bool], ...] = (
+    *((t, t in _EDITABLES_DE_LA_LISTA) for _, t in ps.COLUMNAS_COMPLETA),
+    *((t, False) for t in ps.CAB_DESCUENTO),
+    ("Obs", True), ("Congelar", True), ("No es producto", True),
+    ("Precio fijo", True), ("Margen fijo %", True), ("Desde", True), ("Hasta", True),
+    ("Vigencia", False), (COL_REFERENCIA, False),
+)
+CABECERA_ARCHIVO = [t for t, _ in COLUMNAS_ARCHIVO]
+COLUMNAS_EDITABLES = tuple(t for t, editable in COLUMNAS_ARCHIVO if editable)
+COLUMNAS_SOLO_LECTURA = tuple(t for t, editable in COLUMNAS_ARCHIVO
+                              if not editable and t != COL_REFERENCIA)
 
 # (clave interna, encabezado del archivo), en el orden en que viajan en la referencia.
 CAMPOS = (
@@ -67,15 +91,22 @@ CAMPOS = (
     ("precio", "Precio final"), ("obs", "Obs"), ("congelar", "Congelar"),
     ("no_producto", "No es producto"),
 )
+# Las cuatro columnas que se agregaron despues. Son opcionales en el archivo: un archivo
+# bajado antes (Referencia de 10 partes) no las trae, y uno nuevo (14 partes) las exige.
+# `precio_fijo` y `margen` son la MISMA decision que `precio` y `factor`, con lo guardado.
+CAMPOS_V2 = (
+    ("precio_fijo", "Precio fijo"), ("margen", "Margen fijo %"),
+    ("desde", "Desde"), ("hasta", "Hasta"),
+)
 _ETIQUETA_CAMPO = {
     "tipo_manual": "Tipo", "procedencia_manual": "Procedencia", "margen_fijo": "Factor",
     "precio_fijo": "Precio fijo", "obs": "Obs", "congelar": "Congelar",
-    "no_producto": "No es producto",
+    "no_producto": "No es producto", "vigente_desde": "Desde", "vigente_hasta": "Hasta",
 }
 _CLAVE_POR_CAMPO_OV = {
     "tipo_manual": "tipo", "procedencia_manual": "procedencia", "margen_fijo": "factor",
     "precio_fijo": "precio_fijo", "obs": "obs", "congelar": "congelar",
-    "no_producto": "no_producto",
+    "no_producto": "no_producto", "vigente_desde": "desde", "vigente_hasta": "hasta",
 }
 
 MAX_BYTES = 30 * 1024 * 1024
@@ -103,7 +134,11 @@ UMBRAL_QUITAS = 10
 # fijos, y ninguna validacion por fila lo ve. Una carga de verdad no suele pasar de unos
 # cientos.
 UMBRAL_MASIVA = 200
-TOPE_LISTA = 200            # errores o conflictos que se devuelven (el total va aparte)
+# Lo que cuenta contra ese umbral: precios fijos, factores propios, congelados (Congelar = Si)
+# y fechas del periodo. Ordenar UNA de esas columnas deja cada valor en la fila de otro
+# producto igual que con el precio, y ordenar solo Congelar no disparaba ningun freno.
+_CAMPOS_QUE_FIJAN = ("precio_fijo", "margen_fijo", "congelar", "vigente_desde", "vigente_hasta")
+TOPE_LISTA = 200           # errores o conflictos que se devuelven (el total va aparte)
 TOPE_CODIGOS = 100
 TOPE_CAMBIOS = 300
 MAX_OBS = 500
@@ -270,6 +305,78 @@ def _c_precio(v) -> str:
     return "" if n is None else str(ps.redondear(n))
 
 
+def _fmt_margen(n: float) -> str:
+    """El margen (en % sobre la venta) con hasta 2 decimales y sin ceros de relleno:
+    35, 35.5, 33.33. Mitad hacia arriba, como Excel."""
+    d = Decimal(repr(float(n))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    s = f"{d:f}"
+    return s.rstrip("0").rstrip(".") if "." in s else s
+
+
+def _c_margen(v) -> str:
+    n = leer_numero(v)
+    return "" if n is None else _fmt_margen(n)
+
+
+# Las fechas que acepta el archivo: la de Excel (date, datetime, el numero de serie), la
+# ISO que baja la plataforma, y dd-mm-aaaa o dd/mm/aaaa como las escribe Excel en Chile.
+# NUNCA mes/dia: "10/11/2026" es el 10 de noviembre. Un mes con nombre ("31-oct") o una
+# fecha que no existe ("31-02-2026") es un error, no una adivinanza.
+_FECHA_ISO = re.compile(r"(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?")
+_FECHA_LATINA = re.compile(r"(\d{1,2})([-/])(\d{1,2})\2(\d{4}|\d{2})")
+_SERIAL_EXCEL = re.compile(r"\d{5}(?:[.,]\d+)?")
+_SERIAL_DESDE, _SERIAL_HASTA = 36526, 73415         # 01-01-2000 y 31-12-2100
+_ORIGEN_SERIAL = date(1899, 12, 30)
+
+
+def _leer_fecha(valor) -> date | None:
+    """Una fecha escrita como la deja Excel. None si esta vacia; ValueError si no es una
+    fecha que se pueda leer sin adivinar."""
+    if valor is None:
+        return None
+    if isinstance(valor, datetime):
+        return valor.date()
+    if isinstance(valor, date):
+        return valor
+
+    def _no_entiendo():
+        return ValueError(f'no entiendo "{_texto(valor)}" como fecha: usa dd-mm-aaaa '
+                          "(por ejemplo 31-10-2026)")
+
+    if isinstance(valor, bool):
+        raise _no_entiendo()
+    if isinstance(valor, (int, float)):
+        serial = valor if math.isfinite(float(valor)) else None
+    else:
+        t = str(valor).replace("\x00", "").strip()
+        if t == "":
+            return None
+        serial = float(t.replace(",", ".")) if _SERIAL_EXCEL.fullmatch(t) else None
+        if serial is None:
+            m = _FECHA_ISO.fullmatch(t)
+            if m:
+                a, mes, dia = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            else:
+                m = _FECHA_LATINA.fullmatch(t)
+                if not m:
+                    raise _no_entiendo()
+                dia, mes, a = int(m.group(1)), int(m.group(3)), int(m.group(4))
+                if len(m.group(4)) == 2:
+                    a += 2000
+            try:
+                return date(a, mes, dia)
+            except ValueError:
+                raise _no_entiendo() from None
+    if serial is None or not _SERIAL_DESDE <= serial < _SERIAL_HASTA + 1:
+        raise _no_entiendo()
+    return _ORIGEN_SERIAL + timedelta(days=int(serial))
+
+
+def _c_fecha(v) -> str:
+    d = _leer_fecha(v)
+    return "" if d is None else d.isoformat()
+
+
 _SI = {"si", "s", "1", "x", "true", "verdadero", "yes", "y"}     # ya sin tildes
 _NO = {"no", "n", "0", "false", "falso", ""}
 
@@ -294,8 +401,12 @@ def _canon(campo: str, valor) -> str:
         return _c_obs(valor)
     if campo == "factor":
         return _c_factor(valor)
-    if campo == "precio":
+    if campo in ("precio", "precio_fijo"):
         return _c_precio(valor)
+    if campo == "margen":
+        return _c_margen(valor)
+    if campo in ("desde", "hasta"):
+        return _c_fecha(valor)
     return _c_bool(valor)
 
 
@@ -310,7 +421,7 @@ def _canon_rapido(campo: str, valor, base: str) -> str:
     `_canon` como siempre. La observacion viaja como huella: solo se atajan las vacias."""
     if isinstance(valor, str):
         t = valor.strip()
-        if campo in ("factor", "precio"):
+        if campo in ("factor", "precio", "precio_fijo", "margen"):
             if t == base or (t and t.replace(",", ".") == base):
                 return base
         elif campo in ("congelar", "no_producto"):
@@ -379,8 +490,12 @@ def huella_decisiones(ov: dict | None) -> str:
 def _valores_base(p, ov: dict | None) -> dict[str, str]:
     """Lo que mostraba el archivo para cada columna editable. La observacion va como
     huella: es texto libre (puede traer cualquier caracter) y solo hace falta saber
-    si cambio."""
+    si cambio.
+
+    `precio` y `factor` son lo que RIGE hoy; `precio_fijo` y `margen` son la decision
+    guardada, aunque su periodo este programado o vencido."""
     o = ov or {}
+    desde, hasta = ps._fecha(o.get("vigente_desde")), ps._fecha(o.get("vigente_hasta"))
     return {
         "tipo": _c_texto(p.tipo).replace(SEP, "/"),
         "procedencia": _c_texto(p.procedencia_final).replace(SEP, "/"),
@@ -389,12 +504,24 @@ def _valores_base(p, ov: dict | None) -> dict[str, str]:
         "obs": _h(_c_obs(o.get("obs"))),
         "congelar": "1" if o.get("congelar") else "0",
         "no_producto": "1" if o.get("no_producto") else "0",
+        "precio_fijo": "" if o.get("precio_fijo") is None else str(ps.redondear(o["precio_fijo"])),
+        "margen": "" if o.get("margen_fijo") is None else _fmt_margen(o["margen_fijo"]),
+        "desde": desde.isoformat() if desde else "",
+        "hasta": hasta.isoformat() if hasta else "",
     }
+
+
+# La Referencia v1 (los archivos que ya se bajaron) tiene 10 partes; la v2, 14. Cualquier
+# otro largo es una referencia dañada.
+_PARTES_V1 = len(CAMPOS) + 3
+_PARTES_V2 = _PARTES_V1 + len(CAMPOS_V2)
 
 
 def referencia(codigo: str, p, ov: dict | None) -> str:
     """huella del codigo|tipo|procedencia|factor|precio|huella de la obs|la misma como
-    la deja Excel (cp1252)|congelar|no es producto|huella de las decisiones.
+    la deja Excel (cp1252)|congelar|no es producto|precio fijo|margen fijo|desde|hasta|
+    huella de las decisiones. (La v1 terminaba en "no es producto|huella de las
+    decisiones", sin las cuatro del medio.)
 
     La del codigo ata la referencia a SU producto: una columna ordenada o pegada por
     separado la dejaba en otra fila, y los precios de esa fila se volvian precio fijo
@@ -403,17 +530,22 @@ def referencia(codigo: str, p, ov: dict | None) -> str:
     base = _valores_base(p, ov)
     partes = [base[c] for c, _ in CAMPOS]
     partes.insert(5, _h(_c_obs_ansi((ov or {}).get("obs"))))   # justo despues de la huella de la obs
+    partes += [base[c] for c, _ in CAMPOS_V2]
     return SEP.join([_h(codigo)] + partes + [huella_decisiones(ov)])
 
 
 def _leer_referencia(texto: str) -> tuple[dict[str, str], str, str, str]:
-    """(base por campo, huella de decisiones, huella del codigo, obs como la deja Excel)."""
+    """(base por campo, huella de decisiones, huella del codigo, obs como la deja Excel).
+
+    Acepta la v1 (10 partes) y la v2 (14). La base de una v1 no trae las claves de
+    `CAMPOS_V2`: de esas columnas no se sabe que mostraba el archivo, y no se leen."""
     partes = texto.split(SEP)
-    if len(partes) != len(CAMPOS) + 3:
+    if len(partes) not in (_PARTES_V1, _PARTES_V2):
         raise ValueError("referencia dañada")
     codigo, resto, h2 = partes[0], partes[1:-1], partes[-1]
     obs_ansi = resto.pop(5)
-    return {c: resto[i] for i, (c, _) in enumerate(CAMPOS)}, h2, codigo, obs_ansi
+    campos = CAMPOS + (CAMPOS_V2 if len(partes) == _PARTES_V2 else ())
+    return {c: resto[i] for i, (c, _) in enumerate(campos)}, h2, codigo, obs_ansi
 
 
 # ------------------------------------------------------------------ descarga
@@ -426,11 +558,17 @@ def _si_no(v) -> str:
 
 
 def csv_editable(db) -> tuple[bytes, int]:
-    """La lista completa lista para editar: las mismas columnas que "Exportar
-    completa" mas Obs, Congelar, No es producto y la Referencia.
+    """La lista completa lista para editar: las 16 columnas de "Exportar completa" (las
+    mismas, en el mismo orden) mas Obs, Congelar, No es producto, Precio fijo, Margen
+    fijo %, Desde, Hasta, Vigencia y la Referencia: `COLUMNAS_ARCHIVO`.
 
     El factor sale con hasta 4 decimales: un margen fijo da 1,5385 y con 2 saldria
-    1,54, que al subirlo pareceria una edicion."""
+    1,54, que al subirlo pareceria una edicion.
+
+    `Precio final` y `Factor` son lo que rige HOY. `Precio fijo` y `Margen fijo %` son la
+    decision guardada, aunque su periodo este programado o vencido: sin ellas, un precio
+    de campaña vencido no se veria en el archivo y la persona lo escribiria de nuevo sin
+    saber que ya existe."""
     tenant = settings.default_tenant_id
     campos = [getattr(PrecioProducto, k) for k, _ in ps.COLUMNAS_COMPLETA] + [PrecioProducto.codigo_erp]
     filas = db.execute(
@@ -438,6 +576,7 @@ def csv_editable(db) -> tuple[bytes, int]:
     ).all()
     ovs = ps._overrides(db)
     desc = politica.descuentos(db)
+    hoy = calendario.hoy_chile()
     claves = [k for k, _ in ps.COLUMNAS_COMPLETA]
     i = {k: n for n, k in enumerate(claves)}
     enteras = {"costo", "precio_erp", "precio_calculado", "precio_final", "stock", "stock_transito"}
@@ -462,12 +601,19 @@ def csv_editable(db) -> tuple[bytes, int]:
         for clave in ("glosa", "rubro", "tipo"):
             celdas[i[clave]] = _proteger(celdas[i[clave]])
         p = _Valores(f[i["tipo"]], f[i["procedencia_final"]], f[i["factor"]], f[i["precio_final"]])
-        celdas += [_proteger_obs((ov or {}).get("obs") or ""), _si_no((ov or {}).get("congelar")),
-                   _si_no((ov or {}).get("no_producto")), referencia(interno, p, ov)]
+        o = ov or {}
+        desde, hasta = ps._fecha(o.get("vigente_desde")), ps._fecha(o.get("vigente_hasta"))
+        celdas += [
+            _proteger_obs(o.get("obs") or ""), _si_no(o.get("congelar")), _si_no(o.get("no_producto")),
+            "" if o.get("precio_fijo") is None else str(ps.redondear(o["precio_fijo"])),
+            "" if o.get("margen_fijo") is None else _fmt_margen(o["margen_fijo"]).replace(".", ","),
+            desde.isoformat() if desde else "", hasta.isoformat() if hasta else "",
+            ps.texto_vigencia(o, hoy) if (desde or hasta) else "",
+            referencia(interno, p, ov),
+        ]
         return celdas
 
-    cab = [t for _, t in ps.COLUMNAS_COMPLETA] + ps.CAB_DESCUENTO + CAB_EXTRA
-    return ps._a_csv(cab, (_fila(f) for f in filas)), len(filas)
+    return ps._a_csv(CABECERA_ARCHIVO, (_fila(f) for f in filas)), len(filas)
 
 
 @dataclass
@@ -763,7 +909,9 @@ def leer_archivo(nombre: str, contenido: bytes) -> list[list]:
 
 _CLAVES = {"producto": "producto", "referencia": "referencia", "tipo": "tipo",
            "procedencia": "procedencia", "factor": "factor", "precio final": "precio",
-           "obs": "obs", "congelar": "congelar", "no es producto": "no_producto"}
+           "obs": "obs", "congelar": "congelar", "no es producto": "no_producto",
+           "precio fijo": "precio_fijo", "margen fijo %": "margen", "margen fijo": "margen",
+           "desde": "desde", "hasta": "hasta"}
 _NOMBRE_CLAVE = {"producto": "Producto", "referencia": COL_REFERENCIA,
                  **{c: t for c, t in CAMPOS}}
 
@@ -807,19 +955,131 @@ def _tipos_validos(db) -> dict[str, str]:
     return {politica.tipo_canonico(_norm(t.replace(SEP, "/"))): t for t in nombres}
 
 
-# El unico error que puede venir de lo que OTRA persona dejo en la ficha y no del archivo:
-# el archivo edita el factor y la otra persona puso un precio fijo, o al reves.
+# Los errores que pueden venir de lo que OTRA persona dejo en la ficha y no del archivo (los
+# "de combinacion"): el archivo edita el factor y la otra persona puso un precio fijo, o al
+# reves; o el archivo cambia una decision y el periodo guardado ya habia vencido. Si el
+# producto cambio despues de bajar el archivo, esa fila es un conflicto y no un error.
 _ERROR_COMBINACION = (
-    "Un producto no puede tener precio fijo y factor propio a la vez. Cambia solo uno de los "
-    "dos, o deja vacía la celda del otro para quitárselo."
+    "Un producto no puede tener precio fijo y factor propio a la vez{estorbo}. Cambia solo uno "
+    "de los dos, o deja vacía la celda del otro para quitárselo."
 )
 
 
-def _datos_override(ed: dict[str, str], ov: dict, tipos: dict[str, str]) -> tuple[dict, list[str]]:
-    """De lo que la persona cambio en el archivo, lo que se le aplica al producto
-    (mismos nombres que `guardar_override`) y los errores. Pura: no toca la base."""
+def _error_combinacion(ov: dict, datos: dict, hoy: date) -> str:
+    """El aviso de "precio fijo y factor a la vez". Si lo que estorba es una decision GUARDADA
+    cuyo periodo esta vencido o programado lo dice (la persona no la ve rigiendo): es el mismo
+    texto de la ficha."""
+    frase = ps.mensaje_fijo_y_margen(ov, datos, hoy)
+    return _ERROR_COMBINACION.format(estorbo=frase[frase.index(" ("):] if " (" in frase else "")
+
+
+def _es(texto: str) -> str:
+    """Un numero canonico (con punto) como lo escribe la persona (con coma)."""
+    return texto.replace(".", ",")
+
+
+def _margen_valido(texto: str, errs: list[str]) -> float | None:
+    """El Margen fijo % (en % sobre la venta) o None si no vale, con el motivo en `errs`.
+    Una celda con formato de porcentaje entrega 0,35: es el error que mas se comete."""
+    v = float(texto)
+    if v < 1:
+        errs.append(f"Margen fijo %: {_es(texto)} no vale. Escribe 35 para un margen de 35 %, no 0,35 "
+                    "(tiene que ser 1 o más).")
+        return None
+    if v >= 100:
+        errs.append(f"Margen fijo %: {_es(texto)} no vale. Es un porcentaje sobre la venta: tiene que "
+                    "ser menor que 100.")
+        return None
+    return v
+
+
+def _datos_margen(ed: dict[str, str], ov: dict, datos: dict, errs: list[str]) -> None:
+    """El margen fijo que pide el archivo, desde `Factor` (el atajo de siempre) y/o `Margen
+    fijo %` (la columna explicita). Si cambia una sola, vale esa; si cambian las dos y dicen lo
+    mismo (el factor de ese margen, a 4 decimales), se aplica una vez; si discrepan, es un
+    error. Vacio quita la decision."""
+    f, m = ed.get("factor"), ed.get("margen")
+    if f is not None and m is not None:
+        if f == "" and m == "":
+            nuevo = None
+        elif f == "" or m == "":
+            errs.append("Factor y Margen fijo %: uno quedó vacío y el otro no. Cambia solo uno de los "
+                        "dos, o deja los dos vacíos para quitar el margen.")
+            return
+        else:
+            nuevo = _margen_valido(m, errs)
+            if nuevo is None:
+                return
+            esperado = ps.factor_desde_margen(nuevo)
+            if round(float(f), 4) != esperado:
+                errs.append(f"Factor ({_es(f)}) y Margen fijo % ({_es(m)}) no dicen lo mismo: un margen "
+                            f"de {_es(m)} % es un factor de {_celda_factor(esperado)}. Cambia solo uno "
+                            "de los dos.")
+                return
+    elif m is not None:
+        if m == "":
+            nuevo = None
+        else:
+            nuevo = _margen_valido(m, errs)
+            if nuevo is None:
+                return
+    else:
+        if f == "":
+            nuevo = None
+        else:
+            v = float(f)
+            if not 1.0 < v <= 10.0:
+                errs.append(f"Factor: {_es(f)} no vale. Tiene que ser mayor que 1 y hasta 10.")
+                return
+            actual = ps.factor_desde_margen(ov.get("margen_fijo"))
+            if actual is not None and round(actual, 4) == round(v, 4):
+                return
+            # El margen que da exactamente ese factor: es sobre la venta.
+            nuevo = round((1 - 1 / v) * 100, 8)
+    guardado = ov.get("margen_fijo")
+    if nuevo is None:
+        if guardado is not None:
+            datos["margen_fijo"] = None
+    elif guardado is None or round(float(guardado), 2) != round(nuevo, 2):
+        datos["margen_fijo"] = nuevo
+
+
+def _datos_precio(ed: dict[str, str], ov: dict, datos: dict, errs: list[str]) -> None:
+    """El precio fijo que pide el archivo, desde `Precio final` (el atajo de siempre) y/o
+    `Precio fijo` (la columna explicita), con las mismas reglas que el margen."""
+    p, q = ed.get("precio"), ed.get("precio_fijo")
+    if p is not None and q is not None and p != q:
+        mostrar = lambda t: "vacío" if t == "" else _miles(t)      # noqa: E731
+        errs.append(f"Precio final ({mostrar(p)}) y Precio fijo ({mostrar(q)}) no dicen lo mismo. "
+                    "Cambia solo uno de los dos, o ponles el mismo valor.")
+        return
+    nuevo = q if q is not None else p
+    if nuevo == "":
+        if ov.get("precio_fijo") is not None:
+            datos["precio_fijo"] = None
+        return
+    v = float(int(nuevo))
+    if v < 0:
+        errs.append(f"{'Precio fijo' if q is not None else 'Precio final'}: no puede ser negativo.")
+    elif ov.get("precio_fijo") is None or float(ov["precio_fijo"]) != v:
+        datos["precio_fijo"] = v
+
+
+def _datos_override(ed: dict[str, str], ov: dict, tipos: dict[str, str],
+                    hoy: date) -> tuple[dict, list[str], list[str]]:
+    """De lo que la persona cambio en el archivo, lo que se le aplica al producto (mismos
+    nombres que `guardar_override`) y los problemas: (datos, errores del archivo, errores de
+    combinacion). Pura: no toca la base.
+
+    Los errores del archivo (un tipo que no existe, un factor fuera de rango, un Desde
+    posterior al Hasta que escribio la propia carga...) bloquean la carga entera. Los de
+    combinacion dependen de lo que YA estaba guardado (precio fijo y factor a la vez, un
+    periodo que ya vencio): si otra persona toco el producto despues de bajar el archivo son
+    un conflicto de esa fila; si no, un error. Las reglas del periodo son las de la ficha
+    (`validar_vigencia`)."""
     datos: dict = {}
     errs: list[str] = []
+    combinacion: list[str] = []
 
     if "tipo" in ed:
         t = ed["tipo"]
@@ -846,32 +1106,10 @@ def _datos_override(ed: dict[str, str], ov: dict, tipos: dict[str, str]) -> tupl
             elif ov.get("procedencia_manual") != norm:
                 datos["procedencia_manual"] = norm
 
-    if "factor" in ed:
-        f = ed["factor"]
-        if f == "":
-            if ov.get("margen_fijo") is not None:
-                datos["margen_fijo"] = None
-        else:
-            v = float(f)
-            if not 1.0 < v <= 10.0:
-                errs.append(f"Factor: {f.replace('.', ',')} no vale. Tiene que ser mayor que 1 y hasta 10.")
-            else:
-                actual = ps.factor_desde_margen(ov.get("margen_fijo"))
-                if actual is None or round(actual, 4) != round(v, 4):
-                    # El margen que da exactamente ese factor: es sobre la venta.
-                    datos["margen_fijo"] = round((1 - 1 / v) * 100, 8)
-
-    if "precio" in ed:
-        p = ed["precio"]
-        if p == "":
-            if ov.get("precio_fijo") is not None:
-                datos["precio_fijo"] = None
-        else:
-            v = float(int(p))
-            if v < 0:
-                errs.append("Precio final: no puede ser negativo.")
-            elif ov.get("precio_fijo") is None or float(ov["precio_fijo"]) != v:
-                datos["precio_fijo"] = v
+    if "factor" in ed or "margen" in ed:
+        _datos_margen(ed, ov, datos, errs)
+    if "precio" in ed or "precio_fijo" in ed:
+        _datos_precio(ed, ov, datos, errs)
 
     if "obs" in ed:
         o = ed["obs"]
@@ -884,12 +1122,23 @@ def _datos_override(ed: dict[str, str], ov: dict, tipos: dict[str, str]) -> tupl
         if clave in ed and (ed[clave] == "1") != bool(ov.get(campo)):
             datos[campo] = ed[clave] == "1"
 
-    # Precio fijo y factor propio no conviven: son dos respuestas para el mismo precio.
-    fijo = datos["precio_fijo"] if "precio_fijo" in datos else ov.get("precio_fijo")
-    margen = datos["margen_fijo"] if "margen_fijo" in datos else ov.get("margen_fijo")
-    if not errs and fijo is not None and margen is not None:
-        errs.append(_ERROR_COMBINACION)
-    return datos, errs
+    # El periodo: Desde y Hasta (vacio = sin limite de ese lado). Solo viajan los que cambian.
+    for clave, campo in (("desde", "vigente_desde"), ("hasta", "vigente_hasta")):
+        if clave in ed:
+            nuevo = date.fromisoformat(ed[clave]) if ed[clave] else None
+            if nuevo != ps._fecha(ov.get(campo)):
+                datos[campo] = nuevo
+
+    if not errs:
+        # Precio fijo y factor propio no conviven: son dos respuestas para el mismo precio.
+        fijo = datos["precio_fijo"] if "precio_fijo" in datos else ov.get("precio_fijo")
+        margen = datos["margen_fijo"] if "margen_fijo" in datos else ov.get("margen_fijo")
+        if fijo is not None and margen is not None:
+            combinacion.append(_error_combinacion(ov, datos, hoy))
+        else:
+            for e in ps.validar_vigencia(ov, datos, hoy):
+                (combinacion if e.de_combinacion else errs).append(e.mensaje)
+    return datos, errs, combinacion
 
 
 def _miles(n) -> str:
@@ -915,19 +1164,32 @@ def _describir(datos: dict, ov: dict, p) -> list[dict]:
             despues = "(sin precio fijo)" if v is None else _miles(v)
         elif k in ("congelar", "no_producto"):
             antes, despues = _si_no(ov.get(k)), _si_no(v)
+        elif k in ("vigente_desde", "vigente_hasta"):
+            sin = "(sin Desde)" if k == "vigente_desde" else "(sin vencimiento)"
+            antes_f = ps._fecha(ov.get(k))
+            antes = ps._fmt_dia(antes_f) if antes_f else sin
+            despues = sin if v is None else ps._fmt_dia(v)
         else:
             antes, despues = ov.get("obs") or "(vacía)", v or "(vacía)"
         campos.append({"campo": _ETIQUETA_CAMPO[k], "antes": antes, "despues": despues})
     return campos
 
 
-def _override_despues(ov: dict, datos: dict, precio_vigente) -> dict:
-    d = dict(ov)
-    d.update(datos)
-    if "congelar" in datos:
-        d["congelado_precio"] = precio_vigente if datos["congelar"] and not ov.get("congelar") else (
-            ov.get("congelado_precio") if datos["congelar"] else None)
-    return d
+def _frase_periodo(ov: dict) -> str | None:
+    """El periodo en que rige la decision de precio de un producto, en una frase: "Rige del
+    01-11-2026 al 30-11-2026", "Rige hasta el 30-11-2026". None si no tiene periodo (o no tiene
+    ninguna decision que el periodo gobierne). La vista previa la muestra ya interpretada: es
+    la forma de notar un dia y mes cambiados."""
+    if not ps._tiene_decision_fija(ov):
+        return None
+    desde, hasta = ps._fecha(ov.get("vigente_desde")), ps._fecha(ov.get("vigente_hasta"))
+    if desde and hasta:
+        return f"Rige del {ps._fmt_dia(desde)} al {ps._fmt_dia(hasta)}"
+    if hasta:
+        return f"Rige hasta el {ps._fmt_dia(hasta)}"
+    if desde:
+        return f"Rige desde el {ps._fmt_dia(desde)}"
+    return None
 
 
 _MENSAJE_CONFLICTO = (
@@ -952,13 +1214,15 @@ def planificar(db, nombre: str, contenido: bytes) -> _Plan:
                 "primera, muévela al principio y guarda de nuevo.") from e
         raise
     plan = _Plan()
+    hoy = calendario.hoy_chile()          # la de Chile: los periodos vencen a medianoche de Chile
     errores: list[dict] = []
     conflictos: list[dict] = []
     vistos: dict[str, int] = {}
     candidatos: dict[str, tuple[int, dict[str, str], str]] = {}
     sin_referencia: list[str] = []
     redondeados: list[str] = []
-    leidas = sin_cambios = 0
+    leidas = sin_cambios = archivo_viejo = 0
+    faltan_v2 = [t for c, t in CAMPOS_V2 if c not in cols]
 
     def celda(fila, clave):
         j = cols[clave]
@@ -992,9 +1256,21 @@ def planificar(db, nombre: str, contenido: bytes) -> _Plan:
                 "La Referencia de esta fila es de otro producto: ¿ordenaste o pegaste columnas por "
                 "separado? Descarga el archivo de nuevo y edítalo sin mover columnas sueltas.")})
             continue
+        # Una Referencia de 10 partes es de un archivo bajado antes de las columnas de periodo
+        # (Precio fijo, Margen fijo %, Desde, Hasta): esas celdas, si las hay, no se leen. Con
+        # una de 14, las cuatro columnas tienen que estar: sin ellas no se sabe que mostraba el
+        # archivo, y se las tomaria por vacias (o sea, por quitas).
+        es_v2 = CAMPOS_V2[0][0] in base
+        if es_v2 and faltan_v2:
+            raise ErrorCarga(
+                f"Faltan las columnas: {', '.join(faltan_v2)}. Descarga el archivo de nuevo con "
+                "\"Descargar para editar\" y no borres columnas.")
+        if not es_v2:
+            archivo_viejo += 1
+        campos = CAMPOS + CAMPOS_V2 if es_v2 else CAMPOS
         valores: dict[str, str] = {}
         malo = False
-        for campo, titulo in CAMPOS:
+        for campo, titulo in campos:
             try:
                 valores[campo] = _canon_rapido(campo, celda(fila, campo), base[campo])
             except ValueError as e:
@@ -1002,7 +1278,7 @@ def planificar(db, nombre: str, contenido: bytes) -> _Plan:
                 malo = True
         if malo:
             continue
-        ed = {c: valores[c] for c, _ in CAMPOS if not _igual(c, valores[c], base[c], obs_ansi)}
+        ed = {c: valores[c] for c, _ in campos if not _igual(c, valores[c], base[c], obs_ansi)}
         if "factor" not in ed and valores["factor"] != base["factor"]:
             redondeados.append(codigo)         # Excel mostro el factor con menos decimales
         if not ed:
@@ -1015,7 +1291,7 @@ def planificar(db, nombre: str, contenido: bytes) -> _Plan:
     n_quitan: Counter = Counter()
     n_fijan: Counter = Counter()
     ejemplos_quitan: list[dict] = []
-    suben = bajan = igual = nuevos = 0
+    suben = bajan = igual = nuevos = programados = 0
     if candidatos:
         tenant = settings.default_tenant_id
         codigos = list(candidatos)
@@ -1043,21 +1319,23 @@ def planificar(db, nombre: str, contenido: bytes) -> _Plan:
                 if not ed:
                     sin_cambios += 1
                     continue
-            datos, errs = _datos_override(ed, ov, tipos)
-            if errs and errs != [_ERROR_COMBINACION]:
-                # Un error del propio archivo (tipo que no existe, factor fuera de rango)
-                # bloquea la carga, lo haya editado otra persona o no.
+            datos, errs, combinacion = _datos_override(ed, ov, tipos, hoy)
+            if errs:
+                # Un error del propio archivo (tipo que no existe, factor fuera de rango,
+                # un Desde posterior al Hasta) bloquea la carga, lo haya editado otra persona
+                # o no.
                 errores.extend({"fila": n, "producto": codigo, "mensaje": e} for e in errs)
                 continue
-            if huella_decisiones(ov) != h2 and (datos or errs):
+            if huella_decisiones(ov) != h2 and (datos or combinacion):
                 # Otra persona (o una carga anterior) edito este producto despues de
                 # bajar el archivo, y el archivo lo edita tambien: se omite SOLO esta
-                # fila. Un error de combinacion (precio fijo + factor propio) puede
-                # venir de lo que el otro dejo y no del archivo: no bloquea las demas.
+                # fila. Un error de combinacion (precio fijo + factor propio, un periodo ya
+                # vencido) puede venir de lo que el otro dejo y no del archivo: no bloquea
+                # las demas.
                 conflictos.append({"fila": n, "producto": codigo, "mensaje": _MENSAJE_CONFLICTO})
                 continue
-            if errs:
-                errores.extend({"fila": n, "producto": codigo, "mensaje": e} for e in errs)
+            if combinacion:
+                errores.extend({"fila": n, "producto": codigo, "mensaje": e} for e in combinacion)
                 continue
             if not datos:
                 # Lo que el archivo dice ya es lo que hay: p.ej. el mismo archivo subido
@@ -1067,7 +1345,15 @@ def planificar(db, nombre: str, contenido: bytes) -> _Plan:
             fila_regla = {k: getattr(p, k) for k in (
                 "glosa", "rubro", "procedencia_maestro", "costo", "stock", "stock_transito",
                 "ult_recep_importado", "ult_pe_nacional", "precio_sugerido")}
-            despues = ps.calcular(fila_regla, _override_despues(ov, datos, p.precio_final), fact, rub)
+            # La decision tal como quedaria (la misma `_aplicar_override` que la escribe: una
+            # copia de sus reglas mostraria un precio distinto del que se guarda) y el
+            # precio de hoy, que es el que se congela.
+            precio_hoy = ps.precio_de_hoy(fila_regla, p.precio_final, ov, fact, rub, hoy)
+            ov_despues = ps.override_despues(ov, datos, precio_hoy, hoy)
+            despues = ps.calcular(fila_regla, ov_despues, fact, rub, hoy)
+            if (any(k in datos for k in _CAMPOS_QUE_FIJAN)
+                    and ps.vigencia_de(ov_despues, hoy) == ps.PROGRAMADA):
+                programados += 1             # el archivo lo deja para mas adelante: hoy su precio no cambia
             antes = p.precio_final
             pd = despues["precio_final"]
             if (antes is None) != (pd is None) or (antes is not None and abs(antes - pd) >= 0.5):
@@ -1086,11 +1372,12 @@ def planificar(db, nombre: str, contenido: bytes) -> _Plan:
                     n_quitan[_CLAVE_POR_CAMPO_OV[k]] += 1
                     if len(ejemplos_quitan) < 20:
                         ejemplos_quitan.append({"producto": codigo, "campo": _ETIQUETA_CAMPO[k]})
-                elif k in ("precio_fijo", "margen_fijo"):
+                elif k in _CAMPOS_QUE_FIJAN:
                     n_fijan[_CLAVE_POR_CAMPO_OV[k]] += 1
             plan.cambios.append({
                 "producto": codigo, "fila": n, "glosa": p.glosa, "datos": datos, "h2": h2, "ed": ed,
                 "campos": _describir(datos, ov, p), "precio_antes": antes, "precio_despues": pd,
+                "vigencia": _frase_periodo(ov_despues),
             })
 
     plan.errores_total = len(errores)
@@ -1103,11 +1390,17 @@ def planificar(db, nombre: str, contenido: bytes) -> _Plan:
         "quitan_ejemplos": ejemplos_quitan, "umbral_quitas": UMBRAL_QUITAS,
         "fijan_total": sum(n_fijan.values()), "fijan": dict(n_fijan), "umbral_masiva": UMBRAL_MASIVA,
         "factor_redondeado_total": len(redondeados), "factor_redondeado": redondeados[:TOPE_CODIGOS],
+        # Filas de un archivo bajado antes de las columnas de periodo (Referencia de 10 partes):
+        # sus Precio fijo, Margen fijo %, Desde y Hasta no se leen. Los programados son los que
+        # el archivo deja con una decision que empieza mas adelante (un Desde futuro): hoy su
+        # precio no cambia. No cuenta el producto que ya estaba programado y solo cambia la nota.
+        "archivo_viejo_total": archivo_viejo, "programados_total": programados,
         "errores": errores[:TOPE_LISTA], "errores_total": len(errores),
         "conflictos": conflictos[:TOPE_LISTA], "conflictos_total": len(conflictos),
         "desconocidos": desconocidos[:TOPE_CODIGOS], "desconocidos_total": len(desconocidos),
         "sin_referencia": sin_referencia[:TOPE_CODIGOS], "sin_referencia_total": len(sin_referencia),
-        "cambios": [{k: c[k] for k in ("producto", "glosa", "campos", "precio_antes", "precio_despues")}
+        "cambios": [{k: c[k] for k in ("producto", "glosa", "campos", "precio_antes", "precio_despues",
+                                       "vigencia")}
                     for c in plan.cambios[:TOPE_CAMBIOS]],
         "cambios_total": len(plan.cambios),
     }
@@ -1127,8 +1420,8 @@ def aplicar(db, nombre: str, contenido: bytes, usuario: str | None,
 
     Una celda vacia quita la decision, y un .xlsx con celdas de error (#N/D, #REF!)
     las entrega vacias: si la carga quita `UMBRAL_QUITAS` decisiones o mas, hace falta
-    `confirmar_quitas`. Si pone mas de `UMBRAL_MASIVA` precios fijos o factores propios
-    nuevos, hace falta `confirmar_masiva`."""
+    `confirmar_quitas`. Si pone mas de `UMBRAL_MASIVA` precios fijos, factores propios,
+    congelados o fechas de periodo nuevos, hace falta `confirmar_masiva`."""
     plan = planificar(db, nombre, contenido)
     if plan.errores_total:
         uno = plan.errores_total == 1
@@ -1143,7 +1436,8 @@ def aplicar(db, nombre: str, contenido: bytes, usuario: str | None,
             "error (#N/D, #REF!) en el Excel.")
     if r["fijan_total"] > UMBRAL_MASIVA and not confirmar_masiva:
         raise ErrorCarga(
-            f"Esta carga deja {_miles(r['fijan_total'])} precios fijos o factores propios nuevos. "
+            f"Esta carga deja {_miles(r['fijan_total'])} precios fijos o factores propios nuevos "
+            "(contando también los congelados y las fechas del periodo). "
             "Confírmalo en la pantalla antes de cargar: si no era lo que querías, puede que se haya "
             "ordenado una sola columna del Excel y los valores quedaron en la fila de otro producto.")
     omitidos = {"conflictos": r["conflictos_total"], "desconocidos": r["desconocidos_total"],
@@ -1181,6 +1475,7 @@ def aplicar(db, nombre: str, contenido: bytes, usuario: str | None,
     # reintento de una respuesta perdida) o una edicion de la ficha.
     pendientes: list[dict] = []
     sin_cambios = r["sin_cambios"]
+    hoy = calendario.hoy_chile()
     for c in plan.cambios:
         cod = c["producto"]
         if cod not in prods:
@@ -1188,17 +1483,17 @@ def aplicar(db, nombre: str, contenido: bytes, usuario: str | None,
             continue
         o = ovs.get(cod)
         ov_actual = ps._override_dict(o) if o else {}
-        datos, errs = _datos_override(c["ed"], ov_actual, tipos)
-        if huella_decisiones(ov_actual) != c["h2"] and (datos or errs):
+        datos, errs, combinacion = _datos_override(c["ed"], ov_actual, tipos, hoy)
+        if huella_decisiones(ov_actual) != c["h2"] and (datos or combinacion):
             omitidos["conflictos"] += 1
             continue
-        if errs:
+        if errs or combinacion:
             omitidos["conflictos"] += 1
             continue
         if not datos:
             sin_cambios += 1               # ya estaba como dice el archivo
             continue
-        pendientes.append({**c, "datos": datos})
+        pendientes.append({**c, "datos": datos, "ov_antes": ov_actual})
     if not pendientes:
         db.rollback()
         return {"aplicados": 0, "por_campo": {}, "precios_distintos": 0, "sin_cambios": sin_cambios,
@@ -1213,7 +1508,11 @@ def aplicar(db, nombre: str, contenido: bytes, usuario: str | None,
             o = PrecioOverride(tenant_id=tenant, producto=cod)
             db.add(o)
             ovs[cod] = o
-        detalles[cod] = "; ".join(ps._aplicar_override(o, prods[cod].precio_final, c["datos"], usuario))
+        p = prods[cod]
+        # El precio de hoy es el que queda congelado: si el periodo guardado ya vencio, la
+        # fila puede seguir mostrando el de la decision vencida (ver `guardar_override`).
+        precio_hoy = ps.precio_de_hoy(ps._fila_regla(p), p.precio_final, c["ov_antes"], fact, rub, hoy)
+        detalles[cod] = "; ".join(ps._aplicar_override(o, precio_hoy, c["datos"], usuario, hoy))
         for k in c["datos"]:
             por_campo[_CLAVE_POR_CAMPO_OV[k]] += 1
     db.flush()
@@ -1224,7 +1523,7 @@ def aplicar(db, nombre: str, contenido: bytes, usuario: str | None,
         cod = c["producto"]
         p = prods[cod]
         antes = p.precio_final
-        ps._recalcular_una(db, p, ps._override_dict(ovs[cod]), fact, rub)
+        ps._recalcular_una(db, p, ps._override_dict(ovs[cod]), fact, rub, hoy)
         distintos += int((antes is None) != (p.precio_final is None)
                          or (antes is not None and abs(antes - p.precio_final) >= 0.5))
         obs_de[cod] = ovs[cod].obs
