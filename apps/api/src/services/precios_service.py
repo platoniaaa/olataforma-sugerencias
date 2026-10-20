@@ -8,11 +8,14 @@ primero que aplica):
 
   1. Precio fijo (override)      -> ese es el precio, cambie lo que cambie.
   2. Congelado (override)         -> el precio que tenia al congelar.
-  3. No es producto (override)    -> sin precio (servicios, mano de obra).
-  4. Stock 0 y nada en transito   -> precio 0 (el ERP no lo ofrece).
-  4b. Margen fijo (override)      -> ROUND(costo x 1/(1 - margen)), sigue al costo.
-  5. Tipo Sugerido                -> la lista del proveedor (Gildemeister).
-  6. El resto                     -> ROUND(costo x factor).
+  3. Stock 0 y nada en transito   -> precio 0 (el ERP no lo ofrece).
+  4. No es producto (override)    -> sin precio (servicios, mano de obra).
+  5. Margen fijo (override)       -> ROUND(costo x 1/(1 - margen)), sigue al costo.
+  6. Tipo Sugerido                -> la lista del proveedor (Gildemeister).
+  7. El resto                     -> ROUND(costo x factor).
+
+El 3 va antes que el 4 (un servicio sin stock sale en 0, no sin precio), tal cual lo
+hacia el .exe. En el codigo, 1 y 2 se aplican al final sobre lo que dieron 3 a 7.
 
 El factor sale de la politica por (tipo, procedencia). El tipo y la procedencia
 se deciden en cascada; el detalle esta en `_tipo` y `_procedencia`.

@@ -6,7 +6,11 @@ misma, pero corre donde estan los datos (stock, costo, compras y ventas que la
 plataforma ya recibe del motor) y las decisiones de las personas quedan en una
 tabla que ningun job toca.
 
-Pantallas: `/precios` (la lista) y `/precios/politicas` (factores y rubros).
+Pantallas: `/precios` (la lista) y `/precios/politicas` (factores y rubros). La lista trae un
+recorrido guiado (botón «Tutorial», 16 pasos en `components/tutorial-precios.tsx`) que se abre
+solo la primera vez; explica el orden de decisión, la vigencia, las bodegas que cuentan y los dos
+caminos de «Editar con Excel». Si cambia una regla de este documento, hay que cambiar también ese
+texto: nada los ata.
 
 ## Como se decide el precio
 
@@ -16,13 +20,18 @@ En este orden; gana el primero que aplica (`services/precios_service.calcular`):
    su periodo rija, si tiene uno (ver "Vigencia").
 2. **Congelado** (decision humana): el precio que tenia al congelar, aunque el
    costo cambie despues. Tambien con periodo.
-3. **Stock 0 y nada en transito**: precio 0 (el ERP no lo ofrece).
-4. **No es producto** (servicios, mano de obra): sin precio.
+3. **Stock 0 y nada en transito**: precio 0 (el ERP no lo ofrece). El stock es el de las
+   bodegas que cuentan (ver "Bodegas").
+4. **No es producto** (servicios, mano de obra): sin precio. Va despues del 3: un servicio
+   sin stock sale en 0, no sin precio (asi lo hacia el `.exe`).
 5. **Margen fijo** (decision humana, % sobre la venta): `ROUND(costo x 1/(1 - margen))`.
    Sigue al costo y sin stock cae a 0 como la regla. No convive con el precio fijo.
 6. **Tipo Sugerido**: la lista del proveedor (Gildemeister).
 7. **El resto**: `ROUND(costo x factor)`, redondeando como Excel (la mitad hacia
    arriba).
+
+Precio fijo, margen fijo y congelado solo cuentan **dentro de su periodo** (ver "Vigencia"):
+fuera de el se ignoran antes de aplicar este orden, y el producto vuelve a la regla.
 
 El **factor** sale de la politica por (tipo, procedencia).
 
@@ -630,3 +639,27 @@ sale en el SKU del archivo del ERP y en el Producto de la lista completa. Lo lle
 el feed del ERP (`POST /api/admin/precios/erp`) con el Excel de stock de cada dia;
 una fila sin la clave `codigo_erp` no lo toca, y una que la trae en None lo limpia
 (el ERP le saco el espacio).
+
+## Lo que quedo fuera de esta etapa (20-10-2026)
+
+Decidido a proposito al cerrar bodegas, vigencia y carga por Excel. Ninguna de estas cosas
+rompe nada; son mejoras que se pueden pedir despues:
+
+- **Paso del motor para aplicar vigencias de noche.** No se hizo: el barrido ya corre solo al
+  leer la lista, el resumen o al bajar un archivo, y el motor vive en otro repositorio. Un
+  vencimiento llega al precio la primera vez que alguien lo lee ese dia.
+- **Purga de `precio_cambio`.** La tabla solo crece (un vencimiento deja una fila solo si el precio
+  cambio de verdad). Cuando pese, se purga lo ya revisado y viejo.
+- **Aviso previo al vencimiento.** No hay notificacion en la campanita. Se ve en la lista: columna
+  `Vigencia`, filtro `Vigencia` y recuadro `Vencen en 7 dias`.
+- **Huella de las columnas de solo lectura.** Editar `Costo`, `Stock` o `Estado` en el archivo se
+  ignora, pero no se avisa fila por fila: la huella solo protege lo que la carga puede escribir.
+- **Archivo `.xlsx` generado por el servidor para la lista completa.** «Editar con Excel» baja el
+  completo en CSV; solo la plantilla del Excel corto sale como `.xlsx` (pesa unos KB). Armar el
+  completo en `.xlsx` pesaria decenas de MB y tardaria en un servidor chico.
+- **Mantenimiento de las bodegas en pantalla.** La clasificacion se carga con el script
+  `scripts/precios/bodegas_tipo.py`; no hay una pantalla para editarla.
+- **Margen fijo y congelar en el Excel corto.** Solo se leen precio fijo, periodo y observacion;
+  margen y congelar se cargan con el completo o desde la ficha.
+- **Cambiar el ERP.** Nada de esto cambia el precio en el ERP por si solo: la plataforma recalcula,
+  y el ERP se entera cuando alguien sube el archivo de «Solo diferencias».
