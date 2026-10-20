@@ -468,7 +468,7 @@ export function StockPorBodega({ bodegas }: { bodegas: StockBodega[] }) {
   return (
     // Abierto cuando hay algo que no cuenta: es el caso que genera preguntas.
     <details className="text-[12px]" open={fuera.length > 0}>
-      <summary className="cursor-pointer text-ink-500">
+      <summary className="cursor-pointer text-ink-500 [@media(pointer:coarse)]:py-3">
         Stock por bodega ({bodegas.length})
         {fuera.length > 0 && (
           <span className="ml-2 rounded bg-amber-100 px-1.5 text-[10px] font-semibold text-amber-800">
