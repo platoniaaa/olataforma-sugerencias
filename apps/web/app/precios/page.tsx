@@ -381,6 +381,8 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
         open={modalExcel}
         onClose={() => setModalExcel(false)}
         onCargado={() => { void cargar(); void cargarAuxiliares(); }}
+        totalProductos={resumen?.productos}
+        hoy={resumen?.vigencias?.hoy}
       />
 
       {seleccion && (

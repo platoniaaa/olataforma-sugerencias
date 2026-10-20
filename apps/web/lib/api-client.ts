@@ -228,6 +228,16 @@ async function descargar(path: string, body: unknown, fallbackNombre: string): P
   URL.revokeObjectURL(url);
 }
 
+/** Entrega un archivo ya descargado al navegador, como si se hubiera hecho clic en un enlace. */
+function guardarBlob(blob: Blob, nombre: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nombre;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export const api = {
   baseUrl: BASE,
 
@@ -1189,15 +1199,43 @@ export const api = {
     // pero Excel lo rechaza por "formato o extension no validos".
     const cd = res.headers.get("Content-Disposition") ?? "";
     const nombre = /filename="?([^"]+)"?/.exec(cd)?.[1] ?? `precios_${new Date().toISOString().slice(0, 10)}.csv`;
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = nombre;
-    a.click();
-    URL.revokeObjectURL(url);
+    guardarBlob(blob, nombre);
     // El archivo llegó: la próxima descarga es otra.
     if (esErp) loteErpEnCurso = null;
     return filas;
+  },
+
+  /** Baja la plantilla vacía del Excel corto (Código, Precio fijo, Desde, Hasta, Obs). Pesa unos
+   *  KB y no escribe nada: se puede repetir si el servidor se reinicia. Devuelve el nombre con
+   *  que quedó guardada. */
+  async descargarPlantillaCarga(
+    archivo: "xlsx" | "csv" = "xlsx",
+    alReintentar?: (intento: number, total: number) => void
+  ): Promise<string> {
+    let res: Response;
+    try {
+      res = await reqConReintentos(`/api/precios/carga/plantilla?archivo=${archivo}`, {}, { alReintentar });
+    } catch (e) {
+      if (e instanceof TypeError) throw new Error(MENSAJE_SIN_SERVIDOR);
+      throw e;
+    }
+    if (!res.ok) {
+      if ([502, 503, 504].includes(res.status)) throw new Error(MENSAJE_SIN_SERVIDOR);
+      throw new Error(await mensajeError(res, "No se pudo bajar la plantilla"));
+    }
+    let blob: Blob;
+    try {
+      blob = await res.blob();
+    } catch (e) {
+      if (e instanceof TypeError) throw new Error(MENSAJE_SIN_SERVIDOR);
+      throw e;
+    }
+    // Si el navegador esconde Content-Disposition, el respaldo coincide con el formato pedido:
+    // un CSV con nombre ".xlsx" baja igual, pero Excel lo rechaza.
+    const cd = res.headers.get("Content-Disposition") ?? "";
+    const nombre = /filename="?([^"]+)"?/.exec(cd)?.[1] ?? `plantilla_precios_corta.${archivo}`;
+    guardarBlob(blob, nombre);
+    return nombre;
   },
 
   async politicaFactores(): Promise<import("./types").PoliticaFactor[]> {
@@ -1208,14 +1246,18 @@ export const api = {
     return getJSON("/api/precios/politica/rubros");
   },
 
-  /** Lee el archivo de la lista editado en Excel y dice qué cambiaría. No guarda nada. */
+  /** Lee el archivo de la lista editado en Excel y dice qué cambiaría. No guarda nada.
+   *  `modo` declara qué archivo es ("corto": la plantilla; "completo": el que se bajó para
+   *  editar). Sin él no viaja nada y el servidor lo deduce por las columnas. */
   async vistaPreviaCargaPrecios(
     archivo: File,
     alReintentar?: (intento: number, total: number) => void,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    modo?: import("./types").ModoCarga
   ): Promise<import("./types").CargaPreciosVistaPrevia> {
     const fd = new FormData();
     fd.append("archivo", archivo);
+    if (modo) fd.append("modo", modo);
     let res: Response;
     try {
       // Leer el archivo no escribe nada: se puede repetir si el servidor se reinicia.
@@ -1241,10 +1283,13 @@ export const api = {
    *  la respuesta se pierde, volver a subir el archivo dice 0 cambios. */
   async cargarPrecios(
     archivo: File,
-    opts: { confirmarQuitas?: boolean; confirmarMasiva?: boolean } = {}
+    opts: { confirmarQuitas?: boolean; confirmarMasiva?: boolean; modo?: import("./types").ModoCarga } = {}
   ): Promise<import("./types").CargaPreciosResultado> {
     const fd = new FormData();
     fd.append("archivo", archivo);
+    // El mismo modo con que se leyo la vista previa: si el archivo no es de ese modo, el servidor
+    // responde 422 en vez de cargarlo como otra cosa.
+    if (opts.modo) fd.append("modo", opts.modo);
     // La carga que quita muchas decisiones (celdas vacias), o que pone muchos precios
     // fijos o factores propios, pide confirmacion al servidor.
     if (opts.confirmarQuitas) fd.append("confirmar_quitas", "true");

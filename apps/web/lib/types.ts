@@ -1604,15 +1604,33 @@ export interface CargaPreciosError {
   mensaje: string;
 }
 
+/** Cómo se carga la lista: "completo" es el archivo que se baja para editar (con la columna
+ *  Referencia); "corto" es la plantilla de cinco columnas para tocar pocos productos. */
+export type ModoCarga = "corto" | "completo";
+
 export interface CargaPreciosCambio {
   producto: string;
   glosa: string | null;
   campos: { campo: string; antes: string; despues: string }[];
   precio_antes: number | null;
   precio_despues: number | null;
+  /** El periodo en que rige la decisión de precio que queda, ya interpretado por el servidor
+   *  ("Rige del 01-11-2026 al 30-11-2026"). Nulo si el producto no tiene periodo. */
+  vigencia?: string | null;
+}
+
+/** Un precio fijo del Excel corto que pisa el margen fijo o el congelado que el producto tenía. */
+export interface CargaPreciosReemplazo {
+  producto: string;
+  /** "Margen fijo 35 % (vencido el 30-09-2026)", "Congelado en 2.160". */
+  decision_anterior: string;
+  editado_por: string | null;
+  editado_en: string | null;
 }
 
 export interface CargaPreciosVistaPrevia {
+  /** Qué modo leyó el servidor. Ausente en un servidor anterior al Excel corto. */
+  modo?: ModoCarga;
   archivo: string;
   filas: number;
   sin_cambios: number;
@@ -1624,7 +1642,8 @@ export interface CargaPreciosVistaPrevia {
   quitan: Record<string, number>;
   quitan_ejemplos: { producto: string; campo: string }[];
   umbral_quitas: number;
-  /** Precios fijos y factores propios que la carga PONE, y desde cuántos pide confirmación. */
+  /** Lo que la carga PONE (precios fijos, factores propios, congelados y fechas del periodo), y
+   *  desde cuántos pide confirmación. */
   fijan_total: number;
   fijan: Record<string, number>;
   umbral_masiva: number;
@@ -1641,9 +1660,25 @@ export interface CargaPreciosVistaPrevia {
   sin_referencia_total: number;
   cambios: CargaPreciosCambio[];
   cambios_total: number;
+  /** Filas de un archivo bajado antes de las columnas de periodo: sus Precio fijo, Margen fijo %,
+   *  Desde y Hasta no se leen. */
+  archivo_viejo_total?: number;
+  /** Productos que el archivo deja con una decisión que empieza más adelante (Desde futuro):
+   *  hoy su precio no cambia. */
+  programados_total?: number;
+  /** Columnas del archivo que no se leen (por ejemplo Margen fijo % en el Excel corto). */
+  columnas_ignoradas?: string[];
+  /** Solo en el Excel corto: precios fijos que quedan sin Hasta (permanentes), los que pisan otra
+   *  decisión, y un mensaje cuando el archivo no trae ningún producto. */
+  sin_hasta_total?: number;
+  sin_hasta?: string[];
+  reemplazos_total?: number;
+  reemplazos?: CargaPreciosReemplazo[];
+  mensaje?: string | null;
 }
 
 export interface CargaPreciosResultado {
+  modo?: ModoCarga;
   aplicados: number;
   por_campo: Record<string, number>;
   precios_distintos: number;

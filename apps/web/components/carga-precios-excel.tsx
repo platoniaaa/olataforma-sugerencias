@@ -1,31 +1,35 @@
 "use client";
 
-// Editar la lista de precios en Excel: se baja el archivo, se edita y se vuelve a
-// cargar. Antes de guardar se ve que cambia, producto por producto.
+// Editar la lista de precios en Excel, con DOS modos que la persona elige:
 //
-// El archivo que se sube es el que se bajo aca: trae una columna "Referencia" con los
-// valores que tenia cada producto al bajarlo. Con ella el servidor sabe QUE cambio la
-// persona (y no confunde con edicion lo que el motor recalculo de noche), a que
-// producto pertenece cada fila y si otra persona edito el producto mientras tanto.
+// - Excel corto: se baja una plantilla vacia (Codigo, Precio fijo, Desde, Hasta, Obs), se llena
+//   con los pocos productos que se quieren tocar y se sube. Se aplica TAL CUAL, solo a esos codigos.
+// - Excel completo: se baja la lista entera, se edita (once columnas se pueden tocar) y se sube.
+//
+// El archivo completo trae una columna "Referencia" con los valores que tenia cada producto al
+// bajarlo. Con ella el servidor sabe QUE cambio la persona (y no confunde con edicion lo que el
+// motor recalculo de noche), a que producto pertenece cada fila y si otra persona edito el
+// producto mientras tanto. El corto no la necesita: no compara contra una descarga.
+//
+// Los dos modos comparten el paso de subir el archivo y la vista previa "Qué cambia", antes de
+// guardar. El modo se declara al servidor (si el archivo no es de ese modo, da un error claro en
+// vez de cargarlo como otra cosa), se recuerda en el navegador y, al cambiarlo, se descarta lo que
+// habia a medias.
 import { useEffect, useRef, useState } from "react";
-import { AlertCircle, CheckCircle2, Download, FileSpreadsheet, Loader2, Upload } from "lucide-react";
+import { AlertCircle, CheckCircle2, FileSpreadsheet, Loader2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { api } from "@/lib/api-client";
 import { formatoNumero } from "@/lib/formato";
-import type { CargaPreciosResultado, CargaPreciosVistaPrevia } from "@/lib/types";
+import type { CargaPreciosResultado, CargaPreciosVistaPrevia, ModoCarga } from "@/lib/types";
+import { PasosCompleto } from "@/components/carga-precios/pasos-completo";
+import { PasosCorto } from "@/components/carga-precios/pasos-corto";
+import { SelectorModo, guardarModo, modoGuardado } from "@/components/carga-precios/selector-modo";
 import { VistaPrevia, cantidad, derivadosDePrevia } from "@/components/carga-precios/vista-previa";
 
-/** Las siete columnas que se pueden editar y que hace cada una al cargarla. */
-export const COLUMNAS_EDITABLES = [
-  { columna: "Tipo", hace: "Escribe el tipo a mano en ese producto.", vacia: "Vuelve a seguir al rubro." },
-  { columna: "Procedencia", hace: "Escribe la procedencia a mano (Nacional o Importado).", vacia: "Vuelve a la regla de compras." },
-  { columna: "Factor", hace: "Le da al producto un factor propio (margen fijo).", vacia: "Lo quita: vuelve al factor de la política." },
-  { columna: "Precio final", hace: "Lo deja como precio fijo.", vacia: "Quita el precio fijo." },
-  { columna: "Obs", hace: "Cambia la observación.", vacia: "La borra." },
-  { columna: "Congelar", hace: "Sí congela el precio de hoy; No lo descongela.", vacia: "Cuenta como No." },
-  { columna: "No es producto", hace: "Sí lo saca del cálculo (servicios, mano de obra).", vacia: "Cuenta como No." },
-] as const;
+// Las columnas del archivo completo (las once que se editan y las trece de solo lectura) viven con
+// sus pasos; se exportan desde aca porque es lo que el resto del codigo y las pruebas importan.
+export { COLUMNAS_EDITABLES, COLUMNAS_SOLO_LECTURA } from "@/components/carga-precios/pasos-completo";
 
 type Fase = "inicio" | "leyendo" | "previa" | "cargando" | "listo";
 
@@ -38,6 +42,10 @@ interface Props {
   onClose: () => void;
   /** Se llama cuando la carga terminó, para que la lista se refresque. */
   onCargado?: () => void;
+  /** Cuantos productos tiene la lista: con eso, el Excel corto dice cuantos quedan como estan. */
+  totalProductos?: number;
+  /** La fecha de hoy en Chile (la del servidor), para decir que empieza mas adelante. */
+  hoy?: string;
 }
 
 /** Lo que una carga dejo sin cargar, solo lo que no es cero. */
@@ -51,7 +59,22 @@ function textoOmitidos(o: CargaPreciosResultado["omitidos"]): string {
   return partes.join(", ");
 }
 
-export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
+/** "Listo: 12 productos actualizados, 9 cambiaron de precio. 3 empiezan más adelante y se aplican
+ *  ese día. Los precios nuevos salen en el próximo «Solo diferencias»." */
+function textoListo(r: CargaPreciosResultado, programados: number): string {
+  const empiezan = programados > 0
+    ? ` ${programados === 1 ? "1 empieza más adelante y se aplica ese día." : `${formatoNumero(programados)} empiezan más adelante y se aplican ese día.`}`
+    : "";
+  const base = `Listo: ${cantidad(r.aplicados, "producto actualizado", "productos actualizados")}`;
+  if (r.precios_distintos > 0) {
+    const cambiaron = r.precios_distintos === 1 ? "1 cambió" : `${formatoNumero(r.precios_distintos)} cambiaron`;
+    return `${base}, ${cambiaron} de precio.${empiezan} Los precios nuevos salen en el próximo "Solo diferencias".`;
+  }
+  return `${base}. Ningún precio cambió.${empiezan}`;
+}
+
+export function CargaPreciosExcel({ open, onClose, onCargado, totalProductos, hoy }: Props) {
+  const [modo, setModo] = useState<ModoCarga>(modoGuardado);
   const [fase, setFase] = useState<Fase>("inicio");
   const [archivo, setArchivo] = useState<File | null>(null);
   const [previa, setPrevia] = useState<CargaPreciosVistaPrevia | null>(null);
@@ -66,18 +89,19 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
   const [confirmaMasiva, setConfirmaMasiva] = useState(false);
   const entrada = useRef<HTMLInputElement>(null);
   const botonElegir = useRef<HTMLButtonElement>(null);
+  // El boton de bajar el archivo (la lista o la plantilla: en pantalla hay uno solo).
   const botonDescargar = useRef<HTMLButtonElement>(null);
   const panelResultado = useRef<HTMLDivElement>(null);
   const alerta = useRef<HTMLParagraphElement>(null);
   const panelPrevia = useRef<HTMLElement>(null);
   // Cada lectura y cada descarga lleva un numero. Si cuando termina ya no es el
-  // vigente -se eligio otro archivo, o se cerro el dialogo-, su respuesta se descarta:
-  // sin esto, una lectura lenta que llegaba tarde dejaba el nombre de un archivo y la
+  // vigente -se eligio otro archivo, se cambio de modo o se cerro el dialogo-, su respuesta se
+  // descarta: sin esto, una lectura lenta que llegaba tarde dejaba el nombre de un archivo y la
   // tabla de otro, y "Cargar" subia uno distinto del que se habia mirado.
   const lectura = useRef(0);
   const descarga = useRef(0);
-  // Cuantas descargas siguen en curso. Cerrar el dialogo no cancela la peticion: si el
-  // boton se rehabilitara al reabrir, se podia lanzar otra descarga de 11 MB encima.
+  // Cuantas descargas siguen en curso. Cerrar el dialogo (o cambiar de modo) no cancela la
+  // peticion: si el boton se rehabilitara, se podia lanzar otra descarga de 11 MB encima.
   const enVuelo = useRef(0);
   // La lectura vigente se puede cancelar: sin esto una lectura descartada seguia
   // reintentando y re-subiendo el archivo (hasta 30 MB) a un servidor de 512 MB.
@@ -90,7 +114,7 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
   const enfocarPrevia = useRef(false);
 
   // Al cerrarse el dialogo se empieza de cero: un archivo viejo en pantalla invita a
-  // cargarlo despues de que la lista ya cambio.
+  // cargarlo despues de que la lista ya cambio. El modo elegido NO se borra: es una preferencia.
   useEffect(() => {
     if (open) return;
     lectura.current += 1;
@@ -131,30 +155,52 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
     if (fase === "listo") panelResultado.current?.focus();
   }, [fase]);
 
-  async function descargar() {
+  /** Baja un archivo (la lista para editar o la plantilla) con su aviso propio. `pedir` hace la
+   *  descarga y devuelve lo que se le dice a la persona al terminar. */
+  async function bajar(
+    pedir: (alReintentar: (intento: number, total: number) => void) => Promise<string>,
+    errorPorDefecto: string,
+  ) {
     const id = ++descarga.current;
     enVuelo.current += 1;
     setDescargando(true);
     setError(null);
     try {
-      const n = await api.exportarPrecios(
-        { soloDiferencias: false, formato: "editable" },
-        (i, t) => { if (id === descarga.current) setAvisoDescarga(`Descarga: el servidor no responde. Reintentando (${i} de ${t})…`); },
-      );
-      if (id === descarga.current) {
-        setAvisoDescarga(`Archivo descargado: ${cantidad(n, "producto", "productos")}. Ábrelo con Excel, edita y vuelve aquí.`);
-      }
+      const aviso = await pedir((i, t) => {
+        if (id === descarga.current) setAvisoDescarga(`Descarga: el servidor no responde. Reintentando (${i} de ${t})…`);
+      });
+      if (id === descarga.current) setAvisoDescarga(aviso);
     } catch (e) {
       if (id === descarga.current) {
         setAvisoDescarga(null);
         const activo = typeof document !== "undefined" ? document.activeElement : null;
         enfocarError.current = activo === botonDescargar.current || activo === document.body;
-        setError(e instanceof Error ? e.message : "No se pudo descargar el archivo.");
+        setError(e instanceof Error ? e.message : errorPorDefecto);
       }
     } finally {
       enVuelo.current -= 1;
       setDescargando(enVuelo.current > 0);
     }
+  }
+
+  function descargarLista() {
+    return bajar(
+      async (alReintentar) => {
+        const n = await api.exportarPrecios({ soloDiferencias: false, formato: "editable" }, alReintentar);
+        return `Archivo descargado: ${cantidad(n, "producto", "productos")}. Ábrelo con Excel, edita y vuelve aquí.`;
+      },
+      "No se pudo descargar el archivo.",
+    );
+  }
+
+  function descargarPlantilla() {
+    return bajar(
+      async (alReintentar) => {
+        const nombre = await api.descargarPlantillaCarga("xlsx", alReintentar);
+        return `Plantilla descargada (${nombre}). Ábrela con Excel, llena tus productos y vuelve aquí.`;
+      },
+      "No se pudo descargar la plantilla.",
+    );
   }
 
   async function elegir(f: File | null) {
@@ -180,6 +226,7 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
         f,
         (i, t) => { if (id === lectura.current) setAvisoLectura(`Lectura: el servidor no responde. Reintentando (${i} de ${t})…`); },
         control.signal,
+        modo,
       );
       if (id !== lectura.current) return;
       setAvisoLectura(null);
@@ -200,7 +247,7 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
     setFase("cargando");
     setError(null);
     try {
-      const r = await api.cargarPrecios(archivo, { confirmarQuitas: confirmaQuitas, confirmarMasiva: confirmaMasiva });
+      const r = await api.cargarPrecios(archivo, { confirmarQuitas: confirmaQuitas, confirmarMasiva: confirmaMasiva, modo });
       setResultado(r);
       setFase("listo");
       onCargado?.();
@@ -215,6 +262,18 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
     }
   }
 
+  /** Cambiar de modo es empezar de nuevo, como "Descartar": el archivo y la vista previa eran de
+   *  otro modo. Una descarga en curso no se puede cancelar y sigue (el boton espera), pero su
+   *  aviso ya no corresponde a este modo, asi que se descarta. */
+  function cambiarModo(nuevo: ModoCarga) {
+    if (nuevo === modo) return;
+    void elegir(null);
+    descarga.current += 1;
+    setAvisoDescarga(null);
+    setModo(nuevo);
+    guardarModo(nuevo);
+  }
+
   const leyendo = fase === "leyendo";
   const cargando = fase === "cargando";
   const { hayErrores, pideConfirmar, pideConfirmarMasiva } = derivadosDePrevia(previa);
@@ -223,6 +282,10 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
   const omitidosCarga = resultado
     ? resultado.omitidos.conflictos + resultado.omitidos.desconocidos + resultado.omitidos.sin_referencia
     : 0;
+  // Los que la vista previa dijo que empiezan mas adelante (el resultado no lo repite), sin
+  // contar mas de los que se cargaron.
+  const programados = resultado ? Math.min(previa?.programados_total ?? 0, resultado.aplicados) : 0;
+  const bloqueaDescarga = descargando || leyendo || cargando;
 
   return (
     <Dialog
@@ -230,7 +293,7 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
       // Mientras se guarda no se cierra: la respuesta es lo unico que dice si quedo cargado.
       onClose={() => { if (!cargando) onClose(); }}
       title="Editar la lista con Excel"
-      description="Baja el archivo, edítalo y vuelve a cargarlo. Antes de guardar ves qué cambia."
+      description="Elige cómo cargar. Antes de guardar ves qué cambia."
       className="max-w-4xl"
     >
       <div className="space-y-5 text-[13px] text-slate-700">
@@ -252,10 +315,7 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
                 <span>
                   {resultado.aplicados === 0
                     ? "No había nada que cargar: la lista ya estaba como dice el archivo."
-                    : `Listo: ${cantidad(resultado.aplicados, "producto actualizado", "productos actualizados")}` +
-                      (resultado.precios_distintos > 0
-                        ? `, ${resultado.precios_distintos === 1 ? "1 cambió" : `${formatoNumero(resultado.precios_distintos)} cambiaron`} de precio. Los precios nuevos salen en el próximo "Solo diferencias".`
-                        : ". Ningún precio cambió.")}
+                    : textoListo(resultado, programados)}
                 </span>
               </p>
             )}
@@ -266,54 +326,30 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
               </p>
             )}
             <div className="flex justify-end">
-              <Button size="sm" onClick={onClose}>Cerrar</Button>
+              <Button size="sm" className="[@media(pointer:coarse)]:h-11" onClick={onClose}>Cerrar</Button>
             </div>
           </div>
         ) : (
           <>
-            <section className="space-y-2">
-              <h3 className="text-[13px] font-semibold text-slate-900">1. Descarga la lista</h3>
-              <p>Baja un archivo con todos los productos y sus precios de hoy.</p>
-              <Button ref={botonDescargar} variant="outline" size="sm" onClick={() => void descargar()} disabled={descargando || leyendo || cargando}>
-                {descargando ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
-                Descargar para editar
-              </Button>
-              {avisoDescarga && (
-                <p role="status" className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700">{avisoDescarga}</p>
-              )}
-            </section>
+            <SelectorModo modo={modo} onCambiar={cambiarModo} deshabilitado={leyendo || cargando} />
 
-            <section className="space-y-2">
-              <h3 className="text-[13px] font-semibold text-slate-900">2. Edítala en Excel</h3>
-              <p>Cambia solo las columnas de esta tabla:</p>
-              <div className="overflow-x-auto rounded-md border border-slate-200">
-                <table className="w-full text-[12px]">
-                  <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
-                    <tr>
-                      <th className="px-3 py-1.5">Columna</th>
-                      <th className="px-3 py-1.5">Al cargarla</th>
-                      <th className="px-3 py-1.5">Si la dejas vacía</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {COLUMNAS_EDITABLES.map((c) => (
-                      <tr key={c.columna} className="border-t border-slate-100">
-                        <td className="px-3 py-1.5 font-medium text-slate-900">{c.columna}</td>
-                        <td className="px-3 py-1.5">{c.hace}</td>
-                        <td className="px-3 py-1.5 text-slate-500">{c.vacia}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <ul className="list-disc space-y-0.5 pl-5 text-[12px] text-slate-600">
-                <li>No toques la última columna, <b>Referencia</b>, ni ordenes columnas sueltas: con ella la plataforma sabe qué cambiaste.</li>
-                <li>Guarda el archivo en el formato que quieras: CSV o libro de Excel (.xlsx). Los dos sirven.</li>
-                <li>Solo se carga lo que cambies. Lo demás (costo, stock, precio ERP, estado, descuento) viene del ERP y se recalcula cada día.</li>
-                <li>Un producto no puede tener precio fijo y factor propio a la vez: cambia uno, o deja vacía la celda del otro.</li>
-                <li>Un factor para todo un rubro conviene cambiarlo en <b>Política</b>: es un solo cambio y alcanza a los productos nuevos.</li>
-              </ul>
-            </section>
+            {modo === "corto" ? (
+              <PasosCorto
+                descargando={descargando}
+                deshabilitado={bloqueaDescarga}
+                aviso={avisoDescarga}
+                onDescargar={() => void descargarPlantilla()}
+                botonRef={botonDescargar}
+              />
+            ) : (
+              <PasosCompleto
+                descargando={descargando}
+                deshabilitado={bloqueaDescarga}
+                aviso={avisoDescarga}
+                onDescargar={() => void descargarLista()}
+                botonRef={botonDescargar}
+              />
+            )}
 
             <section className="space-y-2">
               <h3 className="text-[13px] font-semibold text-slate-900">3. Súbelo</h3>
@@ -324,7 +360,7 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
                 accept=".csv,.xlsx,.xlsm"
                 className="sr-only"
                 tabIndex={-1}
-                aria-label="Archivo editado"
+                aria-label={modo === "corto" ? "Archivo con tus productos" : "Archivo editado"}
                 disabled={cargando}
                 onChange={(e) => {
                   void elegir(e.target.files?.[0] ?? null);
@@ -332,7 +368,7 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
                 }}
               />
               <div className="flex flex-wrap items-center gap-2">
-                <Button ref={botonElegir} variant="outline" size="sm" onClick={() => entrada.current?.click()} disabled={cargando}>
+                <Button ref={botonElegir} variant="outline" size="sm" className="[@media(pointer:coarse)]:h-11" onClick={() => entrada.current?.click()} disabled={cargando}>
                   <Upload size={15} /> Elegir archivo
                 </Button>
                 {archivo && (
@@ -364,6 +400,8 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
                 // El boton desaparece con la seccion: el foco pasa a "Elegir archivo".
                 onDescartar={() => { void elegir(null); setTimeout(() => botonElegir.current?.focus(), 0); }}
                 onCargar={() => void cargar()}
+                totalProductos={totalProductos}
+                hoy={hoy}
               />
             )}
           </>
