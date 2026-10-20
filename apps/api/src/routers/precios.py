@@ -148,6 +148,23 @@ def exportar(
     )
 
 
+@router.get("/carga/plantilla")
+def plantilla_carga(
+    archivo: str = Query("xlsx", pattern="^(xlsx|csv)$", description="xlsx (por defecto) | csv"),
+    email: str = Depends(requiere_precios),
+):
+    """La plantilla vacia del Excel corto: Codigo, Precio fijo, Desde, Hasta, Obs. Se llena con
+    los productos que se quieren tocar y se sube en "Editar con Excel". Pesa unos KB.
+
+    Va ANTES del catch-all `/{producto:path}`: declarada despues, FastAPI la lee como un
+    producto y responde 404 "El producto no esta en la lista"."""
+    contenido, nombre, tipo = carga.plantilla_corta(archivo)
+    return StreamingResponse(
+        iter([contenido]), media_type=tipo,
+        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
+    )
+
+
 # Va ANTES del catch-all {producto:path}, si no FastAPI lo lee como un producto.
 @router.get("/{producto:path}", response_model=PrecioDetalleOut)
 def detalle(producto: str, db: Session = Depends(get_db)) -> dict:
@@ -336,15 +353,19 @@ def _leer_subida(archivo: UploadFile) -> bytes:
 
 @router.post("/carga/vista-previa")
 def carga_vista_previa(
-    archivo: UploadFile = File(...), db: Session = Depends(get_db),
-    email: str = Depends(requiere_precios),
+    archivo: UploadFile = File(...), modo: str = Form("auto"),
+    db: Session = Depends(get_db), email: str = Depends(requiere_precios),
 ) -> dict:
     """Lee el archivo editado y dice que cambiaria, sin guardar nada.
+
+    `modo`: `completo` (el archivo que se bajo para editar, con Referencia), `corto` (la
+    plantilla de cinco columnas) o `auto` (por defecto: se deduce de las columnas). Si lo
+    declarado contradice al archivo responde 422.
 
     Es `def` y no `async def`: leer 40 mil filas es trabajo de CPU, y en una
     corrutina bloquearia a todos los demas mientras tanto."""
     try:
-        return carga.vista_previa(db, archivo.filename or "", _leer_subida(archivo))
+        return carga.vista_previa(db, archivo.filename or "", _leer_subida(archivo), modo)
     except carga.ErrorCarga as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
 
@@ -352,15 +373,16 @@ def carga_vista_previa(
 @router.post("/carga")
 def carga_aplicar(
     archivo: UploadFile = File(...), confirmar_quitas: bool = Form(False),
-    confirmar_masiva: bool = Form(False),
+    confirmar_masiva: bool = Form(False), modo: str = Form("auto"),
     db: Session = Depends(get_db), email: str = Depends(requiere_precios),
 ) -> dict:
     """Carga los cambios del archivo editado: todos o ninguno. Vuelve a leer el
     archivo y a compararlo contra lo que hay AHORA, asi lo que se aplica es lo que
-    dice el archivo y no una vista previa vieja."""
+    dice el archivo y no una vista previa vieja. `modo` como en la vista previa."""
     try:
         return carga.aplicar(db, archivo.filename or "", _leer_subida(archivo), email,
-                            confirmar_quitas=confirmar_quitas, confirmar_masiva=confirmar_masiva)
+                            confirmar_quitas=confirmar_quitas, confirmar_masiva=confirmar_masiva,
+                            modo=modo)
     except carga.ErrorCarga as e:
         db.rollback()
         raise HTTPException(status_code=422, detail=str(e)) from e

@@ -313,7 +313,9 @@ estaba sin tocar datos.
 
 Botón "Editar con Excel" en `/precios` (solo quien puede editar precios). Se baja el
 archivo, se edita y se vuelve a cargar; antes de guardar se ve que cambia, producto
-por producto.
+por producto. Hay dos caminos: el **archivo completo** (toda la lista, con `Referencia`: lo
+que sigue) y el **Excel corto** para pocos productos (una plantilla de cinco columnas: ver
+"Excel corto", más abajo).
 
 - **Descarga** (20-10-2026): `GET /api/precios/exportar?formato=editable` son **25
   columnas** (CSV, `;`, BOM), en este orden: las 16 de "Exportar completa" (`Producto`,
@@ -511,6 +513,87 @@ por producto.
   códigos, el escaneo del `.xlsx`, las filas vacías del CSV, el tope de celdas, un error
   de valor escondido como conflicto, las notas que parecen número, el foco de la vista
   previa y los avisos de descarga y lectura (ahora separados). Se agregó el freno de 200.
+
+### Excel corto: pocos productos, sin bajar la lista (20-10-2026)
+
+Para tocar unos pocos productos no hace falta bajar los 40 mil: "Editar con Excel" tiene un
+segundo camino, una **plantilla de cinco columnas** que se llena solo con lo que se quiere
+cambiar. Va por las mismas rutas y la misma tubería que el archivo completo (mismos frenos,
+confirmaciones y auditoría); el campo `modo` dice cuál es.
+
+- **Plantilla**: `GET /api/precios/carga/plantilla?archivo=xlsx|csv` (quien puede editar precios;
+  `xlsx` por defecto, otro valor es 422). Pesa unos KB. Trae solo los encabezados, **sin filas de
+  ejemplo** (se cargarían), con `Código` como texto, `Desde` y `Hasta` con formato `dd-mm-aaaa`,
+  avisos de validación (fecha, precio entero) y una segunda hoja `Instrucciones` que el lector no
+  mira. Los avisos de validación **advierten pero no prohíben**: `QUITAR` es texto y tiene que
+  poder escribirse. La ruta va declarada ANTES de `GET /{producto:path}`: después, FastAPI la
+  leería como un producto y respondería 404 "El producto no esta en la lista". Subir la plantilla
+  vacía da 0 filas y un `mensaje`, sin error.
+- **Columnas**: `Código` (alias sin tildes ni mayúsculas: Código, Codigo, Producto, SKU), `Precio
+  fijo`, `Desde`, `Hasta` y `Obs`. Obligatorios: el código y al menos una de Precio fijo, Desde o
+  Hasta. Las demás (`Margen fijo %`, `Congelar`, `Glosa`...) **no se leen** y se listan en
+  `columnas_ignoradas`: margen y congelar no entran al corto en esta etapa. Los encabezados pueden
+  estar bajo unas filas de leyenda (se buscan en las 15 primeras).
+- **Cómo se elige el modo**: con la columna `Referencia` es el completo; sin ella, el corto. La
+  pantalla lo declara (`modo` = `corto` | `completo`; `auto` por defecto, para clientes de la API)
+  y el servidor lo verifica: un modo que contradice al archivo es un 422 con explicación, nunca se
+  adivina. Un archivo **sin Referencia con tres o más columnas propias de la lista** (Costo,
+  Precio ERP, Estado, Stock, Descuento máximo) se rechaza ("a este archivo le falta la
+  Referencia"): es la lista completa a la que le borraron esa columna, y cada fila traería el
+  precio de hoy en `Precio fijo`, o sea que toda la lista se volvería precio fijo.
+- **Se aplica tal cual, solo a los códigos del archivo.** No hay descarga contra la cual comparar:
+  no hay Referencia ni conflictos (`conflictos_total` y `sin_referencia_total` valen 0), y lo que
+  dice la celda es lo que queda, contra lo que hay en el momento de cargar (las filas se bloquean
+  con `FOR UPDATE` y se recalcula). Por eso subir el mismo archivo dos veces da "sin cambios", y lo
+  que otra persona haya hecho en la ficha entre la vista previa y la carga no es un conflicto. Lo
+  que no está en el archivo no se toca.
+- **Una celda vacía NUNCA quita nada.** Para quitar se escribe `QUITAR` en `Precio fijo`, `Desde`
+  o `Hasta` (en `Desde` y `Hasta` también vale `SIN VENCIMIENTO`), en cualquier mayúscula. `Obs`
+  solo fija: una nota no se quita con el Excel corto. Quitar el precio fijo borra también el
+  periodo si no queda ninguna otra decisión.
+- **Valores**: `Precio fijo` es entero y **mayor que 0** (0 o negativo es un error; el completo sí
+  acepta 0), con los formatos de Excel en Chile (`5200`, `5.200`, `$ 5.200`). Las fechas son las de
+  siempre: ISO, `dd-mm-aaaa`, `dd/mm/aaaa`, año de 2 dígitos, el número de serie y `date` de un
+  `.xlsx`; nunca mes/día. Las reglas del periodo son las de la ficha (`validar_vigencia`: el Desde
+  no puede ser posterior al Hasta, ninguna fecha a más de 3 años, el periodo no puede nacer
+  vencido, un periodo sin decisión es error), pero **aquí todo error bloquea la carga**: no existe
+  el "otro cambió la ficha" que en el completo vuelve conflicto a un error de combinación. Un
+  precio fijo sobre un producto cuyo periodo guardado ya venció necesita un `Hasta` nuevo (o
+  `QUITAR`): heredaría el que ya pasó.
+- **Una fila con solo el código y el Hasta renueva el periodo** de la decisión guardada (error si
+  el producto no tiene ninguna: el mensaje dice que hay que poner también el Precio fijo).
+- **Fijar un precio reemplaza el margen fijo y el congelado** del producto: queda exactamente
+  "precio fijo + periodo". Cada reemplazo sale en `reemplazos[]` (`producto`,
+  `decision_anterior` con su periodo si estaba vencido o programado, `editado_por`, `editado_en`)
+  y cuenta como una quita contra `UMBRAL_QUITAS` (10: pide `confirmar_quitas`).
+- **Un precio fijo sin Hasta queda permanente**, como los 342 de hoy: no se obliga la fecha ni la
+  nota. La vista previa lo cuenta en ámbar (`sin_hasta_total`, `sin_hasta[]`). Tampoco se avisa
+  por desvío contra el precio calculado: 267 de los 318 precios fijos con referencia están a más
+  de 50 % de la regla.
+- **Los códigos**: se recortan solo en los bordes (los espacios de adentro son parte del código:
+  `19  X` y `19 X` son productos distintos); si no hay coincidencia exacta se prueba en
+  mayúsculas. Un código repetido (también el mismo producto escrito en mayúsculas y minúsculas) es
+  un error. Los códigos que no están en la lista se omiten y se listan (`desconocidos`); cualquier
+  error de valor bloquea todo. Una fila con valores y sin código es un error.
+- **Frenos**: `UMBRAL_QUITAS` (10) y `UMBRAL_MASIVA` (200, con su texto propio: "revisa que cada
+  precio esté en la fila de su código", porque ordenar solo la columna de precios deja cada precio
+  en el código de otro y las filas parecen válidas). `fijan` cuenta precios fijos y fechas nuevas,
+  como en el completo. **Máximo 2.000 productos** con código (más es 422: "usa el archivo
+  completo") y la vista previa muestra hasta 1.000 cambios (`TOPE_CAMBIOS_CORTO`; el completo, 300).
+- **Qué deja**: una fila de auditoría `precio_override` por producto con "(carga corta desde
+  Excel)", una de resumen `precios_carga_excel` ("Carga corta: ...") y una notificación. Recalcula
+  solo los productos tocados y no crea "cambios sin revisar". El permiso es el de siempre:
+  `requiere_precios`.
+- **La respuesta** de la vista previa y de la carga trae `modo` (`corto` | `completo`). En el
+  corto, además de las claves de siempre: `columnas_ignoradas`, `reemplazos_total` y
+  `reemplazos[]`, `sin_hasta_total` y `sin_hasta[]`, `programados_total` (un Desde futuro: hoy su
+  precio no cambia), `sin_cambios_codigos` (hasta 100), `mensaje` (solo cuando el archivo no trae
+  ningún producto) y en `cambios[].vigencia` el periodo ya interpretado ("Rige del 20-10-2026 al
+  31-10-2026"), que es la forma de notar un día y un mes cambiados. En el completo
+  `columnas_ignoradas` es `[]`.
+- **Archivos `.csv`**: además de las páginas de códigos de siempre, el lector reconoce la de "CSV
+  MS-DOS" y "CSV Macintosh" por el encabezado `Código` cuando el archivo no trae las columnas de
+  descuento.
 
 ## Exportar al ERP
 

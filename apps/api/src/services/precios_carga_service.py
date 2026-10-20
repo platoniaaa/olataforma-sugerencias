@@ -39,6 +39,27 @@ referencia guarda, por producto, los valores que tenia el archivo al bajarlo:
 40 mil filas en un PC, y mas en el plan gratis de Render. Si el archivo trae un solo
 error no se carga nada; los productos que no estan, los que no traen referencia y
 los conflictos se omiten y se listan.
+
+## El Excel corto (20-10-2026)
+
+Para tocar pocos productos sin bajar la lista entera: una plantilla de cinco columnas (Codigo,
+Precio fijo, Desde, Hasta, Obs) que se baja vacia (`plantilla_corta`). Va por la MISMA tuberia
+(`planificar` / `aplicar`: frenos, confirmaciones, auditoria), con otro modo:
+
+- **Se detecta por la Referencia.** Con la columna Referencia es el archivo completo; sin ella,
+  el corto. El modo que declara la pantalla se verifica: si contradice al archivo es un error.
+  Un archivo sin Referencia con tres o mas columnas propias de la lista (Costo, Precio ERP,
+  Estado, Stock, Descuento maximo) se rechaza: es la lista completa a la que le borraron la
+  Referencia, y cada fila traeria el precio de hoy en `Precio fijo`.
+- **Se aplica TAL CUAL, solo a los codigos del archivo.** No hay descarga contra la cual comparar,
+  asi que no hay Referencia ni conflictos: lo que dice la celda es lo que queda, contra lo que
+  hay al momento de cargar (por eso subir el mismo archivo dos veces da "sin cambios").
+- **Una celda vacia NUNCA quita nada.** Para quitar se escribe QUITAR en Precio fijo, Desde o
+  Hasta (en Desde y Hasta tambien vale SIN VENCIMIENTO). La nota solo fija.
+- **Fijar un precio reemplaza el margen fijo y el congelado** del producto (queda exactamente
+  "precio fijo + periodo") y lo informa en `reemplazos`; cuentan como quitas.
+- Las reglas del periodo son las de la ficha (`ps.validar_vigencia`), pero aca TODO error bloquea
+  la carga: no hay un "otro cambio la ficha" que lo vuelva conflicto.
 """
 from __future__ import annotations
 
@@ -122,8 +143,10 @@ MAX_DESCOMPRIMIDO = 100 * 1024 * 1024
 # llevaba la memoria a 406 MB.
 _TEXTO_MAXIMO = 1 << 20
 # Un encabezado con tilde que SIEMPRE esta en el archivo bajado: con el se distingue la
-# pagina de codigos en que Excel lo guardo (cp1252, cp850 de "CSV MS-DOS", mac_roman).
+# pagina de codigos en que Excel lo guardo (cp1252, cp850 de "CSV MS-DOS", mac_roman). El
+# archivo corto no trae los de descuento, pero si "Código".
 MARCA_CODIFICACION = "Descuento máximo"
+_MARCAS_CODIFICACION = (MARCA_CODIFICACION, "Código")
 # Cuantas decisiones puede QUITAR una carga antes de pedir confirmacion explicita. Una
 # celda vacia quita la decision, y un .xlsx con celdas de error (#N/D, #REF!) las
 # entrega vacias: sin este freno, un BUSCARV roto borraria precios fijos en silencio.
@@ -142,6 +165,10 @@ TOPE_LISTA = 200           # errores o conflictos que se devuelven (el total va 
 TOPE_CODIGOS = 100
 TOPE_CAMBIOS = 300
 MAX_OBS = 500
+# El archivo corto (ver "Excel corto" mas abajo): hasta cuantos productos trae y cuantos cambios
+# muestra la vista previa. El completo tiene 40 mil filas; el corto es para tocar unos pocos.
+TOPE_FILAS_CORTO = 2000
+TOPE_CAMBIOS_CORTO = 1000
 
 
 class ErrorCarga(ValueError):
@@ -616,6 +643,103 @@ def csv_editable(db) -> tuple[bytes, int]:
     return ps._a_csv(CABECERA_ARCHIVO, (_fila(f) for f in filas)), len(filas)
 
 
+CAB_CORTO = ["Código", "Precio fijo", "Desde", "Hasta", "Obs"]
+_TIPO_CSV = "text/csv; charset=utf-8"
+_TIPO_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_INSTRUCCIONES_CORTO = (
+    ("Cómo llenar la plantilla corta", "titulo"),
+    ("Sirve para cambiar el precio fijo, el periodo (Desde y Hasta) o la nota de unos pocos productos. "
+     "Solo se tocan los productos que pongas en el archivo; el resto de la lista no cambia.", ""),
+    ("Columnas", "seccion"),
+    ("Código: el código del producto, como figura en la lista de precios. Una fila por producto. No "
+     "importan las mayúsculas ni los espacios al principio o al final.", ""),
+    ("Precio fijo: el precio en pesos, entero y mayor que 0 (5200 o 5.200). Si el producto tenía margen fijo "
+     "o estaba congelado, el precio fijo los reemplaza (la vista previa lo avisa).", ""),
+    ("Desde: primer día en que rige, como dd-mm-aaaa (por ejemplo 20-10-2026). Es opcional.", ""),
+    ("Hasta: último día en que rige (ese día todavía vale), como dd-mm-aaaa. Es opcional: un precio fijo sin "
+     "Hasta queda permanente.", ""),
+    ("Obs: la nota o el motivo del cambio, hasta 500 caracteres.", ""),
+    ("Reglas", "seccion"),
+    ("Una celda vacía no cambia nada. Para quitar un valor escribe QUITAR en Precio fijo, Desde o Hasta "
+     "(en Desde y Hasta también vale SIN VENCIMIENTO). La nota solo se puede cambiar, no quitar.", ""),
+    ("El periodo (Desde y Hasta) es uno solo por producto. El Desde no puede ser posterior al Hasta, el Hasta "
+     "no puede ser anterior a hoy y ninguna fecha puede estar a más de 3 años.", ""),
+    ("Para renovar un periodo vencido, pon el Código y el nuevo Hasta en una fila.", ""),
+    ("Máximo 2.000 productos por archivo. Para cambiar más, usa el archivo completo (Descargar para editar).", ""),
+    ("Antes de guardar se muestra qué cambia producto por producto. Si hay un solo error no se carga nada.", ""),
+    ("No cambies ni agregues encabezados. Se lee solo la primera hoja (Precios): esta hoja de "
+     "instrucciones no se lee.", ""),
+    ("Ejemplos", "seccion"),
+    ("71 AAA1 | 12990 | 20-10-2026 | 31-10-2026 | Campaña de octubre", ""),
+    ("71 AAA1 | (vacío) | (vacío) | 30-11-2026 | (vacío)   →  renueva el Hasta del precio fijo que ya tiene", ""),
+    ("71 AAA1 | (vacío) | (vacío) | SIN VENCIMIENTO | (vacío)   →  el precio fijo deja de vencer", ""),
+    ("71 AAA1 | QUITAR | (vacío) | (vacío) | (vacío)   →  quita el precio fijo", ""),
+)
+
+
+def plantilla_corta(archivo: str = "xlsx") -> tuple[bytes, str, str]:
+    """La plantilla vacia del archivo corto: (contenido, nombre, tipo de contenido).
+
+    Solo los encabezados, sin filas de ejemplo (se cargarian, o saldrian como codigos
+    desconocidos). El .xlsx lleva el Codigo como texto (Excel no lo vuelve numero ni fecha), las
+    fechas como dd-mm-aaaa y avisos de validacion que NO prohiben: "QUITAR" tiene que poder
+    escribirse en esas celdas. Una segunda hoja, "Instrucciones", explica las reglas; el lector
+    solo mira la primera."""
+    if archivo == "csv":
+        return ps._a_csv(CAB_CORTO, []), "plantilla_precios_corta.csv", _TIPO_CSV
+    if archivo != "xlsx":
+        raise ErrorCarga("El formato de la plantilla tiene que ser xlsx o csv.")
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Precios"
+    ws.append(CAB_CORTO)
+    relleno = PatternFill("solid", fgColor="FFF2CC")
+    for c in ws[1]:
+        c.font = Font(bold=True)
+        c.fill = relleno
+        c.alignment = Alignment(horizontal="center", vertical="center")
+    ultima = TOPE_FILAS_CORTO + 1
+    for letra, ancho, formato in (("A", 24, "@"), ("B", 14, "#,##0"), ("C", 14, "dd-mm-yyyy"),
+                                  ("D", 14, "dd-mm-yyyy"), ("E", 48, "@")):
+        ws.column_dimensions[letra].width = ancho
+        ws.column_dimensions[letra].number_format = formato
+    ws.freeze_panes = "A2"
+
+    # Avisos, no prohibiciones (errorStyle "warning"): QUITAR y SIN VENCIMIENTO son texto.
+    fecha = DataValidation(
+        type="date", operator="between", formula1=str(_SERIAL_DESDE), formula2=str(_SERIAL_HASTA),
+        allow_blank=True, errorStyle="warning", showErrorMessage=True, showInputMessage=True,
+        errorTitle="¿Es una fecha?", error="Escribe la fecha como dd-mm-aaaa (por ejemplo 31-10-2026), "
+        "o QUITAR para sacarla. ¿Seguro que quieres dejar esto?",
+        promptTitle="Fecha", prompt="dd-mm-aaaa. Vacío = no cambia. QUITAR = la saca.")
+    fecha.add(f"C2:D{ultima}")
+    precio = DataValidation(
+        type="whole", operator="greaterThanOrEqual", formula1="1", allow_blank=True,
+        errorStyle="warning", showErrorMessage=True, showInputMessage=True,
+        errorTitle="¿Es un precio?", error="El precio es un número entero mayor que 0, o QUITAR para sacarlo. "
+        "¿Seguro que quieres dejar esto?",
+        promptTitle="Precio fijo", prompt="Entero mayor que 0. Vacío = no cambia. QUITAR = lo saca.")
+    precio.add(f"B2:B{ultima}")
+    ws.add_data_validation(fecha)
+    ws.add_data_validation(precio)
+
+    ayuda = wb.create_sheet("Instrucciones")
+    ayuda.column_dimensions["A"].width = 110
+    for fila, (texto, estilo) in enumerate(_INSTRUCCIONES_CORTO, start=1):
+        c = ayuda.cell(row=fila, column=1, value=texto)
+        c.alignment = Alignment(wrap_text=True, vertical="top")
+        if estilo:
+            c.font = Font(bold=True, size=14 if estilo == "titulo" else 12)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue(), "plantilla_precios_corta.xlsx", _TIPO_XLSX
+
+
 @dataclass
 class _Valores:
     """Lo minimo de un producto que necesita `referencia`."""
@@ -655,13 +779,14 @@ def _decodificar(contenido: bytes) -> str:
     except UnicodeDecodeError:
         pass
     # El encabezado "Descuento máximo" esta siempre: con la pagina de codigos correcta
-    # se lee entero. Si no esta (borraron las columnas de descuento, que no se editan),
-    # gana la pagina en que mas celdas dicen "Sí" (Congelar y No es producto): en otra
-    # la "í" sale como "¡" o "’". Sin ninguna, cp1252, que es la de "CSV".
+    # se lee entero (en el archivo corto, "Código"). Si no esta (borraron las columnas de
+    # descuento, que no se editan), gana la pagina en que mas celdas dicen "Sí" (Congelar y
+    # No es producto): en otra la "í" sale como "¡" o "’". Sin ninguna, cp1252, que es la
+    # de "CSV".
     mejor, mejor_n = None, 0
     for nombre in ("cp1252", "cp850", "mac_roman"):
         texto = contenido.decode(nombre, errors="replace")
-        if MARCA_CODIFICACION in texto[:30000]:
+        if any(m in texto[:30000] for m in _MARCAS_CODIFICACION):
             return texto
         n = len(_SI_CELDA.findall(texto))
         if n > mejor_n:
@@ -933,15 +1058,97 @@ def _mapear(filas: list[list]) -> tuple[dict[str, int], int]:
                     "\"Descargar para editar\" y no borres columnas."
                 )
             return cols, n
-    raise ErrorCarga(
-        "No encuentro las columnas Producto y Referencia. Tiene que ser el archivo que bajaste con "
-        "\"Descargar para editar\": sin la Referencia no sé qué cambiaste."
-    )
+    raise ErrorCarga(_SIN_ENCABEZADOS)
+
+
+# ------------------------------------------------------------ el archivo corto
+MODOS = ("auto", "corto", "completo")
+_ALIAS_CODIGO = ("codigo", "producto", "sku")                # ya sin tildes (`_norm`)
+_CLAVES_CORTO = {"precio fijo": "precio_fijo", "desde": "desde", "hasta": "hasta", "obs": "obs"}
+_DECISIONES_CORTO = ("precio fijo", "desde", "hasta")
+# Columnas que solo trae la lista completa. Un archivo sin Referencia con tres o mas de estas es
+# la lista a la que le borraron la Referencia, no una plantilla corta.
+_PROPIAS_DE_LA_LISTA = {"costo", "precio erp", "estado", "stock", "descuento maximo"}
+_QUITAR = ("quitar",)
+_QUITAR_O_SIN_VENCIMIENTO = ("quitar", "sin vencimiento")
+
+_SIN_ENCABEZADOS = (
+    "No encuentro las columnas Producto y Referencia. Tiene que ser el archivo que bajaste con "
+    "\"Descargar para editar\": sin la Referencia no sé qué cambiaste. Si son pocos productos, usa la "
+    "plantilla corta: Código y al menos una de Precio fijo, Desde o Hasta.")
+_SIN_ENCABEZADOS_CORTO = (
+    "No encuentro las columnas del archivo corto: Código y al menos una de Precio fijo, Desde o Hasta. "
+    "Baja la plantilla corta y no cambies sus encabezados.")
+_FALTA_REFERENCIA = (
+    "A este archivo le falta la Referencia: parece la lista completa a la que se le borró esa "
+    "columna. Descárgalo de nuevo con \"Descargar para editar\", o usa la plantilla corta si son "
+    "pocos productos.")
+_CORTO_CON_REFERENCIA = (
+    "Este archivo trae la columna Referencia: es el archivo completo (el que bajaste con "
+    "\"Descargar para editar\"), no la plantilla corta. Súbelo como archivo completo.")
+_COMPLETO_SIN_REFERENCIA = (
+    "Este archivo no trae la columna Referencia: parece la plantilla corta (Código, Precio fijo, "
+    "Desde, Hasta, Obs). Súbelo como archivo corto, o baja la lista con \"Descargar para editar\" "
+    "para editarla entera.")
+
+
+def _es_encabezado_corto(celdas: list[str]) -> bool:
+    return (any(c in _ALIAS_CODIGO for c in celdas)
+            and any(c in _DECISIONES_CORTO for c in celdas))
+
+
+def _detectar(filas: list[list], modo: str) -> str:
+    """'completo' o 'corto', y el error que corresponda si el archivo no sirve o contradice al
+    modo que declaro la persona.
+
+    Con la columna Referencia (y Producto) es el completo; sin ella, si trae el Codigo y alguna de
+    Precio fijo, Desde u Hasta, el corto. Un mismo encabezado puede cumplir las dos (la lista
+    completa tambien tiene Precio fijo): gana el completo."""
+    completo = corto = None
+    for n, fila in enumerate(filas[:15]):
+        celdas = [_norm(c) for c in fila]
+        if completo is None and "producto" in celdas and "referencia" in celdas:
+            completo = n
+        if corto is None and _es_encabezado_corto(celdas):
+            corto = (n, celdas)
+    if completo is not None and (corto is None or completo <= corto[0]):
+        if modo == "corto":
+            raise ErrorCarga(_CORTO_CON_REFERENCIA)
+        return "completo"
+    if corto is not None:
+        if len(_PROPIAS_DE_LA_LISTA.intersection(corto[1])) >= 3:
+            raise ErrorCarga(_FALTA_REFERENCIA)
+        if modo == "completo":
+            raise ErrorCarga(_COMPLETO_SIN_REFERENCIA)
+        return "corto"
+    raise ErrorCarga(_SIN_ENCABEZADOS_CORTO if modo == "corto" else _SIN_ENCABEZADOS)
+
+
+def _mapear_corto(filas: list[list]) -> tuple[dict[str, int], int, list[str]]:
+    """(columnas por clave, indice de la fila de encabezados, encabezados que se ignoran).
+
+    El Codigo se reconoce con sus alias (Codigo, Producto, SKU, con o sin tilde y en cualquier
+    mayuscula). Todo lo demas que no sea Precio fijo, Desde, Hasta u Obs -Margen fijo %, Congelar,
+    Glosa...- no se lee, y se devuelve para avisarlo en la vista previa."""
+    for n, fila in enumerate(filas[:15]):
+        celdas = [_norm(c) for c in fila]
+        if not _es_encabezado_corto(celdas):
+            continue
+        cols: dict[str, int] = {}
+        for j, c in enumerate(celdas):
+            clave = "codigo" if c in _ALIAS_CODIGO else _CLAVES_CORTO.get(c)
+            if clave and clave not in cols:
+                cols[clave] = j
+        usadas = set(cols.values())
+        ignoradas = [t for j, c in enumerate(fila) if j not in usadas and (t := _c_texto(c))]
+        return cols, n, list(dict.fromkeys(ignoradas))[:TOPE_CODIGOS]
+    raise ErrorCarga(_SIN_ENCABEZADOS_CORTO)
 
 
 # --------------------------------------------------------------------- plan
 @dataclass
 class _Plan:
+    modo: str = "completo"
     resumen: dict = field(default_factory=dict)
     cambios: list[dict] = field(default_factory=list)      # lo que se aplicaria, completo
     errores_total: int = 0
@@ -1145,10 +1352,18 @@ def _miles(n) -> str:
     return f"{int(round(float(n))):,}".replace(",", ".")
 
 
-def _describir(datos: dict, ov: dict, p) -> list[dict]:
-    """Cada cambio como "antes -> despues", en el idioma de la persona."""
+def _describir(datos: dict, ov: dict, p, corto: bool = False) -> list[dict]:
+    """Cada cambio como "antes -> despues", en el idioma de la persona. En el archivo corto no
+    hay columna Factor: el margen fijo que un precio fijo reemplaza se describe como margen."""
     campos = []
     for k, v in datos.items():
+        if corto and k == "margen_fijo":
+            m = ov.get("margen_fijo")
+            campos.append({
+                "campo": "Margen fijo %",
+                "antes": "(sin margen fijo)" if m is None else f"{_es(_fmt_margen(m))} %",
+                "despues": "(sin margen fijo)" if v is None else f"{_es(_fmt_margen(v))} %"})
+            continue
         if k == "tipo_manual":
             antes = ov.get("tipo_manual") or f"(el del rubro: {p.tipo or 'sin tipo'})"
             despues = v or "(vuelve a seguir al rubro)"
@@ -1202,17 +1417,338 @@ def _quita(campo: str, valor) -> bool:
     return valor is None or (campo in ("congelar", "no_producto") and valor is False)
 
 
-def planificar(db, nombre: str, contenido: bytes) -> _Plan:
-    """Lee el archivo y arma lo que se cargaria. No escribe nada."""
+def _efecto(antes, despues) -> str:
+    """Que le pasa al precio de un producto con el cambio: sube, baja, no cambia o aparece
+    (no tenia precio y ahora si). Es la tabla de la vista previa, en los dos modos."""
+    if (antes is None) != (despues is None) or (antes is not None and abs(antes - despues) >= 0.5):
+        a, d = antes or 0, despues or 0
+        if a == 0 and d > 0:
+            return "con_precio_nuevo"
+        return "suben" if d > a else "bajan"
+    return "sin_cambio_de_precio"
+
+
+def _resumen_efecto(cuenta: Counter) -> dict:
+    return {k: cuenta[k] for k in ("suben", "bajan", "sin_cambio_de_precio", "con_precio_nuevo")}
+
+
+_COLUMNAS_FILA_REGLA = ("glosa", "rubro", "procedencia_maestro", "costo", "stock", "stock_transito",
+                        "ult_recep_importado", "ult_pe_nacional", "precio_sugerido")
+
+
+def _fila_de(p) -> dict:
+    """Los insumos de la regla tal como los trae la consulta del plan."""
+    return {k: getattr(p, k) for k in _COLUMNAS_FILA_REGLA}
+
+
+# ---------------------------------------------------------- el archivo corto: lectura
+_SIN_DECISION_CORTO = (
+    "Este producto no tiene precio fijo, margen fijo ni congelado: pon también el Precio fijo en "
+    "esa fila (el periodo necesita una decisión a la que aplicarse).")
+_MENSAJE_CORTO_VACIO = ("El archivo no tiene ningún producto: llena la plantilla con los códigos que "
+                        "quieras cambiar y súbela de nuevo.")
+
+
+def _vacia(v) -> bool:
+    return _texto(v).strip() == ""
+
+
+def _dice(v, palabras: tuple[str, ...]) -> bool:
+    """La celda es una de las palabras (QUITAR, SIN VENCIMIENTO) en cualquier mayuscula."""
+    return isinstance(v, str) and _norm(v) in palabras
+
+
+def _leer_fila_corto(valores: dict) -> tuple[dict, list[str]]:
+    """Lo que dice una fila del archivo corto: ({campo: valor}, errores).
+
+    Solo trae los campos con algo escrito. Una celda vacia NO esta en el resultado: no cambia
+    nada. QUITAR (o SIN VENCIMIENTO en las fechas) es None, que quita. El precio fijo es un
+    entero mayor que 0 (el completo acepta 0; aca queda como 0 solo cuando se escribe QUITAR)."""
+    ed: dict = {}
+    errs: list[str] = []
+
+    v = valores["precio_fijo"]
+    if _vacia(v):
+        pass
+    elif _dice(v, _QUITAR):
+        ed["precio_fijo"] = None
+    else:
+        try:
+            n = leer_numero(v, entero=True)
+        except ValueError as e:
+            errs.append(f"Precio fijo: {e}.")
+        else:
+            precio = ps.redondear(n)
+            if precio <= 0:
+                errs.append("Precio fijo: tiene que ser mayor que 0 (para quitarlo escribe QUITAR).")
+            else:
+                ed["precio_fijo"] = precio
+
+    for clave, titulo in (("desde", "Desde"), ("hasta", "Hasta")):
+        v = valores[clave]
+        if _vacia(v):
+            continue
+        if _dice(v, _QUITAR_O_SIN_VENCIMIENTO):
+            ed[clave] = None
+            continue
+        try:
+            ed[clave] = _leer_fecha(v)
+        except ValueError as e:
+            errs.append(f"{titulo}: {e}.")
+
+    obs = _c_obs(valores["obs"])
+    if len(obs) > MAX_OBS:
+        errs.append(f"Obs: tiene {len(obs)} caracteres y el máximo es {MAX_OBS}.")
+    elif obs:
+        ed["obs"] = obs
+    return ed, errs
+
+
+def _nota_periodo(ov: dict, hoy: date) -> str:
+    """El periodo de una decision guardada, en dos palabras: "vencido el 30-09-2026"."""
+    estado = ps.vigencia_de(ov, hoy)
+    desde, hasta = ps._fecha(ov.get("vigente_desde")), ps._fecha(ov.get("vigente_hasta"))
+    if estado == ps.VENCIDA:
+        return f"vencido el {ps._fmt_dia(hasta)}" if hasta else "vencido"
+    if estado == ps.PROGRAMADA:
+        return f"programado desde {ps._fmt_dia(desde)}" if desde else "programado"
+    if estado == ps.VIGENTE and hasta:
+        return f"hasta {ps._fmt_dia(hasta)}"
+    return ""
+
+
+def _decision_que_se_reemplaza(ov: dict, hoy: date) -> str | None:
+    """El margen fijo y/o el congelado que un precio fijo va a pisar, en una frase: "Margen fijo
+    35 % (vencido el 30-09-2026)", "Congelado en 2.160". None si no hay ninguno."""
+    partes = []
+    if ov.get("margen_fijo") is not None:
+        partes.append(f"Margen fijo {_es(_fmt_margen(ov['margen_fijo']))} %")
+    if ov.get("congelar"):
+        precio = ov.get("congelado_precio")
+        partes.append("Congelado" if precio is None else f"Congelado en {_miles(precio)}")
+    if not partes:
+        return None
+    texto = partes[0] + "".join(" y " + p[0].lower() + p[1:] for p in partes[1:])
+    nota = _nota_periodo(ov, hoy)
+    return f"{texto} ({nota})" if nota else texto
+
+
+def _datos_corto(ed: dict, ov: dict, hoy: date) -> tuple[dict, list[str], str | None]:
+    """De lo que dice la fila, lo que se le aplica al producto (mismos nombres que
+    `guardar_override`), los errores y la decision que se reemplaza. Pura: no toca la base.
+
+    "Tal cual": se compara contra lo guardado AHORA, no contra una descarga. Fijar un precio
+    reemplaza el margen fijo y el congelado que hubiera (queda exactamente "precio fijo +
+    periodo"). Las reglas del periodo son las de la ficha (`validar_vigencia`); aca todo error
+    bloquea la carga, porque no hay una descarga contra la cual otra persona pueda haber
+    cambiado el producto."""
+    datos: dict = {}
+    reemplaza = None
+    if "precio_fijo" in ed:
+        v = ed["precio_fijo"]
+        if v is None:
+            if ov.get("precio_fijo") is not None:
+                datos["precio_fijo"] = None
+        else:
+            if ov.get("precio_fijo") is None or float(ov["precio_fijo"]) != float(v):
+                datos["precio_fijo"] = float(v)
+            reemplaza = _decision_que_se_reemplaza(ov, hoy)
+            if ov.get("margen_fijo") is not None:
+                datos["margen_fijo"] = None
+            if ov.get("congelar"):
+                datos["congelar"] = False
+    for clave, campo in (("desde", "vigente_desde"), ("hasta", "vigente_hasta")):
+        if clave in ed and ed[clave] != ps._fecha(ov.get(campo)):
+            datos[campo] = ed[clave]
+    if "obs" in ed and ed["obs"] != _c_texto(ov.get("obs")):
+        datos["obs"] = ed["obs"]
+    errs = [_SIN_DECISION_CORTO if e.mensaje == ps.MSG_VIGENCIA_SIN_DECISION else e.mensaje
+            for e in ps.validar_vigencia(ov, datos, hoy)]
+    return datos, errs, reemplaza
+
+
+def _buscar_productos(db, codigos: list[str]) -> dict[str, object]:
+    """{codigo de la lista: fila} de los que existen. El codigo ya viene recortado en los bordes;
+    si no hay coincidencia exacta se prueba en mayusculas (los de la lista estan en mayusculas)."""
+    tenant = settings.default_tenant_id
+    cols_p = (*ps._COLUMNAS_REGLA, PrecioProducto.tipo, PrecioProducto.procedencia_final,
+              PrecioProducto.factor, PrecioProducto.precio_final)
+    prods: dict[str, object] = {}
+
+    def _buscar(claves: list[str]) -> None:
+        for lote in ps._en_lotes(claves):
+            for r in db.execute(select(*cols_p).where(
+                    PrecioProducto.tenant_id == tenant, PrecioProducto.producto.in_(lote))).all():
+                prods[r.producto] = r
+
+    _buscar(codigos)
+    mayusculas = list(dict.fromkeys(c.upper() for c in codigos if c not in prods and c.upper() != c))
+    if mayusculas:
+        _buscar(mayusculas)
+    return prods
+
+
+def _plan_corto(db, nombre: str, filas: list[list], cols: dict[str, int], enc: int,
+                ignoradas: list[str]) -> _Plan:
+    """El plan del archivo corto. Misma forma que el del completo (la tuberia de `aplicar`, los
+    frenos y la pantalla son los mismos), con `h2` en None: no hay huella contra la cual comparar."""
+    plan = _Plan(modo="corto")
+    hoy = calendario.hoy_chile()
+    errores: list[dict] = []
+    vistos: dict[str, int] = {}
+    candidatos: dict[str, tuple[int, dict]] = {}
+    leidas = sin_cambios = 0
+    sin_cambios_codigos: list[str] = []
+
+    def celda(fila, clave):
+        j = cols.get(clave)
+        return fila[j] if j is not None and j < len(fila) else ""
+
+    for n, fila in enumerate(filas[enc + 1:], start=enc + 2):
+        # Solo se recortan los bordes: los espacios de adentro son parte del codigo.
+        codigo = _texto(celda(fila, "codigo")).strip()
+        valores = {c: celda(fila, c) for c in ("precio_fijo", "desde", "hasta", "obs")}
+        if not codigo:
+            if not all(_vacia(v) for v in valores.values()):
+                errores.append({"fila": n, "producto": "",
+                                "mensaje": "Esta fila trae valores pero no el código del producto."})
+            continue
+        leidas += 1
+        if leidas > TOPE_FILAS_CORTO:
+            raise ErrorCarga(
+                f"El archivo corto tiene más de {_miles(TOPE_FILAS_CORTO)} productos. Para tantos cambios "
+                "usa el archivo completo (\"Descargar para editar\").")
+        if codigo in vistos:
+            errores.append({"fila": n, "producto": codigo,
+                            "mensaje": f"El código aparece repetido (también en la fila {vistos[codigo]})."})
+            continue
+        vistos[codigo] = n
+        ed, errs = _leer_fila_corto(valores)
+        if errs:
+            errores.extend({"fila": n, "producto": codigo, "mensaje": e} for e in errs)
+            continue
+        if not ed:
+            sin_cambios += 1                  # solo trae el codigo: no cambia nada
+            sin_cambios_codigos.append(codigo)
+            continue
+        candidatos[codigo] = (n, ed)
+
+    desconocidos: list[str] = []
+    efecto: Counter = Counter()
+    n_cambios: Counter = Counter()
+    n_quitan: Counter = Counter()
+    n_fijan: Counter = Counter()
+    ejemplos_quitan: list[dict] = []
+    reemplazos: list[dict] = []
+    sin_hasta: list[str] = []
+    programados = 0
+    if candidatos:
+        prods = _buscar_productos(db, list(candidatos))
+        resuelto = {c: (c if c in prods else c.upper() if c.upper() in prods else None)
+                    for c in candidatos}
+        ovs = ps._overrides(db, [r for r in resuelto.values() if r])
+        fact, rub = politica.factores(db), politica.rubros(db)
+        por_producto: dict[str, int] = {}
+
+        for tipado, (n, ed) in candidatos.items():
+            codigo = resuelto[tipado]
+            if codigo is None:
+                desconocidos.append(tipado)
+                continue
+            if codigo in por_producto:
+                errores.append({"fila": n, "producto": tipado, "mensaje": (
+                    f"El código aparece repetido (es el mismo producto de la fila {por_producto[codigo]}).")})
+                continue
+            por_producto[codigo] = n
+            p = prods[codigo]
+            ov = ovs.get(codigo) or {}
+            datos, errs, reemplaza = _datos_corto(ed, ov, hoy)
+            if errs:
+                errores.extend({"fila": n, "producto": tipado, "mensaje": e} for e in errs)
+                continue
+            if not datos:
+                sin_cambios += 1               # el archivo dice lo que ya hay
+                sin_cambios_codigos.append(codigo)
+                continue
+            fila_regla = _fila_de(p)
+            precio_hoy = ps.precio_de_hoy(fila_regla, p.precio_final, ov, fact, rub, hoy)
+            ov_despues = ps.override_despues(ov, datos, precio_hoy, hoy)
+            despues = ps.calcular(fila_regla, ov_despues, fact, rub, hoy)
+            if (any(k in datos for k in _CAMPOS_QUE_FIJAN)
+                    and ps.vigencia_de(ov_despues, hoy) == ps.PROGRAMADA):
+                programados += 1             # queda para mas adelante: hoy su precio no cambia
+            efecto[_efecto(p.precio_final, despues["precio_final"])] += 1
+            for k, v in datos.items():
+                n_cambios[_CLAVE_POR_CAMPO_OV[k]] += 1
+                if _quita(k, v):
+                    n_quitan[_CLAVE_POR_CAMPO_OV[k]] += 1
+                    if len(ejemplos_quitan) < 20:
+                        ejemplos_quitan.append({
+                            "producto": codigo,
+                            "campo": "Margen fijo %" if k == "margen_fijo" else _ETIQUETA_CAMPO[k]})
+                elif k in _CAMPOS_QUE_FIJAN:
+                    n_fijan[_CLAVE_POR_CAMPO_OV[k]] += 1
+            if reemplaza:
+                reemplazos.append({"producto": codigo, "decision_anterior": reemplaza,
+                                   "editado_por": ov.get("editado_por"), "editado_en": ov.get("editado_en")})
+            if ed.get("precio_fijo") is not None and ov_despues.get("vigente_hasta") is None:
+                sin_hasta.append(codigo)     # queda permanente, como los precios fijos de antes
+            plan.cambios.append({
+                "producto": codigo, "fila": n, "glosa": p.glosa, "datos": datos, "h2": None, "ed": ed,
+                "campos": _describir(datos, ov, p, corto=True), "precio_antes": p.precio_final,
+                "precio_despues": despues["precio_final"], "vigencia": _frase_periodo(ov_despues),
+            })
+
+    plan.errores_total = len(errores)
+    plan.resumen = {
+        "modo": "corto", "archivo": nombre, "filas": leidas, "sin_cambios": sin_cambios,
+        "sin_cambios_codigos": sin_cambios_codigos[:TOPE_CODIGOS],
+        "a_cambiar": len(plan.cambios), "por_campo": dict(n_cambios),
+        "efecto": _resumen_efecto(efecto),
+        "quitan_total": sum(n_quitan.values()), "quitan": dict(n_quitan),
+        "quitan_ejemplos": ejemplos_quitan, "umbral_quitas": UMBRAL_QUITAS,
+        "fijan_total": sum(n_fijan.values()), "fijan": dict(n_fijan), "umbral_masiva": UMBRAL_MASIVA,
+        "reemplazos_total": len(reemplazos), "reemplazos": reemplazos[:TOPE_LISTA],
+        "sin_hasta_total": len(sin_hasta), "sin_hasta": sin_hasta[:TOPE_CODIGOS],
+        "programados_total": programados, "columnas_ignoradas": ignoradas,
+        # No hay descarga contra la cual comparar: no hay referencias, conflictos ni formato viejo.
+        "factor_redondeado_total": 0, "factor_redondeado": [], "archivo_viejo_total": 0,
+        "conflictos": [], "conflictos_total": 0, "sin_referencia": [], "sin_referencia_total": 0,
+        "errores": errores[:TOPE_LISTA], "errores_total": len(errores),
+        "desconocidos": desconocidos[:TOPE_CODIGOS], "desconocidos_total": len(desconocidos),
+        "cambios": [{k: c[k] for k in ("producto", "glosa", "campos", "precio_antes", "precio_despues",
+                                       "vigencia")}
+                    for c in plan.cambios[:TOPE_CAMBIOS_CORTO]],
+        "cambios_total": len(plan.cambios),
+        "mensaje": _MENSAJE_CORTO_VACIO if leidas == 0 else None,
+    }
+    return plan
+
+
+def planificar(db, nombre: str, contenido: bytes, modo: str = "auto") -> _Plan:
+    """Lee el archivo y arma lo que se cargaria. No escribe nada.
+
+    `modo` es lo que declara la pantalla: "completo" (el archivo que se bajo para editar, con
+    Referencia), "corto" (la plantilla de cinco columnas) o "auto" (se deduce de las columnas).
+    Si lo declarado contradice al archivo es un error: nunca se adivina."""
+    modo = (modo or "auto").strip().lower()
+    if modo not in MODOS:
+        raise ErrorCarga(f"El modo tiene que ser uno de estos: {', '.join(MODOS)}.")
     filas = leer_archivo(nombre, contenido)
     try:
-        cols, enc = _mapear(filas)
+        detectado = _detectar(filas, modo)
+        if detectado == "corto":
+            cols, enc, ignoradas = _mapear_corto(filas)
+        else:
+            cols, enc = _mapear(filas)
     except ErrorCarga as e:
         if nombre.lower().endswith((".xlsx", ".xlsm")) and str(e).startswith("No encuentro"):
             raise ErrorCarga(
                 f"{e} Del libro de Excel solo se lee la primera hoja: si la de los datos no es la "
                 "primera, muévela al principio y guarda de nuevo.") from e
         raise
+    if detectado == "corto":
+        return _plan_corto(db, nombre, filas, cols, enc, ignoradas)
     plan = _Plan()
     hoy = calendario.hoy_chile()          # la de Chile: los periodos vencen a medianoche de Chile
     errores: list[dict] = []
@@ -1291,7 +1827,8 @@ def planificar(db, nombre: str, contenido: bytes) -> _Plan:
     n_quitan: Counter = Counter()
     n_fijan: Counter = Counter()
     ejemplos_quitan: list[dict] = []
-    suben = bajan = igual = nuevos = programados = 0
+    efecto: Counter = Counter()
+    programados = 0
     if candidatos:
         tenant = settings.default_tenant_id
         codigos = list(candidatos)
@@ -1342,9 +1879,7 @@ def planificar(db, nombre: str, contenido: bytes) -> _Plan:
                 # dos veces, o una carga cuya respuesta se perdio.
                 sin_cambios += 1
                 continue
-            fila_regla = {k: getattr(p, k) for k in (
-                "glosa", "rubro", "procedencia_maestro", "costo", "stock", "stock_transito",
-                "ult_recep_importado", "ult_pe_nacional", "precio_sugerido")}
+            fila_regla = _fila_de(p)
             # La decision tal como quedaria (la misma `_aplicar_override` que la escribe: una
             # copia de sus reglas mostraria un precio distinto del que se guarda) y el
             # precio de hoy, que es el que se congela.
@@ -1356,16 +1891,7 @@ def planificar(db, nombre: str, contenido: bytes) -> _Plan:
                 programados += 1             # el archivo lo deja para mas adelante: hoy su precio no cambia
             antes = p.precio_final
             pd = despues["precio_final"]
-            if (antes is None) != (pd is None) or (antes is not None and abs(antes - pd) >= 0.5):
-                a, d = antes or 0, pd or 0
-                if a == 0 and d > 0:
-                    nuevos += 1          # no tenia precio y ahora si
-                elif d > a:
-                    suben += 1
-                else:
-                    bajan += 1
-            else:
-                igual += 1
+            efecto[_efecto(antes, pd)] += 1
             for k, v in datos.items():
                 n_cambios[_CLAVE_POR_CAMPO_OV[k]] += 1
                 if _quita(k, v):
@@ -1382,10 +1908,9 @@ def planificar(db, nombre: str, contenido: bytes) -> _Plan:
 
     plan.errores_total = len(errores)
     plan.resumen = {
-        "archivo": nombre, "filas": leidas, "sin_cambios": sin_cambios,
+        "modo": "completo", "archivo": nombre, "filas": leidas, "sin_cambios": sin_cambios,
         "a_cambiar": len(plan.cambios), "por_campo": dict(n_cambios),
-        "efecto": {"suben": suben, "bajan": bajan, "sin_cambio_de_precio": igual,
-                   "con_precio_nuevo": nuevos},
+        "efecto": _resumen_efecto(efecto), "columnas_ignoradas": [],
         "quitan_total": sum(n_quitan.values()), "quitan": dict(n_quitan),
         "quitan_ejemplos": ejemplos_quitan, "umbral_quitas": UMBRAL_QUITAS,
         "fijan_total": sum(n_fijan.values()), "fijan": dict(n_fijan), "umbral_masiva": UMBRAL_MASIVA,
@@ -1407,13 +1932,14 @@ def planificar(db, nombre: str, contenido: bytes) -> _Plan:
     return plan
 
 
-def vista_previa(db, nombre: str, contenido: bytes) -> dict:
-    return planificar(db, nombre, contenido).resumen
+def vista_previa(db, nombre: str, contenido: bytes, modo: str = "auto") -> dict:
+    return planificar(db, nombre, contenido, modo).resumen
 
 
 # ------------------------------------------------------------------ aplicar
 def aplicar(db, nombre: str, contenido: bytes, usuario: str | None,
-            confirmar_quitas: bool = False, confirmar_masiva: bool = False) -> dict:
+            confirmar_quitas: bool = False, confirmar_masiva: bool = False,
+            modo: str = "auto") -> dict:
     """Carga los cambios del archivo, todos o ninguno. Si el archivo tiene errores
     no se carga nada. Recalcula SOLO los productos tocados, con la politica cargada
     una vez, y no genera "cambios sin revisar": son decisiones de una persona.
@@ -1421,8 +1947,12 @@ def aplicar(db, nombre: str, contenido: bytes, usuario: str | None,
     Una celda vacia quita la decision, y un .xlsx con celdas de error (#N/D, #REF!)
     las entrega vacias: si la carga quita `UMBRAL_QUITAS` decisiones o mas, hace falta
     `confirmar_quitas`. Si pone mas de `UMBRAL_MASIVA` precios fijos, factores propios,
-    congelados o fechas de periodo nuevos, hace falta `confirmar_masiva`."""
-    plan = planificar(db, nombre, contenido)
+    congelados o fechas de periodo nuevos, hace falta `confirmar_masiva`.
+
+    En el archivo corto (`modo`) una celda vacia no cambia nada y no hay huella contra la cual
+    comparar: se vuelve a calcular contra lo que hay AHORA, con las filas bloqueadas."""
+    plan = planificar(db, nombre, contenido, modo)
+    corto = plan.modo == "corto"
     if plan.errores_total:
         uno = plan.errores_total == 1
         raise ErrorCarga(
@@ -1435,6 +1965,12 @@ def aplicar(db, nombre: str, contenido: bytes, usuario: str | None,
             "Confírmalo en la pantalla antes de cargar: si no era lo que querías, puede haber celdas con "
             "error (#N/D, #REF!) en el Excel.")
     if r["fijan_total"] > UMBRAL_MASIVA and not confirmar_masiva:
+        if corto:
+            raise ErrorCarga(
+                f"Esta carga deja {_miles(r['fijan_total'])} precios fijos o fechas del periodo nuevos. "
+                "Confírmalo en la pantalla antes de cargar: revisa que cada precio esté en la fila de su "
+                "código (si se ordenó una sola columna del Excel, los valores quedan en la fila de otro "
+                "producto).")
         raise ErrorCarga(
             f"Esta carga deja {_miles(r['fijan_total'])} precios fijos o factores propios nuevos "
             "(contando también los congelados y las fechas del periodo). "
@@ -1443,8 +1979,8 @@ def aplicar(db, nombre: str, contenido: bytes, usuario: str | None,
     omitidos = {"conflictos": r["conflictos_total"], "desconocidos": r["desconocidos_total"],
                 "sin_referencia": r["sin_referencia_total"]}
     if not plan.cambios:
-        return {"aplicados": 0, "por_campo": {}, "precios_distintos": 0, "sin_cambios": r["sin_cambios"],
-                "omitidos": omitidos}
+        return {"modo": plan.modo, "aplicados": 0, "por_campo": {}, "precios_distintos": 0,
+                "sin_cambios": r["sin_cambios"], "omitidos": omitidos}
 
     # La politica se lee ANTES de escribir: `politica.factores` atrapa cualquier error,
     # hace rollback y devuelve {}, y leida despues de los overrides se llevaba por
@@ -1483,10 +2019,17 @@ def aplicar(db, nombre: str, contenido: bytes, usuario: str | None,
             continue
         o = ovs.get(cod)
         ov_actual = ps._override_dict(o) if o else {}
-        datos, errs, combinacion = _datos_override(c["ed"], ov_actual, tipos, hoy)
-        if huella_decisiones(ov_actual) != c["h2"] and (datos or combinacion):
-            omitidos["conflictos"] += 1
-            continue
+        if corto:
+            # Sin huella: el corto se aplica tal cual contra lo que hay ahora. Si en el medio
+            # alguien dejo al producto en un estado que el archivo ya no puede cambiar (un periodo
+            # que vencio, una decision que ya no esta), se omite SOLO esta fila.
+            datos, errs, _ = _datos_corto(c["ed"], ov_actual, hoy)
+            combinacion: list[str] = []
+        else:
+            datos, errs, combinacion = _datos_override(c["ed"], ov_actual, tipos, hoy)
+            if huella_decisiones(ov_actual) != c["h2"] and (datos or combinacion):
+                omitidos["conflictos"] += 1
+                continue
         if errs or combinacion:
             omitidos["conflictos"] += 1
             continue
@@ -1496,8 +2039,8 @@ def aplicar(db, nombre: str, contenido: bytes, usuario: str | None,
         pendientes.append({**c, "datos": datos, "ov_antes": ov_actual})
     if not pendientes:
         db.rollback()
-        return {"aplicados": 0, "por_campo": {}, "precios_distintos": 0, "sin_cambios": sin_cambios,
-                "omitidos": omitidos}
+        return {"modo": plan.modo, "aplicados": 0, "por_campo": {}, "precios_distintos": 0,
+                "sin_cambios": sin_cambios, "omitidos": omitidos}
 
     detalles: dict[str, str] = {}
     por_campo: Counter = Counter()
@@ -1529,10 +2072,11 @@ def aplicar(db, nombre: str, contenido: bytes, usuario: str | None,
         obs_de[cod] = ovs[cod].obs
 
     aplicados = [c["producto"] for c in pendientes]
+    origen = "carga corta desde Excel" if corto else "carga desde Excel"
     filas_aud = [{
         "tenant_id": tenant, "accion": "precio_override", "entidad": "precio", "entidad_id": cod,
         "producto": cod, "usuario_email": usuario, "motivo": obs_de[cod],
-        "detalle": f"{detalles[cod] or 'sin cambios'} (carga desde Excel)"[:1900],
+        "detalle": f"{detalles[cod] or 'sin cambios'} ({origen})"[:1900],
     } for cod in aplicados]
     for i in range(0, len(filas_aud), 500):
         db.execute(insert(AuditoriaLog), filas_aud[i:i + 500])
@@ -1540,16 +2084,17 @@ def aplicar(db, nombre: str, contenido: bytes, usuario: str | None,
     resumen_campos = ", ".join(f"{k}: {v}" for k, v in sorted(por_campo.items()))
     auditoria_service.registrar(
         db, accion="precios_carga_excel", entidad="precios", usuario_email=usuario,
-        detalle=(f"{len(aplicados)} productos ({resumen_campos}); {distintos} cambiaron de precio; "
+        detalle=(f"{'Carga corta: ' if corto else ''}{len(aplicados)} productos ({resumen_campos}); "
+                 f"{distintos} cambiaron de precio; "
                  f"omitidos: {omitidos['conflictos']} conflictos, {omitidos['desconocidos']} desconocidos, "
                  f"{omitidos['sin_referencia']} sin referencia")[:1900],
     )
     auditoria_service.notificar(
         db, tipo="precios",
-        titulo=f"Lista de precios: carga desde Excel de {usuario or 'alguien'}",
+        titulo=f"Lista de precios: {origen} de {usuario or 'alguien'}",
         mensaje=f"{len(aplicados)} productos actualizados ({resumen_campos}); {distintos} cambiaron de precio.",
         creado_por_email=usuario,
     )
     db.commit()
-    return {"aplicados": len(aplicados), "por_campo": dict(por_campo), "precios_distintos": distintos,
-            "sin_cambios": sin_cambios, "omitidos": omitidos}
+    return {"modo": plan.modo, "aplicados": len(aplicados), "por_campo": dict(por_campo),
+            "precios_distintos": distintos, "sin_cambios": sin_cambios, "omitidos": omitidos}
