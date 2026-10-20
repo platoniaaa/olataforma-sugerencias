@@ -681,3 +681,14 @@ def test_el_transito_salva_al_que_no_tiene_stock(db_session):
     p = db_session.query(PrecioProducto).filter_by(producto="17 EN-CAMINO").one()
     assert p.stock_transito == 5
     assert p.estado != "SIN STOCK"
+
+
+@pytest.mark.parametrize("valor", ["false", "no", "0", "true", 1])
+def test_sin_no_disponibles_solo_vale_si_es_un_booleano_verdadero(client, db_session, valor):
+    """Una cadena como "false" es verdadera en Python: no puede saltar la guarda."""
+    r = client.post("/api/admin/precios/bodegas-tipo", json={
+        "filas": [{"bodega": "LINDEROS", "tipo": "REAL"}], "sin_no_disponibles": valor})
+
+    assert r.status_code == 422
+    assert "NODISP" in r.json()["detail"]
+    assert db_session.query(BodegaTipo).count() == 0

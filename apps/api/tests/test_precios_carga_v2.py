@@ -922,3 +922,53 @@ def test_el_precio_de_hoy_es_el_de_la_fila_salvo_que_el_periodo_no_rija(lista):
 ])
 def test_texto_de_la_columna_vigencia(ov, esperado):
     assert svc.texto_vigencia(ov, HOY) == esperado
+
+
+# ---- Revision final: lo que cuenta contra el freno de cargas masivas ----
+
+def test_ordenar_solo_la_columna_tipo_dispara_la_confirmacion_masiva(client, lista, monkeypatch):
+    """Antes no la disparaba: Tipo, Procedencia y No es producto no contaban, y rotar una sola
+    columna deja cada valor en la fila de otro producto sin que ninguna fila lo note."""
+    monkeypatch.setattr(carga, "UMBRAL_MASIVA", 1)
+    filas = _bajar(client)
+    for f in filas[1:]:
+        if f[0] in ("71 AAA1", "13 BBB2"):
+            f[filas[0].index("Tipo")] = "Pesado" if f[0] == "71 AAA1" else "Neumatico"
+
+    v = _vista(client, filas)
+    sin = _cargar(client, filas)
+    con = _cargar(client, filas, confirmar_masiva=True)
+
+    assert v["fijan"] == {"tipo": 2} and v["fijan_total"] == 2
+    assert sin.status_code == 422 and "2 precios fijos o factores propios nuevos" in sin.json()["detail"]
+    assert con.status_code == 200 and con.json()["aplicados"] == 2
+
+
+def test_procedencia_y_no_es_producto_tambien_cuentan_contra_el_freno(client, lista, monkeypatch):
+    monkeypatch.setattr(carga, "UMBRAL_MASIVA", 1)
+    filas = _editar(_bajar(client), "71 AAA1", Procedencia="importado")
+    filas = _editar(filas, "13 BBB2", **{"No es producto": "Sí"})
+
+    v = _vista(client, filas)
+
+    assert v["fijan"] == {"procedencia": 1, "no_producto": 1} and v["fijan_total"] == 2
+    assert _cargar(client, filas).status_code == 422
+
+
+def test_quitar_un_tipo_sigue_siendo_una_quita_y_no_cuenta_como_poner(client, lista):
+    v = _vista(client, _editar(_bajar(client), "71 CCC3", Tipo=""))
+
+    assert v["fijan_total"] == 0
+
+
+# ---- Revision final: un margen basura es un error de fila, no un 500 ----
+
+@pytest.mark.parametrize("basura", [1e30, 1e300, "1E+40"])
+def test_un_margen_fijo_enorme_es_un_error_de_fila_y_no_un_500(client, lista, basura):
+    filas = _editar(_bajar(client), "71 AAA1", **{"Margen fijo %": basura})
+
+    r = _subir(client, _a_csv(filas))
+
+    assert r.status_code == 200, r.text
+    v = r.json()
+    assert v["errores_total"] >= 1 and v["a_cambiar"] == 0

@@ -161,6 +161,11 @@ UMBRAL_MASIVA = 200
 # y fechas del periodo. Ordenar UNA de esas columnas deja cada valor en la fila de otro
 # producto igual que con el precio, y ordenar solo Congelar no disparaba ningun freno.
 _CAMPOS_QUE_FIJAN = ("precio_fijo", "margen_fijo", "congelar", "vigente_desde", "vigente_hasta")
+# Y tambien Tipo, Procedencia y No es producto: ordenar UNA sola de esas columnas deja cada
+# valor en la fila de otro producto (miles de tipos manuales, y por lo tanto de factores) y
+# ninguna validacion por fila lo ve. `_CAMPOS_QUE_FIJAN` queda aparte porque define que es
+# una decision con periodo ("programado"): un tipo no la programa.
+_CAMPOS_CONTRA_EL_FRENO = _CAMPOS_QUE_FIJAN + ("tipo_manual", "procedencia_manual", "no_producto")
 TOPE_LISTA = 200           # errores o conflictos que se devuelven (el total va aparte)
 TOPE_CODIGOS = 100
 TOPE_CAMBIOS = 300
@@ -335,7 +340,10 @@ def _c_precio(v) -> str:
 def _fmt_margen(n: float) -> str:
     """El margen (en % sobre la venta) con hasta 2 decimales y sin ceros de relleno:
     35, 35.5, 33.33. Mitad hacia arriba, como Excel."""
-    d = Decimal(repr(float(n))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    try:
+        d = Decimal(repr(float(n))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except ArithmeticError as e:      # 1e30 no cabe en 2 decimales: InvalidOperation no es ValueError
+        raise ValueError("no es un número") from e
     s = f"{d:f}"
     return s.rstrip("0").rstrip(".") if "." in s else s
 
@@ -1686,7 +1694,7 @@ def _plan_corto(db, nombre: str, filas: list[list], cols: dict[str, int], enc: i
                         ejemplos_quitan.append({
                             "producto": codigo,
                             "campo": "Margen fijo %" if k == "margen_fijo" else _ETIQUETA_CAMPO[k]})
-                elif k in _CAMPOS_QUE_FIJAN:
+                elif k in _CAMPOS_CONTRA_EL_FRENO:
                     n_fijan[_CLAVE_POR_CAMPO_OV[k]] += 1
             if reemplaza:
                 reemplazos.append({"producto": codigo, "decision_anterior": reemplaza,
@@ -1898,7 +1906,7 @@ def planificar(db, nombre: str, contenido: bytes, modo: str = "auto") -> _Plan:
                     n_quitan[_CLAVE_POR_CAMPO_OV[k]] += 1
                     if len(ejemplos_quitan) < 20:
                         ejemplos_quitan.append({"producto": codigo, "campo": _ETIQUETA_CAMPO[k]})
-                elif k in _CAMPOS_QUE_FIJAN:
+                elif k in _CAMPOS_CONTRA_EL_FRENO:
                     n_fijan[_CLAVE_POR_CAMPO_OV[k]] += 1
             plan.cambios.append({
                 "producto": codigo, "fila": n, "glosa": p.glosa, "datos": datos, "h2": h2, "ed": ed,
@@ -1973,7 +1981,8 @@ def aplicar(db, nombre: str, contenido: bytes, usuario: str | None,
                 "producto).")
         raise ErrorCarga(
             f"Esta carga deja {_miles(r['fijan_total'])} precios fijos o factores propios nuevos "
-            "(contando también los congelados y las fechas del periodo). "
+            "(contando también los congelados, las fechas del periodo y los cambios de tipo, "
+            "procedencia o 'No es producto'). "
             "Confírmalo en la pantalla antes de cargar: si no era lo que querías, puede que se haya "
             "ordenado una sola columna del Excel y los valores quedaron en la fila de otro producto.")
     omitidos = {"conflictos": r["conflictos_total"], "desconocidos": r["desconocidos_total"],

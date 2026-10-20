@@ -535,8 +535,9 @@ def bodega_cuenta(tipo: str | None, clave: str) -> bool:
     - `VIRT` o sin clasificar cuentan SALVO que el nombre diga danados, scrap o
       devolucion, o que no tenga nombre. Es la red de seguridad: la regla es "todo
       menos tres bodegas", asi que una cuarta grafia de Danados -el ERP ya trae
-      tres- o una tabla a la que le falte NODISP (recargaron un Excel viejo,
-      `create_all` fallo al arrancar) contaria stock que no existe, en silencio.
+      tres- o una tabla a la que le falte NODISP (recargaron un Excel viejo) contaria
+      stock que no existe, en silencio. La red NO cubre una tabla ausente o vacia:
+      `_cuenta_bodega` no filtra nada sin clasificacion (el comportamiento de antes).
       Con la bodega sin nombre pasa lo mismo: el ERP no dice donde esta ese stock
       (53 filas, 345 unidades) y mientras Abastecimiento no confirme que se puede
       vender, no cuenta.
@@ -930,6 +931,29 @@ LIMITE_EJEMPLOS = 20
 # que dos barridos no recalculen lo mismo a la vez. Si algun dia hubiera dos procesos, lo
 # peor es una fila repetida en `precio_cambio`.
 _CANDADO_BARRIDO = threading.Lock()
+# Encendida mientras corre un recalculo hecho por una persona (`recalcular_a_solas`): el barrido
+# de las lecturas no espera 20 segundos a que termine, se salta (omitido).
+_RECALCULO_A_SOLAS = threading.Event()
+
+
+def recalcular_a_solas(db: Session, **kw) -> dict:
+    """`recalcular` para quien lo pide a mano (boton Recalcular, guardar una politica, las
+    tablas de margen): toma el mismo candado que el barrido de vigencias.
+
+    Sin el, un barrido podia correr EN MEDIO de un recalculo de 4-5 minutos: el recalculo
+    mide los cambios contra la foto que leyo al empezar, ya vieja, y volvia a anotar en
+    `precio_cambio` lo que el barrido ya habia anotado, y pisaba `cambios_pendientes` con
+    un valor viejo. Pasa la primera manana despues de cada vencimiento.
+
+    Espera a que termine un barrido en curso (son unos segundos). Mientras corre, el barrido
+    de las lecturas se salta: el propio recalculo ya lleva al precio los periodos que
+    vencieron, porque mide todo con la fecha de hoy. Mismos argumentos que `recalcular`."""
+    with _CANDADO_BARRIDO:
+        _RECALCULO_A_SOLAS.set()
+        try:
+            return recalcular(db, **kw)
+        finally:
+            _RECALCULO_A_SOLAS.clear()
 
 
 class VigenciasSinAplicar(RuntimeError):
@@ -1069,6 +1093,9 @@ def aplicar_vigencias(db: Session, usuario: str | None = "vigencias", hoy: date 
         salida["ejemplos"] = simulados[:LIMITE_EJEMPLOS]
         return salida
 
+    if _RECALCULO_A_SOLAS.is_set():          # un recalculo a mano esta corriendo: lo cubre el
+        salida["omitido"] = True
+        return salida
     tomado = (_CANDADO_BARRIDO.acquire(timeout=espera_s) if espera_s and espera_s > 0
               else _CANDADO_BARRIDO.acquire(blocking=False))
     if not tomado:

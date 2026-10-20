@@ -182,7 +182,7 @@ def recalcular(
     email: str = Depends(requiere_precios),
 ) -> dict:
     """Recalcula toda la lista con el stock, costo y compras que tiene la plataforma."""
-    return precios_service.recalcular(db, usuario=email, refrescar_insumos=refrescar_insumos)
+    return precios_service.recalcular_a_solas(db, usuario=email, refrescar_insumos=refrescar_insumos)
 
 
 @router.post("/cambios/vistos")
@@ -273,7 +273,7 @@ def guardar_factores(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     # Un factor nuevo cambia precios: se recalcula con los insumos que ya hay.
-    r["recalculo"] = precios_service.recalcular(db, usuario=email, refrescar_insumos=False)
+    r["recalculo"] = precios_service.recalcular_a_solas(db, usuario=email, refrescar_insumos=False)
     return r
 
 
@@ -285,7 +285,7 @@ def guardar_rubros(
         r = politica.guardar_rubros(db, [f.model_dump() for f in payload.filas], email)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
-    r["recalculo"] = precios_service.recalcular(db, usuario=email, refrescar_insumos=False)
+    r["recalculo"] = precios_service.recalcular_a_solas(db, usuario=email, refrescar_insumos=False)
     return r
 
 
@@ -330,8 +330,8 @@ def guardar_politica(
         rs = precios_service.seguir_al_rubro(db, payload.seguir_al_rubro, email)
         # La sesion no hace autoflush: sin esto el recalculo leeria la politica vieja.
         db.flush()
-        recalculo = (precios_service.recalcular(db, usuario=email, refrescar_insumos=False,
-                                                productos=afectados)
+        recalculo = (precios_service.recalcular_a_solas(db, usuario=email, refrescar_insumos=False,
+                                                       productos=afectados)
                      if afectados else None)
         db.commit()
     except ValueError as e:

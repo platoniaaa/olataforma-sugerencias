@@ -447,7 +447,7 @@ def cargar_bodegas_tipo(
     try:
         return precios_service.cargar_bodegas_tipo(
             db, filas, usuario=email,
-            sin_no_disponibles=bool(payload.get("sin_no_disponibles")),
+            sin_no_disponibles=payload.get("sin_no_disponibles") is True,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e

@@ -767,3 +767,66 @@ def test_admin_responde_omitido_si_hay_otro_barrido_en_curso(client, lista, relo
 
     assert (d["omitido"], d["recalculados"], d["pendientes"]) == (True, 0, 1)
     assert _precio(lista, "71 AAA1").precio_final == 990
+
+
+# ---- Revision final: el barrido no corre en medio de un recalculo hecho a mano ----
+
+def test_el_barrido_se_salta_mientras_corre_un_recalculo_a_mano(lista, reloj, monkeypatch):
+    """Antes el recalculo completo no tomaba el candado: el barrido de una lectura corria en
+    medio, y el recalculo volvia a anotar en precio_cambio lo que el barrido ya habia anotado."""
+    _fijo(lista, "71 AAA1", hasta=_dias(2))
+    reloj(_dias(3))
+    en_medio = []
+
+    def recalculo_con_una_lectura_en_medio(db, **kw):
+        en_medio.append(svc.aplicar_vigencias(db, espera_s=0.5))     # lo que haria otra persona
+        return {"productos": 0}
+
+    monkeypatch.setattr(svc, "recalcular", recalculo_con_una_lectura_en_medio)
+
+    svc.recalcular_a_solas(lista, usuario="a@x.cl", refrescar_insumos=False)
+
+    assert en_medio[0]["omitido"] is True and en_medio[0]["recalculados"] == 0
+    assert _filas(lista)["vigencias"] == 0
+    assert not svc._RECALCULO_A_SOLAS.is_set()
+    assert svc._CANDADO_BARRIDO.acquire(blocking=False)         # y el candado se soltó
+    svc._CANDADO_BARRIDO.release()
+
+
+def test_el_recalculo_a_mano_espera_a_un_barrido_en_curso(lista, reloj):
+    reloj(_dias(3))
+    svc._CANDADO_BARRIDO.acquire()
+    soltar = threading.Timer(0.3, svc._CANDADO_BARRIDO.release)
+    soltar.start()
+    try:
+        r = svc.recalcular_a_solas(lista, usuario="a@x.cl", refrescar_insumos=False)
+    finally:
+        soltar.join()
+
+    assert r["productos"] >= 1
+
+
+def test_el_candado_del_recalculo_a_mano_se_suelta_si_falla(lista, monkeypatch):
+    monkeypatch.setattr(svc, "recalcular", _boom)
+
+    with pytest.raises(RuntimeError):
+        svc.recalcular_a_solas(lista)
+
+    assert not svc._RECALCULO_A_SOLAS.is_set()
+    assert svc._CANDADO_BARRIDO.acquire(blocking=False)
+    svc._CANDADO_BARRIDO.release()
+
+
+def test_el_boton_recalcular_pasa_por_el_candado(client, lista, monkeypatch):
+    vistos = []
+
+    def espia(db, **kw):
+        vistos.append(svc._RECALCULO_A_SOLAS.is_set())
+        return {"productos": 0}
+
+    monkeypatch.setattr(svc, "recalcular", espia)
+
+    r = client.post("/api/precios/recalcular?refrescar_insumos=false")
+
+    assert r.status_code == 200, r.text
+    assert vistos == [True]
