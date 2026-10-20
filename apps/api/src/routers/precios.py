@@ -54,10 +54,18 @@ def _filtros(
     origen: str | None = Query(None, description="maestro | manual"),
     con_cambios: bool = Query(False, description="Solo productos con cambios sin revisar"),
     con_stock: bool = Query(False),
+    vigencia: list[str] = Query(
+        default=[], description="programada | vigente | vencida | vence_7d (repetible)"),
 ) -> PrecioFiltros:
+    invalidos = sorted(set(vigencia) - set(precios_service.FILTROS_VIGENCIA))
+    if invalidos:
+        raise HTTPException(
+            status_code=422,
+            detail=(f"Vigencia no válida: {', '.join(invalidos)}. "
+                    f"Usa {', '.join(precios_service.FILTROS_VIGENCIA)}."))
     return PrecioFiltros(
         q=q, rubro=rubro, tipo=tipo, procedencia=procedencia, estado=estado,
-        origen=origen, con_cambios=con_cambios, con_stock=con_stock,
+        origen=origen, con_cambios=con_cambios, con_stock=con_stock, vigencia=vigencia,
     )
 
 
@@ -121,12 +129,18 @@ def exportar(
 
     Sube el proceso 190 a 230 MB: no se arma durante la carga del sugerido ni junto
     a otra descarga grande (services/operacion_pesada.py). Si le toca esperar de
-    mas responde 503, que la web reintenta sola (`reqConReintentos`)."""
-    with operacion_pesada.descarga_pesada():
-        contenido, nombre, n = precios_service.exportar(
-            db, solo_diferencias=solo_diferencias, registrar=registrar and formato == "erp",
-            usuario=email, formato=formato, lote_id=lote,
-        )
+    mas responde 503, que la web reintenta sola (`reqConReintentos`).
+
+    Antes de armar el archivo aplica los vencimientos de vigencia pendientes. Si no pudo
+    y el archivo del ERP saldria con un precio que ya no rige, tambien responde 503."""
+    try:
+        with operacion_pesada.descarga_pesada():
+            contenido, nombre, n = precios_service.exportar(
+                db, solo_diferencias=solo_diferencias, registrar=registrar and formato == "erp",
+                usuario=email, formato=formato, lote_id=lote,
+            )
+    except precios_service.VigenciasSinAplicar as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     tipo = "text/csv; charset=utf-8" if nombre.endswith(".csv") else _XLSX
     return StreamingResponse(
         iter([contenido]), media_type=tipo,

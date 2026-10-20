@@ -115,6 +115,9 @@ class PrecioFiltros(BaseModel):
     origen: str | None = None
     con_cambios: bool = False
     con_stock: bool = False
+    # 'programada' | 'vigente' | 'vencida' | 'vence_7d' (vigente con el Hasta entre hoy y
+    # hoy + 7). Varios valores son una union.
+    vigencia: list[str] = Field(default_factory=list)
 
 
 class OverrideIn(BaseModel):
@@ -146,6 +149,15 @@ class OverrideIn(BaseModel):
         if isinstance(v, str) and _FECHA_ISO.match(v):
             return v
         raise ValueError("la fecha tiene que ser aaaa-mm-dd")
+
+
+class VigenciasAplicarIn(BaseModel):
+    """El cuerpo (opcional) de `POST /api/admin/precios/vigencias/aplicar`."""
+
+    # Cuenta y simula lo que se aplicaria, sin escribir nada.
+    previsualizar: bool = False
+
+    model_config = {"extra": "forbid"}
 
 
 class ProductoNuevoIn(BaseModel):

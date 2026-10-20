@@ -22,8 +22,10 @@ Vigencia (20-10-2026). Precio fijo, margen fijo y congelar pueden traer un perio
 -programada o vencida- las tres se ignoran como si la persona no las hubiera
 decidido, ANTES de aplicar el orden de arriba, que no cambia. La decision no se borra
 ni se edita: `precio_override` sigue siendo solo de personas, y asi existen "Vencido" y
-"Renovar". 'Hoy' es siempre la fecha de Chile (`calendario.hoy_chile`). Todavia no hay
-un barrido: el vencimiento llega al precio en el proximo recalculo.
+"Renovar". 'Hoy' es siempre la fecha de Chile (`calendario.hoy_chile`). El vencimiento
+llega al precio con `aplicar_vigencias`, un barrido idempotente que recalcula SOLO los
+productos cuyo periodo cambio de estado: corre solo al abrir el resumen o la lista y al
+bajar un archivo, y a pedido en `POST /api/admin/precios/vigencias/aplicar`.
 
 La regla de la procedencia por compras es la que pidio Abastecimiento: si la
 ultima compra esta en el seguimiento de importacion, es Importado; si esta en el
@@ -36,17 +38,18 @@ import io
 import logging
 import math
 import re
+import threading
 import unicodedata
 import uuid
 from collections import Counter
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from statistics import median
 from typing import NamedTuple
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
-from sqlalchemy import Numeric, and_, cast, delete, func, insert, or_, select, update
+from sqlalchemy import Numeric, and_, cast, delete, false, func, insert, or_, select, update
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -150,6 +153,9 @@ def _fecha(v) -> date | None:
 # "vencida" (hoy > Hasta). Sin periodo, o sin ninguna de las tres decisiones, no hay estado.
 PROGRAMADA, VIGENTE, VENCIDA = "programada", "vigente", "vencida"
 VIGENCIAS = (PROGRAMADA, VIGENTE, VENCIDA)
+# Un valor mas del filtro de la lista (no un estado): vigentes cuyo Hasta cae en los proximos 7 dias.
+VENCE_7D = "vence_7d"
+FILTROS_VIGENCIA = VIGENCIAS + (VENCE_7D,)
 # Una fecha mas lejos que esto de hoy es un error de tipeo (el 2206 por el 2026).
 MAX_ANIOS_VIGENCIA = 3
 
@@ -882,6 +888,227 @@ def recalcular(db: Session, usuario: str | None = None, refrescar_insumos: bool 
     }
 
 
+# ------------------------------------------------- el barrido de vigencias
+# Quien lee la lista tiene que ver los precios de hoy, y el motor solo corre cuando alguien
+# aprieta un boton (el cron de GitHub que debia hacerlo falla con 403): el vencimiento no
+# puede esperar a un recalculo. Por eso el barrido corre solo al leer. Recalcula SOLO los
+# productos cuyo periodo cambio de estado, y no escribe nada si no hay ninguno.
+LIMITE_BARRIDO_PANTALLA = 500          # productos por lectura de pantalla (~7 ms cada uno)
+ESPERA_BARRIDO_PANTALLA_S = 20.0       # la pantalla pide el resumen y la lista casi a la vez
+ESPERA_BARRIDO_DESCARGA_S = 30.0
+LIMITE_EJEMPLOS = 20
+# La API corre en un solo proceso (`operacion_pesada`): un candado del proceso alcanza para
+# que dos barridos no recalculen lo mismo a la vez. Si algun dia hubiera dos procesos, lo
+# peor es una fila repetida en `precio_cambio`.
+_CANDADO_BARRIDO = threading.Lock()
+
+
+class VigenciasSinAplicar(RuntimeError):
+    """El archivo del ERP no puede salir porque hay vencimientos que no se aplicaron."""
+
+
+def _consulta_candidatos_vigencia(tenant: str):
+    """La consulta de `_candidatos_vigencia`, aparte para poder compilarla en los tests
+    contra el dialecto de Postgres (los tests corren en SQLite y produccion no)."""
+    return (
+        select(PrecioProducto.producto, PrecioProducto.vigencia_aplicada,
+               PrecioOverride.precio_fijo, PrecioOverride.margen_fijo, PrecioOverride.congelar,
+               PrecioOverride.vigente_desde, PrecioOverride.vigente_hasta)
+        .select_from(PrecioProducto)
+        .outerjoin(PrecioOverride, and_(PrecioOverride.tenant_id == PrecioProducto.tenant_id,
+                                        PrecioOverride.producto == PrecioProducto.producto))
+        .where(PrecioProducto.tenant_id == tenant,
+               or_(PrecioProducto.vigencia_aplicada.isnot(None),
+                   PrecioOverride.vigente_desde.isnot(None),
+                   PrecioOverride.vigente_hasta.isnot(None)))
+        .order_by(PrecioProducto.producto)
+    )
+
+
+def _candidatos_vigencia(db: Session, hoy: date) -> tuple[list[dict], int]:
+    """Los productos cuyo marcador (`vigencia_aplicada`) no es el estado de hoy, y cuantos
+    productos tienen un periodo que gobierna alguna decision. Solo lee.
+
+    Una consulta trae lo unico que puede importar: los productos con marcador (los que
+    alguna vez tuvieron periodo, incluidos los huerfanos que ya no lo tienen) y los que
+    tienen fechas en su override. Candidato = marcador distinto del estado esperado, o sea
+    que un recalculo les cambiaria el estado. Los codigos de un override que ya no esta en
+    la lista no aparecen: no hay precio que recalcular."""
+    filas = db.execute(_consulta_candidatos_vigencia(settings.default_tenant_id)).all()
+    candidatos: list[dict] = []
+    con_periodo = 0
+    for producto, marcador, fijo, margen, congelar, desde, hasta in filas:
+        esperado = vigencia_de(
+            {"precio_fijo": fijo, "margen_fijo": margen, "congelar": bool(congelar),
+             "vigente_desde": desde, "vigente_hasta": hasta}, hoy)
+        con_periodo += int(esperado is not None)
+        if marcador != esperado:
+            candidatos.append({"producto": producto, "marcador": marcador, "esperado": esperado})
+    return candidatos, con_periodo
+
+
+def vigencias_por_aplicar(db: Session, hoy: date | None = None) -> int:
+    """Cuantos productos tienen un vencimiento (o un comienzo) que la lista todavia no aplico."""
+    return len(_candidatos_vigencia(db, hoy or calendario.hoy_chile())[0])
+
+
+def _titulo_vigencias(vencieron: int, comenzaron: int) -> str:
+    """El titulo de la notificacion de un barrido: lo que volvio a la regla y lo que empezo."""
+    partes = []
+    if vencieron:
+        partes.append(f"{vencieron} volvió a la regla" if vencieron == 1
+                      else f"{vencieron} volvieron a la regla")
+    if comenzaron:
+        partes.append(f"{comenzaron} empezó" if comenzaron == 1 else f"{comenzaron} empezaron")
+    return "Vigencias de precios: " + (", ".join(partes) or "periodos reajustados")
+
+
+def _simular_vigencias(db: Session, lote: list[dict], hoy: date) -> list[dict]:
+    """Que precio tendria cada candidato con la regla de hoy, SIN escribir nada: la misma
+    `calcular` que usa `recalcular` sobre lo que la fila ya tiene (el barrido no relee el
+    stock ni el costo). Sirve para los ejemplos y para la vista previa."""
+    codigos = [c["producto"] for c in lote]
+    filas: dict[str, PrecioProducto] = {}
+    for sub in _en_lotes(codigos):
+        for p in db.scalars(select(PrecioProducto).where(
+                PrecioProducto.tenant_id == settings.default_tenant_id,
+                PrecioProducto.producto.in_(sub))).all():
+            filas[p.producto] = p
+    ovs = _overrides(db, codigos)
+    fact, rub = politica.factores(db), politica.rubros(db)
+    salida = []
+    for c in lote:
+        p = filas.get(c["producto"])
+        if p is None:
+            continue
+        despues = calcular(_fila_regla(p), ovs.get(p.producto), fact, rub, hoy)["precio_final"]
+        salida.append({
+            "producto": p.producto, "glosa": p.glosa,
+            "vigencia_antes": c["marcador"], "vigencia_despues": c["esperado"],
+            "precio_antes": p.precio_final, "precio_despues": despues,
+            "cambia": _txt(p.precio_final) != _txt(despues),
+        })
+    return salida
+
+
+def aplicar_vigencias(db: Session, usuario: str | None = "vigencias", hoy: date | None = None,
+                      limite: int | None = None, previsualizar: bool = False,
+                      espera_s: float = 0.0) -> dict:
+    """Lleva al precio los periodos que vencieron o empezaron. Idempotente.
+
+    1. Lee los candidatos (productos cuyo marcador no es el estado de hoy). Sin candidatos
+       devuelve ceros SIN escribir NADA: `recalcular` siempre deja una fila de auditoria,
+       aunque de 0 cambios, y un barrido en cada lectura llenaria la tabla de filas vacias.
+    2. Con candidatos toma el candado del proceso (`espera_s` segundos; 0 = no espera, y si
+       esta ocupado responde `omitido`) y los vuelve a leer: mientras esperaba, otro barrido
+       pudo haber hecho el trabajo.
+    3. Recalcula los candidatos (hasta `limite`, en orden de codigo) con los insumos que la
+       fila ya tiene: UNA auditoria y UNA notificacion propias, no una por producto.
+
+    Nunca escribe `precio_override`: el vencimiento no toca lo que decidieron las personas.
+    `previsualizar` cuenta y simula, sin escribir ni tomar el candado.
+
+    Devuelve {hoy, con_periodo, al_dia, pendientes, vencieron, comenzaron, recalculados,
+    precios_cambiados, omitido, previsualizar, ejemplos}. `al_dia` y `pendientes` son los de
+    ANTES de aplicar; `vencieron` y `comenzaron` cuentan lo recalculado en esta corrida."""
+    hoy = hoy or calendario.hoy_chile()
+    salida: dict = {
+        "hoy": hoy.isoformat(), "con_periodo": 0, "al_dia": 0, "pendientes": 0, "vencieron": 0,
+        "comenzaron": 0, "recalculados": 0, "precios_cambiados": 0, "omitido": False,
+        "previsualizar": previsualizar, "ejemplos": [],
+    }
+
+    def leer() -> list[dict]:
+        candidatos, con_periodo = _candidatos_vigencia(db, hoy)
+        salida["con_periodo"] = con_periodo
+        salida["al_dia"] = con_periodo - sum(1 for c in candidatos if c["esperado"] is not None)
+        salida["pendientes"] = len(candidatos)
+        return candidatos
+
+    def tomar(candidatos: list[dict]) -> list[dict]:
+        lote = candidatos if limite is None else candidatos[:limite]
+        salida["vencieron"] = sum(1 for c in lote if c["esperado"] == VENCIDA)
+        salida["comenzaron"] = sum(1 for c in lote if c["esperado"] == VIGENTE)
+        return lote
+
+    candidatos = leer()
+    if not candidatos:
+        return salida
+    if previsualizar:
+        simulados = _simular_vigencias(db, tomar(candidatos), hoy)
+        salida["precios_cambiados"] = sum(1 for s in simulados if s["cambia"])
+        salida["ejemplos"] = simulados[:LIMITE_EJEMPLOS]
+        return salida
+
+    tomado = (_CANDADO_BARRIDO.acquire(timeout=espera_s) if espera_s and espera_s > 0
+              else _CANDADO_BARRIDO.acquire(blocking=False))
+    if not tomado:
+        salida["omitido"] = True
+        return salida
+    try:
+        candidatos = leer()                  # con el candado puesto: otro pudo haberlo hecho
+        if not candidatos:
+            return salida
+        lote = tomar(candidatos)
+        salida["ejemplos"] = _simular_vigencias(db, lote[:LIMITE_EJEMPLOS], hoy)
+        r = recalcular(
+            db, usuario=usuario, refrescar_insumos=False, productos=[c["producto"] for c in lote],
+            hoy=hoy, accion="precios_vigencias",
+            titulo=_titulo_vigencias(salida["vencieron"], salida["comenzaron"]),
+        )
+        salida["recalculados"] = r["productos"]
+        salida["precios_cambiados"] = r["precios_distintos"]
+    finally:
+        _CANDADO_BARRIDO.release()
+    log.info("vigencias: %s volvieron a la regla, %s empezaron, %s precios cambiaron",
+             salida["vencieron"], salida["comenzaron"], salida["precios_cambiados"])
+    return salida
+
+
+def _barrido_perezoso(db: Session, limite: int | None, espera_s: float) -> dict | None:
+    """El barrido que corre al leer. Un fallo NUNCA rompe la lectura: se deshace lo que
+    quedo a medias, se deja en el log y la persona ve lo que ya habia. Devuelve el
+    resultado, o None si fallo."""
+    try:
+        return aplicar_vigencias(db, limite=limite, espera_s=espera_s)
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        log.warning("vigencias: el barrido fallo y la lectura sigue sin el: %s", exc, exc_info=True)
+        return None
+
+
+def _cond_vence_pronto(hoy: date, dias: int = 7):
+    """Vigentes cuyo Hasta cae entre hoy y hoy + `dias` (ambos incluidos). Usa el marcador
+    guardado para el estado y el override para el Hasta."""
+    hasta = select(PrecioOverride.producto).where(
+        PrecioOverride.tenant_id == settings.default_tenant_id,
+        PrecioOverride.vigente_hasta.isnot(None),
+        PrecioOverride.vigente_hasta >= hoy,
+        PrecioOverride.vigente_hasta <= hoy + timedelta(days=dias),
+    )
+    return and_(PrecioProducto.vigencia_aplicada == VIGENTE, PrecioProducto.producto.in_(hasta))
+
+
+def _resumen_vigencias(db: Session, hoy: date) -> dict:
+    """El bloque `vigencias` del resumen. `hoy` viene del servidor para que los atajos de la
+    ficha (30/60/90 dias, fin de mes) no dependan del reloj del navegador."""
+    tenant = settings.default_tenant_id
+    por = dict(db.execute(
+        select(PrecioProducto.vigencia_aplicada, func.count())
+        .where(PrecioProducto.tenant_id == tenant, PrecioProducto.vigencia_aplicada.isnot(None))
+        .group_by(PrecioProducto.vigencia_aplicada)
+    ).all())
+    vencen = db.scalar(
+        select(func.count()).select_from(PrecioProducto)
+        .where(PrecioProducto.tenant_id == tenant, _cond_vence_pronto(hoy))
+    ) or 0
+    return {
+        "hoy": hoy.isoformat(), "vigentes": por.get(VIGENTE, 0),
+        "programadas": por.get(PROGRAMADA, 0), "vencidas": por.get(VENCIDA, 0),
+        "vencen_7_dias": vencen, "por_aplicar": vigencias_por_aplicar(db, hoy),
+    }
+
+
 # ------------------------------------------------------ cambios de politica
 # Las columnas que necesita `calcular`, mas el tipo actual para contar de donde
 # sale. Se piden columnas y no el objeto: un cambio de factor de "Liviano" toca
@@ -1136,10 +1363,25 @@ def _filtrar(stmt, f):
         stmt = stmt.where(PrecioProducto.cambios_pendientes > 0)
     if getattr(f, "con_stock", False):
         stmt = stmt.where(PrecioProducto.stock > 0)
+    vigencia = set(getattr(f, "vigencia", None) or [])
+    if vigencia:
+        # Usa el marcador guardado: el barrido de `listar` y `resumen` lo dejo al dia antes
+        # de consultar. Varios valores son una union; 'vence_7d' (vigente con el Hasta entre
+        # hoy y hoy + 7) es un valor mas, no un estado.
+        condiciones = []
+        estados = sorted(vigencia & set(VIGENCIAS))
+        if estados:
+            condiciones.append(PrecioProducto.vigencia_aplicada.in_(estados))
+        if VENCE_7D in vigencia:
+            condiciones.append(_cond_vence_pronto(calendario.hoy_chile()))
+        stmt = stmt.where(or_(*condiciones)) if condiciones else stmt.where(false())
     return stmt
 
 
 def listar(db: Session, f, page: int = 1, limit: int = 200, sort: str | None = None):
+    # Lo primero: la pantalla pide el resumen al abrir y la lista 300 ms despues, asi que la
+    # lista espera al barrido que el resumen tenga en curso en vez de leer precios vencidos.
+    _barrido_perezoso(db, LIMITE_BARRIDO_PANTALLA, ESPERA_BARRIDO_PANTALLA_S)
     base = _filtrar(select(PrecioProducto), f)
     total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
     col, desc_ = "producto", False
@@ -1224,7 +1466,12 @@ def opciones_filtros(db: Session) -> dict:
 
 
 def resumen(db: Session) -> dict:
+    """Los contadores de la pantalla. Antes de contar aplica los vencimientos pendientes
+    (hasta `LIMITE_BARRIDO_PANTALLA` productos): el resumen es lo primero que pide la
+    pantalla, y 'pendientes de envio' tiene que incluir lo que vencio esta noche."""
     tenant = settings.default_tenant_id
+    hoy = calendario.hoy_chile()
+    _barrido_perezoso(db, LIMITE_BARRIDO_PANTALLA, ESPERA_BARRIDO_PANTALLA_S)
     try:
         total = db.scalar(select(func.count()).select_from(PrecioProducto).where(PrecioProducto.tenant_id == tenant)) or 0
         con_cambios = db.scalar(
@@ -1238,10 +1485,13 @@ def resumen(db: Session) -> dict:
         ultima = db.scalar(select(func.max(PrecioProducto.actualizado_en)).where(PrecioProducto.tenant_id == tenant))
         ultimo_envio = db.scalar(select(func.max(PrecioEnvio.enviado_en)).where(PrecioEnvio.tenant_id == tenant))
         overrides = db.scalar(select(func.count()).select_from(PrecioOverride).where(PrecioOverride.tenant_id == tenant)) or 0
+        vigencias = _resumen_vigencias(db, hoy)
     except Exception:  # noqa: BLE001
         db.rollback()
         return {"productos": 0, "con_cambios": 0, "por_estado": {}, "ultimo_recalculo": None,
-                "ultimo_envio": None, "overrides": 0, "pendientes_envio": 0}
+                "ultimo_envio": None, "overrides": 0, "pendientes_envio": 0,
+                "vigencias": {"hoy": hoy.isoformat(), "vigentes": 0, "programadas": 0,
+                              "vencidas": 0, "vencen_7_dias": 0, "por_aplicar": 0}}
     return {
         "productos": total, "con_cambios": con_cambios,
         "por_estado": {k or "(sin estado)": v for k, v in por_estado.items()},
@@ -1249,6 +1499,7 @@ def resumen(db: Session) -> dict:
         "ultimo_envio": ultimo_envio.isoformat() if ultimo_envio else None,
         "overrides": overrides,
         "pendientes_envio": contar_diferencias(db),
+        "vigencias": vigencias,
     }
 
 
@@ -1796,25 +2047,42 @@ def exportar(db: Session, *, solo_diferencias: bool, registrar: bool, usuario: s
     lote ya quedo registrado -la respuesta se perdio y el navegador reintenta-, se
     devuelve el MISMO archivo en vez de calcular de nuevo: sin esto el reintento
     salia vacio, porque el primer intento ya habia marcado todo como enviado, y la
-    persona se quedaba sin el archivo creyendo que no habia cambios."""
+    persona se quedaba sin el archivo creyendo que no habia cambios.
+
+    Antes de armar cualquier formato -y de contar las diferencias- aplica TODOS los
+    vencimientos pendientes (sin tope, esperando hasta `ESPERA_BARRIDO_DESCARGA_S` si otro
+    barrido esta en curso): el archivo del ERP tiene que salir con la regla de hoy, y el
+    ERP conserva el precio de la campana hasta que alguien lo sube. Si el barrido falla
+    la lista y la editable salen igual; el archivo del ERP no (`VigenciasSinAplicar`).
+    Los nombres llevan la fecha de Chile."""
+    _barrido_perezoso(db, None, ESPERA_BARRIDO_DESCARGA_S)
+    hoy = calendario.hoy_chile()
     if formato == "completa":
         contenido, n = _csv_completa(db)
-        return contenido, f"lista_precios_completa_{date.today():%Y-%m-%d}.csv", n
+        return contenido, f"lista_precios_completa_{hoy:%Y-%m-%d}.csv", n
     if formato == "editable":
         # La lista completa mas lo que hace falta para editarla y volver a cargarla.
         from . import precios_carga_service
 
         contenido, n = precios_carga_service.csv_editable(db)
-        return contenido, f"lista_precios_para_editar_{date.today():%Y-%m-%d}.csv", n
+        return contenido, f"lista_precios_para_editar_{hoy:%Y-%m-%d}.csv", n
 
     tenant = settings.default_tenant_id
-    nombre = f"precios_{'diferencias' if solo_diferencias else 'completa'}_{date.today():%Y%m%d}.csv"
+    nombre = f"precios_{'diferencias' if solo_diferencias else 'completa'}_{hoy:%Y%m%d}.csv"
     desc = politica.descuentos(db)
 
     if registrar and lote_id:
         ya = _filas_de_lote(db, tenant, lote_id)
         if ya:
             return _csv_erp(ya, desc), nombre, len(ya)
+
+    if vigencias_por_aplicar(db, hoy):
+        # Es donde un precio de campana vencido hace dano: sale al ERP y queda registrado
+        # como enviado. Mejor que la web reintente (503) a mandar un precio que ya no rige.
+        raise VigenciasSinAplicar(
+            "Hay vencimientos de precios que todavía no se aplican a la lista, y el archivo "
+            "saldría con precios que ya no rigen. Intenta de nuevo en un minuto; si se "
+            "repite, avisa al administrador.")
 
     if solo_diferencias:
         filas = _diferencias(db)

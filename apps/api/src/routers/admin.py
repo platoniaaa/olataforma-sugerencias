@@ -27,6 +27,7 @@ from ..services import (
     transito_service,
     ventas_historicas_service,
 )
+from ..schemas.precios import VigenciasAplicarIn
 from ..services.auth import requiere_admin
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -450,6 +451,30 @@ def cargar_bodegas_tipo(
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
+
+
+@router.post("/precios/vigencias/aplicar")
+def aplicar_vigencias_precios(
+    payload: VigenciasAplicarIn | None = None,
+    db: Session = Depends(get_db),
+    email: str = Depends(requiere_admin),
+) -> dict:
+    """Lleva al precio los periodos de vigencia que vencieron o empezaron. Admin.
+
+    body (opcional): {"previsualizar": true} cuenta y simula, sin escribir nada.
+
+    Precio fijo, margen fijo y congelar pueden traer un Desde y un Hasta; fuera del
+    periodo no rigen y el producto vuelve a la regla. La plataforma lo aplica sola cuando
+    alguien abre la lista o baja un archivo; este endpoint es para hacerlo a pedido (y para
+    que lo llame el motor). Idempotente: la segunda llamada seguida responde ceros y no
+    escribe ninguna fila (ni auditoria ni notificacion). No tiene tope de productos. Si
+    hay otro barrido en curso responde `omitido: true` sin hacer nada.
+
+    Responde {hoy, con_periodo, al_dia, pendientes, vencieron, comenzaron, recalculados,
+    precios_cambiados, omitido, previsualizar, ejemplos}. Nunca modifica `precio_override`.
+    """
+    return precios_service.aplicar_vigencias(
+        db, usuario=email, previsualizar=bool(payload and payload.previsualizar), espera_s=0.0)
 
 
 @router.post("/precios/eliminar")

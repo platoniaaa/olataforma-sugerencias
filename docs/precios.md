@@ -69,6 +69,8 @@ REVISION` (queda sin precio hasta que alguien decida).
   Cada cambio queda en `auditoria_log` (`politica_precio_editada` /
   `politica_rubro_editada`) con el usuario y el valor anterior, y se ve en
   la pantalla de Auditoria.
+- Aplicar los vencimientos de vigencia a pedido (`POST /api/admin/precios/vigencias/aplicar`):
+  admin. Lo demas de la vigencia lo hace la plataforma sola al leer (ver "Vigencia").
 
 ## Cargas
 
@@ -162,12 +164,69 @@ Renovar uno que todavia regia conserva su precio. La auditoria de cada guardado 
 notificacion de siempre. Escribe `precio_producto.vigencia_aplicada` en cada recalculo, igual que
 `estado`. Un vencimiento solo deja una fila en `precio_cambio` si el precio cambio de verdad.
 
-**Todavia no hay barrido.** Hoy el vencimiento llega al precio en el proximo recalculo (el
-boton Recalcular o el del motor); no hay filtros por vigencia, ni el bloque `vigencias` del
-resumen, ni el endpoint del admin, ni columnas nuevas en los archivos de descarga. Eso viene en
-el paso siguiente del plan. Tampoco hay columnas de Desde y Hasta en la carga por Excel: si se
-sube un archivo que edita el `Precio final` de un producto con la decision vencida, el precio
-queda guardado pero no rige hasta renovar el periodo.
+**El barrido: como llega el vencimiento al precio.** `calcular` ya ignora una decision fuera de
+su periodo, pero el precio guardado solo cambia cuando alguien lo recalcula, y el motor solo
+corre cuando se aprieta el boton (el cron de GitHub que debia hacerlo falla con 403). Por eso
+`aplicar_vigencias` (`services/precios_service.py`) lleva los vencimientos al precio solo, al leer:
+
+1. **Candidatos, sin escribir.** Una consulta compara el marcador `vigencia_aplicada` de cada
+   producto con el estado de hoy. Candidato = el marcador no coincide: el periodo vencio, empezo,
+   o quedo un marcador huerfano de un periodo que ya no existe.
+2. **Sin candidatos no se escribe nada**: ni auditoria, ni notificacion, ni `actualizado_en`.
+   `recalcular` siempre deja una fila de auditoria, aunque de 0 cambios, y un barrido en cada
+   lectura llenaria la tabla de filas vacias. Es idempotente: la segunda corrida seguida da ceros.
+3. **Con candidatos** toma un candado del proceso (la API corre en un solo proceso,
+   `services/operacion_pesada.py`), vuelve a leer los candidatos (otro barrido pudo haber hecho
+   el trabajo mientras esperaba) y llama a `recalcular(productos=candidatos,
+   refrescar_insumos=False, accion="precios_vigencias")`: UNA fila de auditoria y UNA
+   notificacion ("Vigencias de precios: 3 volvieron a la regla, 1 empezo"), no una por producto.
+   No relee stock ni costo. Un vencimiento deja una fila en `precio_cambio` solo si el precio
+   cambio de verdad. Si otro barrido tiene el candado y no lo suelta en el plazo, responde
+   `omitido` y no hace nada. Si fueran mas de 5.000 y mas de la mitad de la lista, `recalcular`
+   lee la lista entera, como siempre hizo.
+4. **Nunca escribe `precio_override`**: es solo de personas (`editado_por` y `editado_en` no se
+   mueven), por eso el vencimiento tampoco mueve la huella de la carga por Excel.
+
+| Donde corre | Tope | Espera el candado |
+|---|---|---|
+| `GET /api/precios/resumen` | 500 productos | hasta 20 s |
+| `GET /api/precios` (la lista) | 500 productos | hasta 20 s |
+| `GET /api/precios/exportar`, cualquier formato | sin tope | hasta 30 s |
+| `POST /api/admin/precios/vigencias/aplicar` | sin tope | no espera: `omitido` |
+| Recalcular completo (boton o motor) | no hace falta | -- (ya respeta el periodo) |
+
+La pantalla pide el resumen al abrir y la lista 300 ms despues, asi que la lista tambien barre
+y espera al barrido que el resumen tenga en curso. El tope de 500 (unos 4-5 s, estimado a 7 ms
+por producto) protege la pantalla; lo que quede lo completa la lectura siguiente o la descarga.
+Un fallo del barrido nunca rompe la lectura: se deshace, queda en el log (`vigencias: el barrido
+fallo`) y la pantalla muestra lo que ya habia; `vigencias.por_aplicar` dice cuantos quedaron sin
+aplicar.
+
+**Que suma la API** (el paso del motor para aplicar vigencias de noche NO se hizo: seria
+redundante y vive en otro repositorio):
+
+- `GET /api/precios?vigencia=...`, repetible y en union: `programada`, `vigente`, `vencida` o
+  `vence_7d` (vigente con el Hasta entre hoy y hoy + 7, ambos incluidos). Usa el marcador
+  guardado, que el barrido deja al dia antes de consultar. Un valor que no existe da 422.
+- `GET /api/precios/resumen` suma `vigencias`: `{hoy, vigentes, programadas, vencidas,
+  vencen_7_dias, por_aplicar}`. `hoy` viene del servidor para que los atajos de la ficha (30/60/90
+  dias, fin de mes) no dependan del reloj del navegador. `por_aplicar` son los vencimientos que
+  el tope dejo pendientes. `pendientes_envio` ya incluye lo que acaba de vencer.
+- `POST /api/admin/precios/vigencias/aplicar` (admin; cuerpo opcional `{"previsualizar": true}`).
+  Responde `{hoy, con_periodo, al_dia, pendientes, vencieron, comenzaron, recalculados,
+  precios_cambiados, omitido, previsualizar, ejemplos}`, con hasta 20 ejemplos (`producto`,
+  `vigencia_antes`, `vigencia_despues`, `precio_antes`, `precio_despues`). `al_dia` y
+  `pendientes` son los de ANTES de aplicar. Con `previsualizar` cuenta y simula, sin escribir ni
+  tomar el candado. La segunda llamada seguida responde ceros y no escribe ninguna fila.
+
+**Lo que NO hace.** El vencimiento ocurre en la plataforma, no en el ERP: **el ERP conserva el
+precio de la campana hasta que alguien suba el archivo**. Nada se empuja solo. El producto que
+vence entra a "solo diferencias" y suma en `pendientes_envio` desde la primera lectura del dia
+(solo si el ERP tenia el precio anterior; si nunca se envio, no aparece). Tampoco hay aviso
+previo en la campanita, ni columnas de Desde y Hasta en los archivos de descarga ni en la carga
+por Excel: si se sube un archivo que edita el `Precio final` de un producto con la decision
+vencida, el precio queda guardado pero no rige hasta renovar el periodo. Los vencidos se quedan
+visibles hasta que alguien los renueve o los quite.
 
 **Migracion.** `db.py` agrega `precio_override.vigente_desde`, `precio_override.vigente_hasta` y
 `precio_producto.vigencia_aplicada` (las tres nullable, sin relleno: ningun precio cambia al
@@ -386,6 +445,15 @@ descuento maximo de la politica mas uno, salvo cuando es 0 (desde el 09-10-2026;
 antes la tercera columna era el costo). Con `solo_diferencias=true` salen solo los productos cuyo
 precio o costo difiere de lo ultimo enviado (o nunca enviados). Cada
 exportacion queda registrada en `precio_envio`.
+
+**Vencimientos de vigencia (20-10-2026).** Antes de armar CUALQUIER formato -y de contar las
+diferencias- la descarga aplica todos los vencimientos pendientes, sin tope y esperando hasta 30 s
+si otro barrido esta en curso (ver "Vigencia"). Asi el archivo y el contador de "solo
+diferencias" salen con la regla de hoy aunque nadie haya abierto la pantalla ese dia, tambien
+sabado, domingo y feriado. Si el barrido falla y quedan vencimientos sin aplicar, el archivo del
+ERP responde 503 (la web reintenta sola) en vez de salir con un precio que ya no rige y quedar
+registrado como enviado; la lista completa y la editable salen igual. Los nombres de los archivos
+llevan la fecha de Chile: de 21:00 a 24:00 la del servidor, que corre en UTC, ya es la de manana.
 
 **Que pasa si la descarga se corta (09-10-2026).** El navegador manda `lote=<uuid>`
 en cada descarga del archivo del ERP. Si ese lote ya quedo registrado -el servidor
