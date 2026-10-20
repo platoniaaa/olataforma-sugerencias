@@ -150,6 +150,27 @@ def test_el_archivo_dorado_con_el_producto_cambiado_en_la_ficha_es_un_conflicto(
     assert v["conflictos_total"] == 1 and v["a_cambiar"] == 0 and v["errores_total"] == 0
 
 
+def test_la_huella_de_decisiones_sin_periodo_es_la_de_siempre():
+    """Las tres huellas que trae `editable_v1.csv` (generadas con el codigo de ANTES): un
+    producto sin decision, uno con tipo y nota, y uno congelado con tipo a mano. Si cambiaran,
+    cada producto editado de todos los archivos ya bajados saldria como conflicto. El periodo
+    entra a la huella SOLO si existe alguna fecha."""
+    assert carga.huella_decisiones(None) == "eed06f35"
+    assert carga.huella_decisiones({"tipo_manual": "Pesado", "obs": "revisar"}) == "2e98333c"
+    assert carga.huella_decisiones({"tipo_manual": "Pesado", "congelar": True}) == "d91e8a02"
+    # Sin fechas, o con fechas vacias, es la misma.
+    assert carga.huella_decisiones({"tipo_manual": "Pesado", "obs": "revisar",
+                                    "vigente_desde": None, "vigente_hasta": None}) == "2e98333c"
+    # Con periodo cambia; y no es lo mismo un Desde que un Hasta con la misma fecha.
+    base = {"precio_fijo": 990.0}
+    con_hasta = carga.huella_decisiones({**base, "vigente_hasta": date(2026, 10, 31)})
+    con_desde = carga.huella_decisiones({**base, "vigente_desde": date(2026, 10, 31)})
+    sin_periodo = carga.huella_decisiones(base)
+    assert len({sin_periodo, con_hasta, con_desde}) == 3
+    # No depende de la fecha de hoy ni de como venga escrita: que un periodo venza no la mueve.
+    assert carga.huella_decisiones({**base, "vigente_hasta": "2026-10-31"}) == con_hasta
+
+
 def test_una_fila_v1_dentro_de_un_archivo_con_columnas_nuevas_ignora_las_nuevas(client, lista):
     """La Referencia de 10 partes dice que ese archivo no conocia el periodo: lo que haya en
     Precio fijo, Margen fijo %, Desde y Hasta de esa fila no se lee (y se cuenta)."""
