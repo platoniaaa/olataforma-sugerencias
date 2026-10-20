@@ -24,7 +24,7 @@ export const COLUMNAS_PRECIOS: DefColPrecio[] = [
   { key: "factor", label: "Factor", tipo: "decimal", visiblePorDefecto: true },
   { key: "costo", label: "Costo", tipo: "clp", visiblePorDefecto: true },
   { key: "stock", label: "Stock", tipo: "numero", visiblePorDefecto: true,
-    ayuda: "Solo bodegas reales: no cuenta dañados, devolución, scrap ni bodegas dadas de baja" },
+    ayuda: "Todas las bodegas de Curifor menos dañados, devolución y scrap" },
   { key: "precio_erp", label: "Precio ERP", tipo: "clp", visiblePorDefecto: true, ayuda: "El precio que tiene hoy el ERP" },
   { key: "precio_final", label: "Precio final", tipo: "clp", visiblePorDefecto: true, pin: "right",
     ayuda: "Lo que se manda al ERP: precio fijo o congelado si hay, calculado si no" },

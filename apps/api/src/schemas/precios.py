@@ -61,12 +61,22 @@ class PrecioEnvioOut(BaseModel):
     enviado_por: str | None = None
 
 
+class StockBodegaOut(BaseModel):
+    """Stock de un producto en una bodega de Curifor y si suma al de la lista."""
+
+    bodega: str
+    stock: float
+    cuenta: bool
+
+
 class PrecioDetalleOut(PrecioRow):
     """La ficha: la fila mas su historia. Sin este schema FastAPI recortaba
     `cambios` y `envios` de la respuesta y la ficha se caia al abrirse."""
 
     cambios: list[PrecioCambioOut] = Field(default_factory=list)
     envios: list[PrecioEnvioOut] = Field(default_factory=list)
+    # De que bodegas sale el stock (solo Curifor, distinto de 0, mayor primero).
+    stock_bodegas: list[StockBodegaOut] = Field(default_factory=list)
 
 
 class PrecioPage(BaseModel):

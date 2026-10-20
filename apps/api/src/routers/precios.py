@@ -86,7 +86,10 @@ def resumen(db: Session = Depends(get_db)) -> dict:
 
 @router.get("/bodegas")
 def bodegas(db: Session = Depends(get_db)) -> list[dict]:
-    """Que bodegas cuentan para el stock de la lista y cuales no."""
+    """Que bodegas cuentan para el stock de la lista y cuales no.
+
+    Cada fila trae `cuenta` (si su stock suma a la lista). Las bodegas con stock de
+    Curifor que nadie clasifico van al final con `sin_clasificar: true`."""
     return precios_service.bodegas_tipo(db)
 
 

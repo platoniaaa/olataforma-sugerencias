@@ -420,18 +420,34 @@ def publicar_compras_precios(payload: dict, db: Session = Depends(get_db)) -> di
 
 
 @router.post("/precios/bodegas-tipo")
-def cargar_bodegas_tipo(payload: dict, db: Session = Depends(get_db)) -> dict:
-    """Clasifica las bodegas en REAL / VIRT / ELIM. Admin.
+def cargar_bodegas_tipo(
+    payload: dict,
+    db: Session = Depends(get_db),
+    email: str = Depends(requiere_admin),
+) -> dict:
+    """Clasifica las bodegas en REAL / VIRT / ELIM / NODISP. Admin.
 
-    payload: {"filas": [{"bodega": "BODEGA SCRAP", "tipo": "VIRT"}, ...]}
+    payload: {"filas": [{"bodega": "BODEGA SCRAP", "tipo": "NODISP"}, ...],
+              "sin_no_disponibles": false}
 
-    La lista de precios solo cuenta el stock de las REAL: el ERP mezcla bodegas
-    fisicas con bodegas de proceso -danados, devolucion, scrap, PE por
-    regularizar- y ese stock no se puede vender. Se reemplaza entera.
+    La lista de precios cuenta el stock de todas las bodegas MENOS las NODISP (no
+    disponibles): el ERP mezcla bodegas fisicas con bodegas de proceso -danados,
+    devolucion, scrap- y ese stock no se puede vender. REAL, VIRT y ELIM solo
+    describen la bodega. El tipo acepta "NO DISPONIBLE" y variantes. Se reemplaza
+    entera y queda guardado quien la cargo.
+
+    Se rechaza (422) una carga con un tipo que no existe y una carga sin ninguna
+    NODISP, salvo `sin_no_disponibles: true`: recargar un Excel viejo volveria a
+    contar danados y devolucion sin que nadie lo note. La respuesta nombra las
+    NODISP y las bodegas con stock que quedaron sin clasificar. La regla se aplica
+    en el proximo recalculo que relea el stock (el del motor o el boton Recalcular).
     """
     filas = payload.get("filas") or []
     try:
-        return precios_service.cargar_bodegas_tipo(db, filas, usuario=None)
+        return precios_service.cargar_bodegas_tipo(
+            db, filas, usuario=email,
+            sin_no_disponibles=bool(payload.get("sin_no_disponibles")),
+        )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
 

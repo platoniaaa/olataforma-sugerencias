@@ -156,6 +156,18 @@ def create_all() -> None:
         "ALTER TABLE sugerido ADD COLUMN IF NOT EXISTS tipo_precio_recomendado VARCHAR",
         # 2026-09: que bodegas son reales. La lista de precios solo cuenta esas.
         "CREATE INDEX IF NOT EXISTS ix_bodega_tipo_clave ON bodega_tipo (tenant_id, clave)",
+        # 2026-10: la lista cuenta todas las bodegas menos las NODISP (no disponibles).
+        # Siembra de fabrica: danados (dos grafias), devolucion, scrap y la bodega sin
+        # nombre pasan a NODISP. Corre en CADA arranque, asi que solo surte efecto la
+        # primera vez: no hace nada si ya hay una NODISP o si alguna fila la cargo una
+        # persona (`actualizado_por`). Sin esa guardia revertiria, en el siguiente
+        # reinicio, cualquier decision posterior del admin (por ejemplo dejar SCRAP
+        # en VIRT a proposito). Solo toca VIRT/ELIM: una REAL puesta a mano se respeta.
+        "UPDATE bodega_tipo SET tipo = 'NODISP' "
+        "WHERE clave IN ('', 'BODEGADANADOS', 'BODEGADAAADOS', 'BODEGASCRAP', 'BODEGADEVOLUCION') "
+        "AND tipo IN ('VIRT', 'ELIM') "
+        "AND NOT EXISTS (SELECT 1 FROM bodega_tipo b2 "
+        "WHERE b2.tipo = 'NODISP' OR b2.actualizado_por IS NOT NULL)",
         # 2026-08: vendedor de sucursal (arma requerimientos, no ve el sugerido).
         "ALTER TABLE usuario ADD COLUMN IF NOT EXISTS es_vendedor BOOLEAN NOT NULL DEFAULT FALSE",
         # 2026-08: notificaciones dirigidas ("tu requerimiento fue comprado").

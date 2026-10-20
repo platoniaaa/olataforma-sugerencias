@@ -41,6 +41,7 @@ from sqlalchemy import Numeric, and_, cast, delete, func, insert, or_, select, u
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
+from ..models.bodega_tipo import ELIM, NODISP, REAL, TIPOS as TIPOS_BODEGA
 from ..models import (
     PrecioBaja,
     BodegaTipo,
@@ -245,50 +246,109 @@ def clave_bodega(nombre: str | None) -> str:
     return re.sub(r"[^A-Z0-9]", "", txt)
 
 
-def bodegas_excluidas(db: Session) -> set[str]:
-    """Nombres de bodega, TAL COMO estan en el stock, que no son reales.
+# Lo que nunca se puede vender, dicho por el nombre: danados (el ERP lo trae con la
+# enie, con el mojibake de la enie -que deja una A de mas: BODEGADAAADOS- y con la
+# letra perdida, "DA?ADOS"), scrap y devolucion. Se busca sobre la CLAVE, que ya
+# viene sin tildes ni signos.
+_NOMBRE_NO_DISPONIBLE = re.compile(r"DA.{0,3}ADOS|SCRAP|DEVOLUC")
+SIN_NOMBRE = "(sin nombre)"
 
-    Se devuelven las EXCLUIDAS y no las reales a proposito: una bodega nueva que
-    todavia nadie clasifico sigue contando. Al reves, la bodega que aparezca
-    manana desapareceria del stock sin que nadie se entere, que es la forma mas
-    cara de equivocarse aca.
+
+def bodega_cuenta(tipo: str | None, clave: str) -> bool:
+    """Si el stock de una bodega suma al de la lista de precios.
+
+    `tipo` es el de la tabla `bodega_tipo` (None si la bodega no esta clasificada)
+    y `clave` la del nombre (`clave_bodega`).
+
+    - `NODISP` no cuenta. Es la decision explicita y manda sobre todo lo demas.
+    - `REAL` y `ELIM` cuentan, aunque el nombre diga devolucion: si alguien la marca
+      asi, es porque quiere que cuente. Cambiar de criterio es una fila de la
+      tabla, no un deploy.
+    - `VIRT` o sin clasificar cuentan SALVO que el nombre diga danados, scrap o
+      devolucion, o que no tenga nombre. Es la red de seguridad: la regla es "todo
+      menos tres bodegas", asi que una cuarta grafia de Danados -el ERP ya trae
+      tres- o una tabla a la que le falte NODISP (recargaron un Excel viejo,
+      `create_all` fallo al arrancar) contaria stock que no existe, en silencio.
+      Con la bodega sin nombre pasa lo mismo: el ERP no dice donde esta ese stock
+      (53 filas, 345 unidades) y mientras Abastecimiento no confirme que se puede
+      vender, no cuenta.
+    """
+    t = (tipo or "").strip().upper()
+    if t == NODISP:
+        return False
+    if t in (REAL, ELIM):
+        return True
+    return bool(clave) and not _NOMBRE_NO_DISPONIBLE.search(clave)
+
+
+def _tipos_bodega(db: Session) -> dict[str, str]:
+    """La clasificacion cargada: clave de bodega -> tipo. Vacio si no hay ninguna.
+
+    Lo comparten el filtro del stock, la ficha y la pantalla de bodegas, para que
+    las tres respondan lo mismo a "esta bodega cuenta?".
+    """
+    try:
+        return {
+            c: t for c, t in db.execute(
+                select(BodegaTipo.clave, BodegaTipo.tipo)
+                .where(BodegaTipo.tenant_id == settings.default_tenant_id)
+            ).all()
+        }
+    except Exception:  # noqa: BLE001 - tabla ausente en un despliegue viejo
+        db.rollback()
+        return {}
+
+
+def _cuenta_bodega(tipos: dict[str, str], nombre: str | None) -> bool:
+    """`bodega_cuenta` para un nombre tal como viene del stock. Con la tabla vacia
+    todo cuenta: no se filtra nada."""
+    if not tipos:
+        return True
+    k = clave_bodega(nombre)
+    return bodega_cuenta(tipos.get(k), k)
+
+
+def bodegas_excluidas(db: Session) -> set[str]:
+    """Nombres de bodega, TAL COMO estan en el stock, cuyo stock NO cuenta.
+
+    Se devuelven las EXCLUIDAS y no las que cuentan a proposito: la regla es "todo
+    menos lo no disponible", y una bodega nueva que todavia nadie clasifico cuenta
+    (salvo que el nombre diga danados, scrap o devolucion; ver `bodega_cuenta`).
 
     El cruce se resuelve en Python y no en SQL porque la clave normalizada
     -sin tildes ni signos- no se puede calcular igual en SQLite y en Postgres, y
     los tests corren en una y produccion en la otra. Sale barato: son unas 40
     bodegas distintas contra 30 mil filas de stock.
     """
-    tenant = settings.default_tenant_id
+    tipos = _tipos_bodega(db)
+    if not tipos:
+        return set()
     try:
-        no_reales = {
-            c for (c,) in db.execute(
-                select(BodegaTipo.clave).where(
-                    BodegaTipo.tenant_id == tenant, BodegaTipo.tipo != "REAL")
-            ).all()
-        }
-        if not no_reales:
-            return set()
         nombres = db.execute(
             select(StockUnificado.bodega)
-            .where(StockUnificado.tenant_id == tenant)
+            .where(StockUnificado.tenant_id == settings.default_tenant_id)
             .distinct()
         ).all()
     except Exception:  # noqa: BLE001 - tabla ausente en un despliegue viejo
         db.rollback()
         return set()
-    # La bodega vacia entra al cruce como una mas: el Excel de Abastecimiento trae
-    # una fila con el nombre en blanco marcada VIRT, y son 53 filas de stock que el
-    # ERP dejo sin bodega. Saltarlas dejaba 345 unidades contando en 29 productos.
-    return {b or "" for (b,) in nombres if clave_bodega(b) in no_reales}
+    # La bodega vacia entra al cruce como una mas: son filas de stock que el ERP
+    # dejo sin bodega (53, 345 unidades en 29 productos). Una bodega NULL y una ''
+    # son lo mismo, y las dos quedan afuera con el `coalesce` del filtro.
+    return {b or "" for (b,) in nombres if not _cuenta_bodega(tipos, b)}
 
 
 def _stock(db: Session, codigos: list[str]) -> tuple[dict[str, float], dict[str, float], bool]:
-    """Stock y transito por producto, contando SOLO las bodegas reales de Curifor.
+    """Stock y transito por producto, contando las bodegas de Curifor MENOS las
+    no disponibles (danados, devolucion, scrap y el stock sin bodega).
 
     El ERP mezcla bodegas fisicas con bodegas de proceso -danados, devolucion,
     scrap, PE por regularizar-. Para decidir un precio solo cuenta lo que se puede
-    vender: 436 productos tenian stock unicamente en esas bodegas y salian con
-    precio como si estuvieran disponibles.
+    vender: 436 productos tenian stock unicamente en danados, devolucion o scrap y
+    salian con precio como si estuvieran disponibles. Hasta el 20-10-2026 la regla
+    era la contraria -solo las bodegas marcadas REAL- y 248 productos que si se
+    pueden vender (PE por regularizar, COMEX, importacion de motos) quedaban SIN
+    STOCK. Ver `bodega_cuenta`.
 
     Si `bodega_tipo` esta vacia no se filtra nada: la lista sigue como antes en vez
     de quedarse sin stock de golpe.
@@ -954,7 +1014,43 @@ def detalle(db: Session, producto: str) -> dict | None:
          "enviado_en": e.enviado_en.isoformat() if e.enviado_en else None, "enviado_por": e.enviado_por}
         for e in envios
     ]
+    d["stock_bodegas"] = _stock_bodegas(db, producto)
     return d
+
+
+def _stock_bodegas(db: Session, producto: str) -> list[dict]:
+    """De que bodegas sale el stock de un producto: [{bodega, stock, cuenta}].
+
+    Solo Curifor y solo lo distinto de 0, la bodega con mas stock primero. `cuenta`
+    dice si ese stock suma al de la lista (la misma regla que `_stock`): sin esto el
+    equipo no puede explicar por que un producto tiene precio con stock en PE X
+    REGULARIZAR, ni por que otro sigue sin stock teniendo unidades en Danados.
+    """
+    tipos = _tipos_bodega(db)
+    try:
+        # Se agrupa por la columna cruda y no por un `coalesce(bodega, '')`: en
+        # Postgres con parametros del lado del servidor, la '' del SELECT y la del
+        # GROUP BY son parametros distintos y la consulta se rechaza.
+        filas = db.execute(
+            select(StockUnificado.bodega, func.coalesce(func.sum(StockUnificado.stock), 0))
+            .where(StockUnificado.tenant_id == settings.default_tenant_id,
+                   StockUnificado.producto == producto,
+                   func.upper(func.coalesce(StockUnificado.origen, "CURIFOR")) != "FRONTERA")
+            .group_by(StockUnificado.bodega)
+        ).all()
+    except Exception:  # noqa: BLE001 - tabla ausente en un despliegue viejo
+        db.rollback()
+        return []
+    # Una bodega NULL y una '' son la misma: la que el ERP dejo sin nombre.
+    por_bodega: dict[str, float] = {}
+    for b, t in filas:
+        por_bodega[b or ""] = por_bodega.get(b or "", 0.0) + float(t or 0)
+    salida = [
+        {"bodega": b or SIN_NOMBRE, "stock": t, "cuenta": _cuenta_bodega(tipos, b)}
+        for b, t in por_bodega.items() if t
+    ]
+    salida.sort(key=lambda r: (-r["stock"], r["bodega"]))
+    return salida
 
 
 # ------------------------------------------------------------------ escritura
@@ -1735,34 +1831,89 @@ def eliminar(db: Session, productos: list[str], usuario: str | None,
             "conservados": conservados[:50]}
 
 
-def cargar_bodegas_tipo(db: Session, filas: list[dict], usuario: str | None) -> dict:
+# Como la gente escribe "no disponible" en el Excel: se compara sobre la clave
+# (sin espacios, guiones ni tildes), asi que "No Disponible", "NO_DISP" y "no-disp"
+# caen aca.
+_ALIAS_TIPO_BODEGA = {"NODISPONIBLE": NODISP, "NODISPONIBLES": NODISP, "NODISP": NODISP}
+
+
+def _normalizar_tipo_bodega(valor) -> str:
+    """El tipo de una fila de la carga, ya normalizado. Si no es ninguno de los
+    cuatro (ni un alias de NODISP) devuelve el texto tal cual, para el mensaje."""
+    txt = str(valor if valor is not None else "").strip().upper()
+    if txt in TIPOS_BODEGA:
+        return txt
+    return _ALIAS_TIPO_BODEGA.get(clave_bodega(txt), txt)
+
+
+def _bodegas_sin_clasificar(db: Session, claves: set[str]) -> list[str]:
+    """Bodegas con stock de Curifor cuya clave no esta en `claves`, tal como estan
+    en el stock (la que no tiene nombre sale como ''). El stock de Frontera no
+    cuenta para la lista, asi que una bodega que solo tiene Frontera no es un aviso
+    que alguien pueda atender."""
+    try:
+        nombres = db.execute(
+            select(StockUnificado.bodega)
+            .where(StockUnificado.tenant_id == settings.default_tenant_id,
+                   func.upper(func.coalesce(StockUnificado.origen, "CURIFOR")) != "FRONTERA")
+            .distinct()
+        ).all()
+    except Exception:  # noqa: BLE001 - tabla ausente en un despliegue viejo
+        db.rollback()
+        return []
+    # Dos escrituras del mismo deposito son una sola bodega: se avisa una vez.
+    vistas: dict[str, str] = {}
+    for nombre in sorted(b or "" for (b,) in nombres):
+        k = clave_bodega(nombre)
+        if k not in claves:
+            vistas.setdefault(k, nombre)
+    return sorted(vistas.values())
+
+
+def cargar_bodegas_tipo(db: Session, filas: list[dict], usuario: str | None,
+                        sin_no_disponibles: bool = False) -> dict:
     """Reemplaza la clasificacion de bodegas. `filas`: {bodega, tipo}.
 
     Es una dimension que mantiene una persona: se reemplaza entera, como la
-    politica. No la toca ningun job.
+    politica. No la toca ningun job. La tabla de produccion es el maestro; el
+    Excel de origen envejece (`scripts/precios/bodegas_tipo.py --exportar` la baja).
 
-    Un tipo que no sea REAL/VIRT/ELIM se rechaza en vez de guardarse: guardarlo
-    lo dejaria como "no real" -la exclusion es `tipo != REAL`- y una bodega
-    fisica desapareceria del stock por un error de tipeo.
+    Tipos: REAL, VIRT, ELIM y NODISP (acepta "NO DISPONIBLE" y variantes). Solo
+    NODISP deja el stock fuera de la lista; ver `bodega_cuenta`.
+
+    - Un tipo que no sea ninguno de esos se rechaza en vez de guardarse: una
+      bodega fisica quedaria mal clasificada por un error de tipeo.
+    - Una carga sin ninguna NODISP tambien se rechaza, salvo `sin_no_disponibles`:
+      es lo que pasa al recargar un Excel viejo, y volveria a contar danados y
+      devolucion sin que nadie lo note. Nada se escribe si la carga se rechaza.
+
+    Devuelve cuantas bodegas quedaron, por tipo, cuales son NODISP y cuales bodegas
+    con stock de Curifor quedaron sin clasificar (esas cuentan, salvo que el nombre
+    diga danados, scrap o devolucion). La regla se aplica en el proximo recalculo
+    que relea el stock; guardar esto no recalcula nada.
     """
     tenant = settings.default_tenant_id
-    validos = {"REAL", "VIRT", "ELIM"}
     limpias: dict[str, dict] = {}
     malas: list[str] = []
     for f in filas:
         bodega = str(f.get("bodega") or "").strip()
-        tipo = str(f.get("tipo") or "").strip().upper()
-        if tipo not in validos:
-            malas.append(f"{bodega or '(sin nombre)'}: {tipo or '(vacio)'}")
+        tipo = _normalizar_tipo_bodega(f.get("tipo"))
+        if tipo not in TIPOS_BODEGA:
+            malas.append(f"{bodega or SIN_NOMBRE}: {tipo or '(vacio)'}")
             continue
         # La clave manda: "CHILLAN 2" y "CHILLAN2" son la misma bodega y no pueden
         # quedar como dos filas con tipos distintos.
         limpias[clave_bodega(bodega)] = {"bodega": bodega, "tipo": tipo}
     if malas:
-        raise ValueError("Tipos de bodega no validos (se espera REAL, VIRT o ELIM): "
+        raise ValueError("Tipos de bodega no validos (se espera REAL, VIRT, ELIM o NODISP): "
                          + ", ".join(malas[:10]))
     if not limpias:
         raise ValueError("No vino ninguna bodega")
+    if not sin_no_disponibles and not any(v["tipo"] == NODISP for v in limpias.values()):
+        raise ValueError(
+            "La carga no trae ninguna bodega NODISP (no disponible): sin ellas, danados, "
+            "devolucion y scrap volverian a contar en el stock de la lista. Marcalas como "
+            "NODISP, o si es a proposito repite la carga con sin_no_disponibles=true.")
 
     db.execute(delete(BodegaTipo).where(BodegaTipo.tenant_id == tenant))
     ahora = _now()
@@ -1779,25 +1930,47 @@ def cargar_bodegas_tipo(db: Session, filas: list[dict], usuario: str | None) -> 
     por_tipo: dict[str, int] = {}
     for v in limpias.values():
         por_tipo[v["tipo"]] = por_tipo.get(v["tipo"], 0) + 1
-    return {"bodegas": len(limpias), "por_tipo": por_tipo}
+    return {
+        "bodegas": len(limpias), "por_tipo": por_tipo,
+        "no_disponibles": sorted(
+            v["bodega"] or SIN_NOMBRE for v in limpias.values() if v["tipo"] == NODISP),
+        "sin_clasificar_con_stock": sorted(
+            n or SIN_NOMBRE for n in _bodegas_sin_clasificar(db, set(limpias))),
+    }
 
 
 def bodegas_tipo(db: Session) -> list[dict]:
-    """La clasificacion actual, y si esa bodega aparece con stock hoy."""
+    """La clasificacion actual, si esa bodega aparece con stock hoy y si su stock
+    CUENTA para la lista (`cuenta`).
+
+    Al final van las bodegas que tienen stock de Curifor y ninguna fila en la tabla
+    (`sin_clasificar: true`, `tipo: null`): son las que alguien tiene que mirar,
+    porque con la regla "todo menos lo no disponible" una grafia nueva de danados
+    suma stock que no existe. `cuenta` ahi es lo que pasa HOY con ellas.
+    """
     tenant = settings.default_tenant_id
-    con_stock = {
-        clave_bodega(b) for (b,) in db.execute(
-            select(StockUnificado.bodega).where(StockUnificado.tenant_id == tenant).distinct()
-        ).all() if b is not None
-    }
     filas = db.scalars(
         select(BodegaTipo).where(BodegaTipo.tenant_id == tenant).order_by(BodegaTipo.bodega)
     ).all()
-    return [
+    tipos = {f.clave: f.tipo for f in filas}
+    # Una bodega NULL es la que el ERP dejo sin nombre: su clave es la de la fila ''.
+    con_stock = {
+        clave_bodega(b) for (b,) in db.execute(
+            select(StockUnificado.bodega).where(StockUnificado.tenant_id == tenant).distinct()
+        ).all()
+    }
+    salida = [
         {"bodega": f.bodega, "tipo": f.tipo, "con_stock": f.clave in con_stock,
-         "actualizado_por": f.actualizado_por}
+         "actualizado_por": f.actualizado_por, "sin_clasificar": False,
+         "cuenta": bodega_cuenta(f.tipo, f.clave)}
         for f in filas
     ]
+    salida += [
+        {"bodega": nombre, "tipo": None, "con_stock": True, "actualizado_por": None,
+         "sin_clasificar": True, "cuenta": _cuenta_bodega(tipos, nombre)}
+        for nombre in _bodegas_sin_clasificar(db, set(tipos))
+    ]
+    return salida
 
 
 def cargar_costos(db: Session, filas: list[dict]) -> dict:

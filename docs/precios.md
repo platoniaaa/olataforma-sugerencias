@@ -55,6 +55,7 @@ REVISION` (queda sin precio hasta que alguien decida).
 | `precio_override` | Precio fijo, margen fijo, congelar, tipo/procedencia a mano, "no es producto", observacion. | solo personas |
 | `politica_precio` | Factor por (tipo, procedencia). | admin |
 | `politica_rubro` | Tipo y procedencia forzada por rubro. | admin |
+| `bodega_tipo` | Que bodegas cuentan para el stock: REAL, VIRT, ELIM y NODISP (ver "Bodegas"). | admin (carga) |
 | `precio_cambio` | Que cambio en cada recalculo (procedencia, costo, stock, precio, tipo), pendiente hasta que alguien lo marca visto. | el recalculo |
 | `precio_envio` | Que precio y costo se mando al ERP, cuando y quien. Es lo que hace posible exportar solo las diferencias. | la exportacion |
 
@@ -85,9 +86,84 @@ REVISION` (queda sin precio hasta que alguien decida).
   `producto_catalogo.costo`: es una carga unica sin fecha.
 - **Stock, precio del proveedor y ultima venta** los toma el recalculo de las
   tablas que el motor ya publica (`stock_unificado`, `stock_transito`,
-  `sugerido`, `venta_historica`). Del stock cuenta solo el de Curifor y solo
-  bodegas reales: `stock_unificado` trae tambien Frontera porque el sugerido la
-  usa (decision del 07-10-2026). El transito igual: solo las OC de Curifor.
+  `sugerido`, `venta_historica`). Del stock cuenta solo el de Curifor y de todas
+  sus bodegas MENOS danados, devolucion y scrap (ver "Bodegas"): `stock_unificado`
+  trae tambien Frontera porque el sugerido la usa (decision del 07-10-2026). El
+  transito igual: solo las OC de Curifor, sin mirar bodega.
+
+## Bodegas: que stock cuenta (20-10-2026)
+
+El ERP mezcla bodegas fisicas con bodegas de proceso. La lista cuenta el stock de
+**todas las bodegas de Curifor menos danados, devolucion y scrap**. Hasta esa fecha
+solo contaban las marcadas REAL, y 248 productos que si se pueden vender (PE por
+regularizar, COMEX, importacion de motos) salian SIN STOCK y sin precio.
+
+La tabla `bodega_tipo` clasifica cada bodega en uno de cuatro tipos. Solo el
+cuarto decide algo:
+
+| Tipo | Que es | Cuenta |
+|---|---|---|
+| `REAL` | Bodega fisica de la que se vende. | Si |
+| `VIRT` | Bodega de proceso (PE por regularizar, COMEX, importacion). | Si |
+| `ELIM` | Bodega dada de baja; si aun tiene stock, esta ahi. | Si |
+| `NODISP` | **No disponible**: danados (dos grafias en la tabla), devolucion, scrap y la bodega sin nombre. | **No** |
+
+Reglas que conviene saber (`services/precios_service.bodega_cuenta`):
+
+- **Sin tabla, sin filtro.** Con `bodega_tipo` vacia no se excluye nada.
+- **Una bodega nueva o sin clasificar cuenta**, salvo que su nombre diga danados,
+  scrap o devolucion. Es la red de seguridad: el ERP ya trae tres grafias de
+  danados ("DAÑADOS", la misma con la letra rota "DAÃ‘ADOS" y "DA?ADOS") y una
+  cuarta, o una tabla a la que le falte NODISP, sumaria stock que no existe. La red
+  actua solo sobre VIRT y sin clasificar: un `REAL` o `ELIM` explicito le gana, para
+  que el cambio de criterio sea una fila de la tabla y no un deploy.
+- **La bodega sin nombre no cuenta** mientras el responsable de Abastecimiento no
+  confirme que ese stock se puede vender (53 filas, 345 unidades en 29 productos: el
+  ERP no dice donde estan). Es decision conservadora. Si dice que cuenta, se marca
+  `REAL` en la tabla y se aplica en el proximo recalculo.
+- **No cambian a proposito**: el transito, el stock de Frontera, la clase ABC
+  (`abc_stock_service`, que no filtra bodegas), el stock operativo del sugerido y el
+  chequeo FORD (usan `dim_sucursal`: otro concepto) y el feed de altas, que sigue
+  sumando todas las bodegas del Excel del ERP (un producto con stock solo en
+  danados se da de alta y queda SIN STOCK; arreglarlo exige que el motor mande el
+  desglose por bodega).
+
+**Quien la mantiene y como.** La tabla de produccion es el maestro, no el Excel
+local de origen (`1 Tipo bodega.xlsx`, descarga del 08-09, sin NODISP): recargarlo
+volveria a contar danados y devolucion.
+
+1. Bajar la tabla actual: `python scripts/precios/bodegas_tipo.py --exportar
+   bodegas.xlsx --env <.env>`. Trae las bodegas clasificadas y, al final, las que
+   tienen stock y nadie clasifico.
+2. Editar el tipo (acepta "NO DISPONIBLE", "no_disp" y variantes como NODISP).
+3. Subirla: `python scripts/precios/bodegas_tipo.py bodegas.xlsx --env <.env>`
+   (`--simular` no escribe). Equivale a `POST /api/admin/precios/bodegas-tipo`.
+
+La carga se rechaza (422) si trae un tipo que no existe o si no trae ninguna
+NODISP (salvo `sin_no_disponibles: true` / `--sin-no-disponibles`), y no escribe
+nada. Queda guardado quien la cargo. La respuesta nombra las bodegas NODISP y las
+que tienen stock de Curifor sin clasificar. `GET /api/precios/bodegas` dice, por
+fila, si la bodega `cuenta`, y lista al final las `sin_clasificar`. La ficha de un
+producto (`GET /api/precios/{producto}`) trae `stock_bodegas`: de que bodegas sale
+su stock y si cada una cuenta.
+
+**Siembra.** Al arrancar, `db.py` marca NODISP a Danados (las dos grafias),
+Devolucion, Scrap y la bodega sin nombre, UNA sola vez: la sentencia no hace nada si
+ya existe una NODISP o si alguna fila la cargo una persona (`actualizado_por`), asi
+un reinicio nunca revierte una decision del admin.
+
+**Cuando se aplica.** Cargar la tabla no recalcula nada: la regla entra en el
+proximo recalculo que relea el stock (el del motor o el boton Recalcular, unos 4,5
+min). Guardar una ficha o la politica no relee el stock, asi que no hay saltos de
+precio a mitad del dia. Medido sobre el stock publicado el 19-10-2026, el primer
+recalculo tras el cambio mueve ~528 productos (254 pasan de 0 a stock positivo;
+ningun producto que ya tenia precio cambia de precio, que es costo por factor) y
+deja ~248 precios nuevos en "Solo diferencias" del archivo del ERP, para revisar
+antes de subirlos. Las cifras exactas del dia variaran unas decenas.
+
+**Volver atras.** El dato `NODISP` es compatible con el codigo anterior (que excluia
+todo lo que no fuera `REAL`), asi que revertir el despliegue deja la lista como
+estaba sin tocar datos.
 
 ## Editar la lista con Excel (14-10-2026)
 
