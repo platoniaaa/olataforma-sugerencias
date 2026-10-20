@@ -1070,6 +1070,9 @@ export const api = {
     (f.tipo ?? []).forEach((v) => p.append("tipo", v));
     (f.procedencia ?? []).forEach((v) => p.append("procedencia", v));
     (f.estado ?? []).forEach((v) => p.append("estado", v));
+    // Repetido, como estado: la API lo toma como una union (vigente, programada, vencida,
+    // vence_7d). Sin valores no viaja nada.
+    (f.vigencia ?? []).forEach((v) => p.append("vigencia", v));
     if (f.origen) p.set("origen", f.origen);
     if (f.con_cambios) p.set("con_cambios", "true");
     if (f.con_stock) p.set("con_stock", "true");

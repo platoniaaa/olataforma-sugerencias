@@ -11,6 +11,10 @@
  * 3. «Volver a la regla» y «Sacar de la lista» piden confirmacion y llaman a su endpoint.
  * 4. Un error del servidor se ve en la ficha, no se pierde.
  * 5. Sin permiso se puede mirar pero no tocar.
+ *
+ * Y la vigencia (Desde / Hasta del precio fijo, el margen fijo y el congelado): el chip, la
+ * explicacion cuando la decision NO rige, lo que viaja al guardar (las fechas solo si
+ * cambiaron), los errores junto al campo y el desglose del stock por bodega.
  */
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -82,7 +86,7 @@ afterEach(() => {
 
 async function abrir(
   detalle: PrecioDetalle = SIN_DECISION,
-  extra: Partial<{ puedeEditar: boolean; onCerrar: () => void; onGuardado: () => Promise<void> }> = {},
+  extra: Partial<{ puedeEditar: boolean; onCerrar: () => void; onGuardado: () => Promise<void>; hoy: string }> = {},
 ) {
   mocks.detalle.mockResolvedValue(detalle);
   const props = {
@@ -97,6 +101,7 @@ async function abrir(
       tipos={["Liviano", "Pesado", "Sugerido"]}
       onCerrar={props.onCerrar}
       onGuardado={props.onGuardado}
+      hoy={extra.hoy}
     />,
   );
   // La ficha pide el detalle al abrirse: hasta que llega solo dice «Cargando…».
@@ -507,5 +512,437 @@ describe("explicacionMargen: lo que se lee bajo el campo", () => {
     fireEvent.change(margenFijo(), { target: { value: "50" } });
 
     expect(screen.getByText(`Factor 2,00 → ${formatoCLP(20000)} con el costo de hoy. Sin stock queda en $0.`)).toBeInTheDocument();
+  });
+});
+
+// ------------------------------------------------------------------ vigencia
+
+const HOY = "2026-10-20";
+
+/** Precio fijo que rige hasta el 30-11. La regla daria $18.000. */
+const FIJO_VIGENTE: PrecioDetalle = {
+  ...SIN_DECISION,
+  precio_fijo: 15000, precio_final: 15000, estado: "FIJO",
+  vigente_desde: null, vigente_hasta: "2026-11-30", vigencia: "vigente", vigencia_dias: 41, precio_regla: 18000,
+  editado_por: "compras@curifor.cl", editado_en: "2026-10-10T15:30:00Z",
+};
+
+/** Precio fijo guardado que empieza el 05-11: hoy el producto sigue la regla. */
+const FIJO_PROGRAMADO: PrecioDetalle = {
+  ...SIN_DECISION,
+  precio_fijo: 15000, margen_fijo: null,
+  vigente_desde: "2026-11-05", vigente_hasta: "2026-11-30", vigencia: "programada", vigencia_dias: 16,
+};
+
+/** Precio fijo que venció el 12-10: sigue guardado, pero el precio ya es el de la regla. */
+const FIJO_VENCIDO: PrecioDetalle = {
+  ...SIN_DECISION,
+  precio_fijo: 15000,
+  vigente_desde: null, vigente_hasta: "2026-10-12", vigencia: "vencida", vigencia_dias: 8,
+};
+
+const hastaCampo = () => screen.getByLabelText("Hasta (incluido)") as HTMLInputElement;
+const desdeCampo = () => screen.getByLabelText("Desde") as HTMLInputElement;
+const enviado = () => mocks.guardar.mock.calls[0][1] as Record<string, unknown>;
+
+describe("Ficha: el chip y la explicacion segun la vigencia", () => {
+  it("un precio fijo que rige muestra el chip y hasta cuando", async () => {
+    const { container } = await abrir(FIJO_VIGENTE, { hoy: HOY });
+
+    const cabecera = within(container.querySelector('[data-tour="ficha-precio"]') as HTMLElement);
+    expect(cabecera.getByText("FIJO")).toBeInTheDocument();
+    expect(cabecera.getByTestId("chip-vigencia")).toHaveTextContent("Fijo hasta 30-11");
+    expect(cabecera.getByText("Precio fijo puesto a mano · hasta el 30-11")).toBeInTheDocument();
+  });
+
+  it("sin periodo no hay chip y la explicacion es la de siempre", async () => {
+    const { container } = await abrir(CON_DECISION, { hoy: HOY });
+
+    const cabecera = container.querySelector('[data-tour="ficha-precio"]') as HTMLElement;
+    expect(within(cabecera).queryByTestId("chip-vigencia")).not.toBeInTheDocument();
+    expect(within(cabecera).getByText("Precio fijo puesto a mano")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Renovar" })).not.toBeInTheDocument();
+  });
+
+  it("programado: NO dice «Precio fijo puesto a mano»: explica la regla y cuando empieza", async () => {
+    const { container } = await abrir(FIJO_PROGRAMADO, { hoy: HOY });
+
+    const cabecera = within(container.querySelector('[data-tour="ficha-precio"]') as HTMLElement);
+    expect(cabecera.queryByText(/Precio fijo puesto a mano/)).not.toBeInTheDocument();
+    expect(cabecera.getByText(
+      `Hoy sigue la regla: ${formatoCLP(10000)} × 1,80 = ${formatoCLP(18000)}. El precio fijo de ${formatoCLP(15000)} empieza el 05-11.`,
+    )).toBeInTheDocument();
+    // El estado es el de lo que rige hoy, no FIJO.
+    expect(cabecera.getByText("OK")).toBeInTheDocument();
+    expect(cabecera.getByText(formatoCLP(18000))).toBeInTheDocument();
+    expect(cabecera.getByTestId("chip-vigencia")).toHaveTextContent("Programado desde 05-11");
+  });
+
+  it("vencido: dice que volvio a la regla y que la decision sigue guardada", async () => {
+    const { container } = await abrir(FIJO_VENCIDO, { hoy: HOY });
+
+    const cabecera = within(container.querySelector('[data-tour="ficha-precio"]') as HTMLElement);
+    expect(cabecera.queryByText(/Precio fijo puesto a mano/)).not.toBeInTheDocument();
+    expect(cabecera.getByText(
+      `Venció el 12-10: volvió a la regla (${formatoCLP(10000)} × 1,80 = ${formatoCLP(18000)}). El precio fijo de ${formatoCLP(15000)} sigue guardado.`,
+    )).toBeInTheDocument();
+    expect(cabecera.getByTestId("chip-vigencia")).toHaveTextContent("Vencido 12-10");
+  });
+
+  it("el margen fijo solo se rotula en el factor si rige hoy", async () => {
+    const margen = { ...SIN_DECISION, margen_fijo: 40, vigente_desde: null, vigente_hasta: "2026-11-30", vigencia_dias: 41 };
+    const { container, unmount } = await abrir({ ...margen, vigencia: "vigente" }, { hoy: HOY });
+    expect(within(container.querySelector('[data-tour="ficha-origen"]') as HTMLElement).getByText("margen 40,0 %")).toBeInTheDocument();
+    unmount();
+
+    const otra = await abrir({ ...margen, vigencia: "vencida", vigente_hasta: "2026-10-12" }, { hoy: HOY });
+    expect(within(otra.container.querySelector('[data-tour="ficha-origen"]') as HTMLElement).queryByText(/margen 40/)).not.toBeInTheDocument();
+  });
+
+  it("vencido: «Renovar» lleva el foco al Hasta y «Volver a la regla» sigue ahi", async () => {
+    await abrir(FIJO_VENCIDO, { hoy: HOY });
+
+    expect(screen.getByRole("button", { name: "Volver a la regla" })).toBeInTheDocument();
+    fireEvent.click(boton("Renovar"));
+
+    expect(hastaCampo()).toHaveFocus();
+    expect(mocks.guardar).not.toHaveBeenCalled();
+  });
+
+  it("«Renovar» solo aparece si esta vencido", async () => {
+    for (const detalle of [FIJO_VIGENTE, FIJO_PROGRAMADO, SIN_DECISION]) {
+      const { unmount } = await abrir(detalle, { hoy: HOY });
+      expect(screen.queryByRole("button", { name: "Renovar" })).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+});
+
+describe("Ficha: la seccion Vigencia", () => {
+  it("esta dentro de la decision, con las fechas que trae el producto", async () => {
+    const { container } = await abrir(FIJO_PROGRAMADO, { hoy: HOY });
+
+    const decision = container.querySelector('[data-tour="ficha-decision"]') as HTMLElement;
+    expect(within(decision).getByRole("group", { name: /Vigencia/ })).toBeInTheDocument();
+    expect(desdeCampo().value).toBe("2026-11-05");
+    expect(hastaCampo().value).toBe("2026-11-30");
+  });
+
+  it("sin ninguna decision esta deshabilitada y dice por que; al fijar un precio se habilita", async () => {
+    await abrir(SIN_DECISION, { hoy: HOY });
+
+    expect(desdeCampo()).toBeDisabled();
+    expect(screen.getByText(/Primero fija un precio, un margen o congela el precio/)).toBeInTheDocument();
+
+    fireEvent.change(precioFijo(), { target: { value: "15000" } });
+
+    expect(desdeCampo()).toBeEnabled();
+    expect(hastaCampo()).toBeEnabled();
+    expect(screen.queryByText(/Primero fija un precio/)).not.toBeInTheDocument();
+  });
+
+  it("congelar tambien habilita las fechas, y el margen", async () => {
+    const { unmount } = await abrir(SIN_DECISION, { hoy: HOY });
+    fireEvent.click(congelar());
+    expect(hastaCampo()).toBeEnabled();
+    unmount();
+
+    await abrir(SIN_DECISION, { hoy: HOY });
+    fireEvent.change(margenFijo(), { target: { value: "35" } });
+    expect(hastaCampo()).toBeEnabled();
+  });
+
+  it("sin permiso se ven las fechas pero no se tocan", async () => {
+    await abrir(FIJO_VIGENTE, { puedeEditar: false, hoy: HOY });
+
+    expect(hastaCampo().value).toBe("2026-11-30");
+    expect(hastaCampo()).toBeDisabled();
+    expect(desdeCampo()).toBeDisabled();
+    expect(screen.getByRole("button", { name: "30 días" })).toBeDisabled();
+    // Y el chip sigue a la vista.
+    expect(screen.getAllByTestId("chip-vigencia").length).toBeGreaterThan(0);
+  });
+
+  it("los atajos cuentan desde el «hoy» del servidor, no desde el reloj del navegador", async () => {
+    await abrir(SIN_DECISION, { hoy: "2026-03-10" });
+    fireEvent.change(precioFijo(), { target: { value: "15000" } });
+
+    fireEvent.click(boton("30 días"));
+
+    expect(hastaCampo().value).toBe("2026-04-09");
+  });
+
+  it("la linea viva explica al vencer a que precio vuelve, usando el precio de la regla", async () => {
+    // 15.000 -> 12.000 es -20 %: se destaca con la palabra «baja».
+    await abrir({ ...FIJO_VIGENTE, precio_regla: 12000 }, { hoy: HOY });
+
+    expect(screen.getByText(/Rige hoy y hasta el 30-11-2026 incluido\. El 01-12-2026 vuelve a la regla\./)).toBeInTheDocument();
+    expect(screen.getByText(`Al vencer el precio baja de ${formatoCLP(15000)} a ${formatoCLP(12000)} (−20 %).`)).toBeInTheDocument();
+  });
+
+  it("si la regla da mas, dice «sube»", async () => {
+    await abrir(FIJO_VIGENTE, { hoy: HOY });
+
+    expect(screen.getByText(`Al vencer el precio sube de ${formatoCLP(15000)} a ${formatoCLP(18000)} (+20 %).`)).toBeInTheDocument();
+  });
+
+  it("cambiar las fechas antepone «Al guardar:» a la linea", async () => {
+    await abrir(FIJO_VIGENTE, { hoy: HOY });
+
+    fireEvent.change(hastaCampo(), { target: { value: "2026-12-15" } });
+
+    expect(screen.getByText(/^Al guardar: rige hoy y hasta el 15-12-2026 incluido/)).toBeInTheDocument();
+  });
+
+  it("al desmarcar todas las decisiones avisa que se borran las fechas", async () => {
+    await abrir(FIJO_VIGENTE, { hoy: HOY });
+
+    fireEvent.change(precioFijo(), { target: { value: "" } });
+
+    expect(screen.getByText(/Al guardar se borran las fechas/)).toBeInTheDocument();
+    expect(hastaCampo()).toBeDisabled();
+  });
+});
+
+describe("Ficha: guardar con vigencia", () => {
+  it("sin tocar las fechas NO las manda (una API sin vigencia las rechazaria)", async () => {
+    const { onGuardado } = await abrir(FIJO_VIGENTE, { hoy: HOY });
+
+    fireEvent.change(observacion(), { target: { value: "revisado" } });
+    fireEvent.click(boton("Guardar"));
+
+    await waitFor(() => expect(onGuardado).toHaveBeenCalledTimes(1));
+    expect(enviado()).toEqual({
+      precio_fijo: 15000, margen_fijo: null, congelar: false,
+      tipo_manual: null, procedencia_manual: null, no_producto: false, obs: "revisado",
+    });
+    expect(enviado()).not.toHaveProperty("vigente_desde");
+    expect(enviado()).not.toHaveProperty("vigente_hasta");
+  });
+
+  it("un producto sin periodo tampoco las manda", async () => {
+    const { onGuardado } = await abrir(SIN_DECISION, { hoy: HOY });
+
+    fireEvent.change(precioFijo(), { target: { value: "15000" } });
+    fireEvent.click(boton("Guardar"));
+
+    await waitFor(() => expect(onGuardado).toHaveBeenCalledTimes(1));
+    expect(Object.keys(enviado()).sort()).toEqual(
+      ["congelar", "margen_fijo", "no_producto", "obs", "precio_fijo", "procedencia_manual", "tipo_manual"],
+    );
+  });
+
+  it("con un Hasta nuevo manda solo el Hasta", async () => {
+    const { onGuardado } = await abrir(SIN_DECISION, { hoy: HOY });
+
+    fireEvent.change(precioFijo(), { target: { value: "15000" } });
+    fireEvent.change(hastaCampo(), { target: { value: "2026-11-30" } });
+    fireEvent.click(boton("Guardar"));
+
+    await waitFor(() => expect(onGuardado).toHaveBeenCalledTimes(1));
+    expect(enviado().precio_fijo).toBe(15000);
+    expect(enviado().vigente_hasta).toBe("2026-11-30");
+    expect(enviado()).not.toHaveProperty("vigente_desde");
+  });
+
+  it("con Desde y Hasta manda los dos", async () => {
+    const { onGuardado } = await abrir(SIN_DECISION, { hoy: HOY });
+
+    fireEvent.change(precioFijo(), { target: { value: "15000" } });
+    fireEvent.change(desdeCampo(), { target: { value: "2026-11-05" } });
+    fireEvent.change(hastaCampo(), { target: { value: "2026-11-30" } });
+    fireEvent.click(boton("Guardar"));
+
+    await waitFor(() => expect(onGuardado).toHaveBeenCalledTimes(1));
+    expect(enviado().vigente_desde).toBe("2026-11-05");
+    expect(enviado().vigente_hasta).toBe("2026-11-30");
+  });
+
+  it("«Sin vencimiento» manda el Hasta como null (quita ese lado)", async () => {
+    const { onGuardado } = await abrir(FIJO_VIGENTE, { hoy: HOY });
+
+    fireEvent.click(boton("Sin vencimiento"));
+    fireEvent.click(boton("Guardar"));
+
+    await waitFor(() => expect(onGuardado).toHaveBeenCalledTimes(1));
+    expect(enviado().vigente_hasta).toBeNull();
+    expect(enviado()).not.toHaveProperty("vigente_desde");
+  });
+
+  it("renovar un vencido: un Hasta nuevo en el mismo guardado", async () => {
+    const { onGuardado } = await abrir(FIJO_VENCIDO, { hoy: HOY });
+
+    fireEvent.click(boton("60 días"));
+    fireEvent.click(boton("Guardar"));
+
+    await waitFor(() => expect(onGuardado).toHaveBeenCalledTimes(1));
+    expect(enviado().vigente_hasta).toBe("2026-12-19");
+    expect(enviado().precio_fijo).toBe(15000);
+  });
+
+  it("vaciar precio fijo, margen y congelar manda las dos fechas en null", async () => {
+    const conDesde = { ...FIJO_VIGENTE, vigente_desde: "2026-10-01" };
+    const { onGuardado } = await abrir(conDesde, { hoy: HOY });
+
+    fireEvent.change(precioFijo(), { target: { value: "" } });
+    fireEvent.click(boton("Guardar"));
+
+    await waitFor(() => expect(onGuardado).toHaveBeenCalledTimes(1));
+    expect(enviado().precio_fijo).toBeNull();
+    expect(enviado().vigente_desde).toBeNull();
+    expect(enviado().vigente_hasta).toBeNull();
+  });
+
+  it("un vencido sin tocar se puede seguir editando (la observacion) sin renovar", async () => {
+    const { onGuardado } = await abrir(FIJO_VENCIDO, { hoy: HOY });
+
+    fireEvent.change(observacion(), { target: { value: "ya no aplica" } });
+    fireEvent.click(boton("Guardar"));
+
+    await waitFor(() => expect(onGuardado).toHaveBeenCalledTimes(1));
+    expect(enviado().obs).toBe("ya no aplica");
+    expect(enviado()).not.toHaveProperty("vigente_hasta");
+  });
+});
+
+describe("Ficha: errores de la vigencia", () => {
+  it("Hasta antes del Desde: no llama a la API, dice el error junto al campo y enfoca el Hasta", async () => {
+    const { onGuardado } = await abrir(SIN_DECISION, { hoy: HOY });
+    fireEvent.change(precioFijo(), { target: { value: "15000" } });
+    fireEvent.change(desdeCampo(), { target: { value: "2026-11-05" } });
+    fireEvent.change(hastaCampo(), { target: { value: "2026-11-01" } });
+
+    // El error se ve apenas se escribe, antes de guardar.
+    expect(screen.getByText("El Hasta no puede ser antes del Desde (05-11-2026).")).toBeInTheDocument();
+    expect(hastaCampo()).toHaveAttribute("aria-invalid", "true");
+    expect(desdeCampo()).not.toHaveAttribute("aria-invalid");
+
+    fireEvent.click(boton("Guardar"));
+
+    expect(mocks.guardar).not.toHaveBeenCalled();
+    expect(onGuardado).not.toHaveBeenCalled();
+    expect(hastaCampo()).toHaveFocus();
+  });
+
+  it("un Hasta que ya paso, escrito por la persona, no se guarda", async () => {
+    await abrir(SIN_DECISION, { hoy: HOY });
+    fireEvent.change(precioFijo(), { target: { value: "15000" } });
+    fireEvent.change(hastaCampo(), { target: { value: "2026-10-12" } });
+
+    expect(screen.getByText(/Ese Hasta ya pasó \(12-10-2026\)/)).toBeInTheDocument();
+    fireEvent.click(boton("Guardar"));
+
+    expect(mocks.guardar).not.toHaveBeenCalled();
+    expect(hastaCampo()).toHaveFocus();
+  });
+
+  it("un Hasta vencido que vino del servidor y nadie toco NO es un error", async () => {
+    await abrir(FIJO_VENCIDO, { hoy: HOY });
+
+    expect(hastaCampo()).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByText(/Ese Hasta ya pasó/)).not.toBeInTheDocument();
+    // Lo que si dice es que ya vencio y como seguir.
+    expect(screen.getByText(/Venció el 12-10-2026 y hoy sigue la regla/)).toBeInTheDocument();
+  });
+
+  it("cambiar el precio de un vencido sin renovar el Hasta se rechaza antes de ir al servidor", async () => {
+    await abrir(FIJO_VENCIDO, { hoy: HOY });
+
+    fireEvent.change(precioFijo(), { target: { value: "14000" } });
+    fireEvent.click(boton("Guardar"));
+
+    expect(mocks.guardar).not.toHaveBeenCalled();
+    expect(hastaCampo()).toHaveFocus();
+    expect(hastaCampo()).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("congelar con un Desde futuro: el error esta en el Desde y manda a usar precio fijo", async () => {
+    await abrir(SIN_DECISION, { hoy: HOY });
+    fireEvent.click(congelar());
+    fireEvent.change(desdeCampo(), { target: { value: "2026-11-05" } });
+
+    expect(screen.getByText(/Congelar toma el precio de hoy/)).toBeInTheDocument();
+    expect(desdeCampo()).toHaveAttribute("aria-invalid", "true");
+    fireEvent.click(boton("Guardar"));
+
+    expect(mocks.guardar).not.toHaveBeenCalled();
+    expect(desdeCampo()).toHaveFocus();
+  });
+
+  it("corregido el error, guarda", async () => {
+    const { onGuardado } = await abrir(SIN_DECISION, { hoy: HOY });
+    fireEvent.change(precioFijo(), { target: { value: "15000" } });
+    fireEvent.change(hastaCampo(), { target: { value: "2026-10-12" } });
+    fireEvent.click(boton("Guardar"));
+    expect(mocks.guardar).not.toHaveBeenCalled();
+
+    fireEvent.change(hastaCampo(), { target: { value: "2026-11-30" } });
+    fireEvent.click(boton("Guardar"));
+
+    await waitFor(() => expect(onGuardado).toHaveBeenCalledTimes(1));
+    expect(enviado().vigente_hasta).toBe("2026-11-30");
+  });
+
+  it("un rechazo del servidor se anuncia como alerta, con su mensaje", async () => {
+    mocks.guardar.mockRejectedValue(new Error("El periodo ya terminó (Hasta 12-10-2026): pon un Hasta de hoy en adelante o déjalo sin vencimiento."));
+    await abrir(FIJO_VIGENTE, { hoy: HOY });
+
+    fireEvent.click(boton("Guardar"));
+
+    const alerta = await screen.findByRole("alert");
+    expect(alerta).toHaveTextContent("El periodo ya terminó (Hasta 12-10-2026)");
+  });
+});
+
+describe("Ficha: rotulos de precio fijo y margen fijo", () => {
+  it("tienen rotulo visible y accesible, no solo placeholder", async () => {
+    await abrir(SIN_DECISION, { hoy: HOY });
+
+    expect(screen.getByLabelText("Precio fijo ($)")).toBe(precioFijo());
+    expect(screen.getByLabelText("Margen fijo (% sobre la venta)")).toBe(margenFijo());
+    // La ayuda va enlazada, no dentro de la etiqueta: el nombre del campo es solo su rotulo.
+    expect(precioFijo()).toHaveAccessibleDescription("Gana a todo, incluso sin stock.");
+    expect(margenFijo()).toHaveAccessibleDescription(/Sobre la venta/);
+  });
+});
+
+describe("Ficha: stock por bodega", () => {
+  const BODEGAS = [
+    { bodega: "BODEGA CENTRAL", stock: 30, cuenta: true },
+    { bodega: "PE X REGULARIZAR", stock: 4, cuenta: true },
+    { bodega: "BODEGA DAÑADOS", stock: 5, cuenta: false },
+  ];
+
+  it("lo que no cuenta va tachado Y rotulado, y el desglose se abre solo", async () => {
+    await abrir({ ...SIN_DECISION, stock_bodegas: BODEGAS }, { hoy: HOY });
+
+    const resumen = screen.getByText(/Stock por bodega \(3\)/);
+    expect(resumen.closest("details")).toHaveAttribute("open");
+    expect(within(resumen).getByText("1 no cuenta")).toBeInTheDocument();
+    const danados = screen.getByText("BODEGA DAÑADOS");
+    expect(danados.className).toContain("line-through");
+    expect(danados.nextSibling?.textContent).toBe("no cuenta");
+    // Las que cuentan, sin tachar.
+    expect(screen.getByText("BODEGA CENTRAL").className).not.toContain("line-through");
+    expect(screen.getAllByText("no cuenta")).toHaveLength(1);
+  });
+
+  it("si todas cuentan queda plegado y sin aviso", async () => {
+    await abrir({ ...SIN_DECISION, stock_bodegas: BODEGAS.slice(0, 2) }, { hoy: HOY });
+
+    const resumen = screen.getByText(/Stock por bodega \(2\)/);
+    expect(resumen.closest("details")).not.toHaveAttribute("open");
+    expect(screen.queryByText(/no cuenta/)).not.toBeInTheDocument();
+  });
+
+  it("varias que no cuentan: lo dice en plural", async () => {
+    await abrir({ ...SIN_DECISION, stock_bodegas: [BODEGAS[0], { bodega: "BODEGA SCRAP", stock: 2, cuenta: false }, BODEGAS[2]] }, { hoy: HOY });
+
+    expect(screen.getByText("2 no cuentan")).toBeInTheDocument();
+  });
+
+  it("sin desglose (una API anterior o sin stock) no dibuja nada", async () => {
+    await abrir(SIN_DECISION, { hoy: HOY });
+    expect(screen.queryByText(/Stock por bodega/)).not.toBeInTheDocument();
   });
 });

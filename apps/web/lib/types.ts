@@ -1311,6 +1311,14 @@ export interface Tablero {
 
 // ----------------------------------------------------------- Lista de precios
 
+/** El estado de un periodo de vigencia respecto de hoy (fecha de Chile). Siempre en
+ *  femenino: es el de la vigencia. null = sin periodo, o sin ninguna decision que vigilar. */
+export type EstadoVigencia = "programada" | "vigente" | "vencida";
+
+/** Lo que se puede pedir al filtro de vigencia de la lista. `vence_7d` = vigente con el
+ *  Hasta entre hoy y dentro de 7 dias. */
+export type FiltroVigencia = EstadoVigencia | "vence_7d";
+
 /** Una fila de la lista de precios: lo calculado mas lo decidido a mano. */
 export interface PrecioRow {
   producto: string;
@@ -1354,6 +1362,19 @@ export interface PrecioRow {
   editado_por: string | null;
   editado_en: string | null;
   actualizado_en: string | null;
+  /** Periodo de `precio_fijo`, `margen_fijo` y `congelar` (aaaa-mm-dd, sin hora, los dos dias
+   *  incluidos; vacio = sin limite de ese lado). Esas tres columnas son la decision GUARDADA
+   *  aunque no rija; `estado`, `factor` y `precio_final` son lo que rige HOY. Opcionales: una
+   *  API anterior no las trae. */
+  vigente_desde?: string | null;
+  vigente_hasta?: string | null;
+  vigencia?: EstadoVigencia | null;
+  /** Vigente con Hasta: dias hasta el Hasta (0 = ultimo dia). Programada: dias hasta el
+   *  Desde. Vencida: dias desde que vencio. Vigente sin Hasta: null. */
+  vigencia_dias?: number | null;
+  /** Solo en la ficha y solo si la vigencia es "vigente": a que precio vuelve cuando el
+   *  periodo termine (lo que daria la regla sin precio fijo, margen ni congelado). */
+  precio_regla?: number | null;
 }
 
 export interface PrecioCambio {
@@ -1372,9 +1393,18 @@ export interface PrecioEnvio {
   enviado_por: string | null;
 }
 
+/** De que bodega sale el stock de un producto y si suma al de la lista. */
+export interface StockBodega {
+  bodega: string;
+  stock: number;
+  cuenta: boolean;
+}
+
 export interface PrecioDetalle extends PrecioRow {
   cambios: PrecioCambio[];
   envios: PrecioEnvio[];
+  /** Solo Curifor y solo lo distinto de 0, la bodega con mas stock primero. */
+  stock_bodegas?: StockBodega[];
 }
 
 export interface PrecioPage {
@@ -1393,6 +1423,8 @@ export interface PrecioFiltros {
   origen?: string;
   con_cambios?: boolean;
   con_stock?: boolean;
+  /** Varios valores son una union. Ver `FiltroVigencia`. */
+  vigencia?: string[];
 }
 
 export interface PrecioOpciones {
@@ -1410,6 +1442,19 @@ export interface PrecioResumen {
   ultimo_envio: string | null;
   overrides: number;
   pendientes_envio: number;
+  /** Los periodos de vigencia. `hoy` viene del servidor (fecha de Chile) para que los atajos
+   *  de la ficha no dependan del reloj del navegador. */
+  vigencias?: PrecioVigencias;
+}
+
+export interface PrecioVigencias {
+  hoy: string;
+  vigentes: number;
+  programadas: number;
+  vencidas: number;
+  vencen_7_dias: number;
+  /** Productos cuyo precio todavia no refleja el cambio de estado de su periodo. */
+  por_aplicar: number;
 }
 
 /** Lo que una persona decide sobre un precio. Solo viajan los campos que se tocan. */
@@ -1421,6 +1466,11 @@ export interface PrecioOverrideIn {
   procedencia_manual?: string | null;
   no_producto?: boolean;
   obs?: string | null;
+  /** Ausente = no tocar; null = quitar ese extremo. La ficha los manda solo si la persona
+   *  los cambio: la API valida con `extra=forbid`, y una web nueva contra una API sin
+   *  vigencia no debe romper el guardado de toda la ficha. */
+  vigente_desde?: string | null;
+  vigente_hasta?: string | null;
 }
 
 export interface PrecioProductoNuevo {

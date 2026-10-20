@@ -22,12 +22,21 @@ import { ResumenDiferencias } from "@/components/resumen-diferencias";
 import { TutorialPrecios } from "@/components/tutorial-precios";
 import { api } from "@/lib/api-client";
 import { getPuedePrecios } from "@/lib/auth";
-import { KEYS_PRECIOS_DEFAULT } from "@/lib/columnas-precios";
+import { KEYS_PRECIOS_DEFAULT, LS_COLUMNAS_PRECIOS, leerColumnasGuardadas } from "@/lib/columnas-precios";
 import { formatoFechaHora, formatoNumero } from "@/lib/formato";
 import type { PrecioFiltros, PrecioOpciones, PrecioResumen, PrecioRow } from "@/lib/types";
 
-const LS_COLUMNAS = "precios_columnas_visibles";
 const LIMITE = 2000;
+
+/** Lo que ofrece el filtro de vigencia. «Vence en 7 días» es un subconjunto de «Vigente». */
+const OPCIONES_VIGENCIA = [
+  { value: "vigente", label: "Vigente" },
+  { value: "vence_7d", label: "Vence en 7 días" },
+  { value: "programada", label: "Programada" },
+  { value: "vencida", label: "Vencida" },
+];
+/** Lo que pide el recuadro «Vencen en 7 días»: lo que vence pronto y lo que ya venció. */
+const VIGENCIA_POR_REVISAR = ["vence_7d", "vencida"];
 
 export default function PreciosPage() {
   const [filtros, setFiltros] = useState<PrecioFiltros>({});
@@ -49,19 +58,18 @@ export default function PreciosPage() {
 
   useEffect(() => {
     setPuedeEditar(getPuedePrecios());
-    const saved = localStorage.getItem(LS_COLUMNAS);
-    if (saved) {
-      try {
-        const arr = JSON.parse(saved);
-        if (Array.isArray(arr) && arr.length) setColsVisibles(arr);
-      } catch {
-        /* noop */
-      }
-    }
+    // La seleccion guardada manda sobre los defaults: se le suman, una sola vez, las columnas
+    // nuevas visibles por defecto (Vigencia), si no quien ya uso la pantalla nunca las veria.
+    const guardadas = leerColumnasGuardadas();
+    if (guardadas) setColsVisibles(guardadas);
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(LS_COLUMNAS, JSON.stringify(colsVisibles));
+    try {
+      localStorage.setItem(LS_COLUMNAS_PRECIOS, JSON.stringify(colsVisibles));
+    } catch {
+      /* sin almacenamiento (ventana privada): la seleccion dura lo que dure la pagina */
+    }
   }, [colsVisibles]);
 
   const cargarAuxiliares = useCallback(async () => {
@@ -138,9 +146,15 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
 
   const hayFiltros = useMemo(
     () => Boolean(filtros.q || filtros.rubro?.length || filtros.tipo?.length || filtros.procedencia?.length
-      || filtros.estado?.length || filtros.con_cambios || filtros.con_stock),
+      || filtros.estado?.length || filtros.vigencia?.length || filtros.con_cambios || filtros.con_stock),
     [filtros]
   );
+
+  // El recuadro de vigencias aparece cuando ya hay algun periodo: antes no hay nada que contar.
+  const hayVigencias = Boolean(resumen?.vigencias
+    && resumen.vigencias.vigentes + resumen.vigencias.programadas + resumen.vigencias.vencidas > 0);
+  const porRevisar = (filtros.vigencia ?? []).length === VIGENCIA_POR_REVISAR.length
+    && VIGENCIA_POR_REVISAR.every((v) => filtros.vigencia?.includes(v));
 
   return (
     <div className="space-y-4">
@@ -184,7 +198,7 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
             <Columns3 size={15} /> Columnas
           </Button>
           {puedeEditar && (
-            <Button variant="outline" size="sm" onClick={() => setModalExcel(true)}>
+            <Button variant="outline" size="sm" onClick={() => setModalExcel(true)} data-tour="excel">
               <FileSpreadsheet size={15} /> Editar con Excel
             </Button>
           )}
@@ -238,6 +252,18 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
           <Kpi etiqueta="Con cambios sin revisar" valor={formatoNumero(resumen.con_cambios)}
                destacar={resumen.con_cambios > 0}
                onClick={() => set({ con_cambios: !filtros.con_cambios })} activo={Boolean(filtros.con_cambios)} />
+          {hayVigencias && resumen.vigencias && (
+            // Que precios fijos se acaban esta semana, sin recorrer 40 mil filas. Si ademas hay
+            // vencidos (ya volvieron a la regla pero siguen guardados) los suma al filtro.
+            <Kpi etiqueta="Vencen en 7 días" valor={formatoNumero(resumen.vigencias.vencen_7_dias)}
+                 nota={resumen.vigencias.vencidas > 0
+                   ? `y ${formatoNumero(resumen.vigencias.vencidas)} ya vencidos`
+                   : undefined}
+                 destacar={resumen.vigencias.vencen_7_dias > 0 || resumen.vigencias.vencidas > 0}
+                 onClick={porRevisar ? () => set({ vigencia: undefined }) : () => set({ vigencia: VIGENCIA_POR_REVISAR })}
+                 activo={porRevisar}
+                 deshabilitado={!porRevisar && resumen.vigencias.vencen_7_dias === 0 && resumen.vigencias.vencidas === 0} />
+          )}
           <Kpi etiqueta="Último recálculo" valor={resumen.ultimo_recalculo ? formatoFechaHora(resumen.ultimo_recalculo) : "—"} />
         </div>
       )}
@@ -267,6 +293,9 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
           <MultiSelect label="Estado" className="w-[150px]"
             opciones={opciones.estados.map((s) => ({ value: s, label: s }))}
             seleccionados={filtros.estado ?? []} onChange={(v) => set({ estado: v })} />
+          <MultiSelect label="Vigencia" className="w-[150px]"
+            opciones={OPCIONES_VIGENCIA}
+            seleccionados={filtros.vigencia ?? []} onChange={(v) => set({ vigencia: v })} />
           <label className="flex items-center gap-1.5 text-[13px] text-slate-600">
             <input type="checkbox" className="accent-brand" checked={Boolean(filtros.con_stock)}
                    onChange={(e) => set({ con_stock: e.target.checked })} />
@@ -318,6 +347,7 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
       <div data-tour="tabla">
         <TablaPrecios
           rows={rows}
+          hoy={resumen?.vigencias?.hoy}
           columnasVisibles={colsVisibles}
           onFila={setSeleccion}
           onEliminar={puedeEditar ? sacarDeLaLista : undefined}
@@ -358,6 +388,7 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
           producto={seleccion.producto}
           puedeEditar={puedeEditar}
           tipos={Array.from(new Set([...opciones.tipos, "Sugerido"])).sort()}
+          hoy={resumen?.vigencias?.hoy}
           onCerrar={() => setSeleccion(null)}
           onGuardado={async () => {
             await Promise.all([cargar(), cargarAuxiliares()]);
@@ -379,8 +410,10 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
   );
 }
 
-function Kpi({ etiqueta, valor, nota, destacar, onClick, activo }: {
+function Kpi({ etiqueta, valor, nota, destacar, onClick, activo, deshabilitado }: {
   etiqueta: string; valor: string; nota?: string; destacar?: boolean; onClick?: () => void; activo?: boolean;
+  /** Se ve pero no filtra: no hay nada que mostrar. */
+  deshabilitado?: boolean;
 }) {
   // Las tarjetas se dimensionan por su contenido y no estiradas a un tercio de
   // la pantalla: con cinco KPI quedaban justas, con tres quedaban de 600px con
@@ -396,12 +429,12 @@ function Kpi({ etiqueta, valor, nota, destacar, onClick, activo }: {
       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{etiqueta}</p>
       <p className="font-mono text-2xl font-semibold tabular-nums tracking-tight text-slate-900">{valor}</p>
       {nota && <p className="text-[11px] text-slate-400">{nota}</p>}
-      {onClick && (
+      {onClick && !deshabilitado && (
         <p className="text-[11px] text-brand">{activo ? "Filtrando · clic para quitar" : "Clic para filtrar"}</p>
       )}
     </>
   );
-  return onClick
+  return onClick && !deshabilitado
     ? <button className={`${cls} transition-colors hover:border-brand`} onClick={onClick}>{inner}</button>
     : <div className={cls}>{inner}</div>;
 }
