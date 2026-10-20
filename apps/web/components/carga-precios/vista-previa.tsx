@@ -363,6 +363,13 @@ export function VistaPrevia({
         </Aviso>
       )}
 
+      {!corto && (
+        <p className="text-[12px] text-slate-600" data-testid="nota-solo-lectura">
+          Solo se leen las 11 columnas editables. Si cambiaste Costo, Stock, Glosa, Estado o Vigencia en el
+          archivo, eso no se carga.
+        </p>
+      )}
+
       {archivoViejo > 0 && (
         <Aviso
           tono="ambar"

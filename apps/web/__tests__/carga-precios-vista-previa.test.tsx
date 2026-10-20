@@ -464,3 +464,15 @@ describe("derivadosDePrevia", () => {
     expect(derivadosDePrevia(BASE).hayErrores).toBe(false);
   });
 });
+
+describe("nota de columnas de solo lectura", () => {
+  it("el completo avisa que Costo, Stock, Glosa, Estado y Vigencia no se cargan; el corto no", () => {
+    dibujar({ ...BASE, modo: "completo" });
+    expect(screen.getByTestId("nota-solo-lectura")).toHaveTextContent(/Costo, Stock, Glosa, Estado o Vigencia/);
+  });
+
+  it("en el corto no aparece", () => {
+    dibujar({ ...BASE, modo: "corto" });
+    expect(screen.queryByTestId("nota-solo-lectura")).not.toBeInTheDocument();
+  });
+});

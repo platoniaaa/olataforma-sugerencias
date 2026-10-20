@@ -37,12 +37,12 @@ const OPCIONES: { modo: ModoCarga; titulo: string; descripcion: string }[] = [
   {
     modo: "corto",
     titulo: "Excel corto",
-    descripcion: "Solo los productos que pongo. Código, precio fijo y fechas; no baja la lista.",
+    descripcion: "Solo los productos que pones tú. Código, precio fijo y fechas; no baja la lista.",
   },
   {
     modo: "completo",
     titulo: "Excel completo para editar",
-    descripcion: "Bajo toda la lista (unos 40 mil productos), edito lo que quiera y la subo.",
+    descripcion: "Bajas toda la lista (unos 40 mil productos), editas lo que quieras y la subes.",
   },
 ];
 

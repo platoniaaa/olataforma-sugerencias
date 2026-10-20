@@ -11,10 +11,10 @@ import { Download, Loader2 } from "lucide-react";
 import type { Ref } from "react";
 import { Button } from "@/components/ui/button";
 
-const VACIO = <span className="italic text-slate-400">(vacío)</span>;
+const VACIO = <span className="italic text-slate-600">(vacío)</span>;
 
 function Ejemplo() {
-  return <span className="ml-2 rounded-sm bg-slate-100 px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">ejemplo</span>;
+  return <span className="ml-2 rounded-sm bg-slate-100 px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-600">ejemplo</span>;
 }
 
 export function PasosCorto({ descargando, deshabilitado, aviso, onDescargar, botonRef }: {

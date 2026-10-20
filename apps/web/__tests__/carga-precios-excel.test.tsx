@@ -872,8 +872,8 @@ describe("elegir el modo de carga", () => {
     const corto = within(grupo).getByRole("radio", { name: "Excel corto" });
     const completo = within(grupo).getByRole("radio", { name: "Excel completo para editar" });
     expect(within(grupo).getAllByRole("radio")).toHaveLength(2);
-    expect(corto).toHaveAccessibleDescription(/Solo los productos que pongo/);
-    expect(completo).toHaveAccessibleDescription(/Bajo toda la lista/);
+    expect(corto).toHaveAccessibleDescription(/Solo los productos que pones tú/);
+    expect(completo).toHaveAccessibleDescription(/Bajas toda la lista/);
     // Son radios nativos: el teclado (flechas) y los lectores de pantalla ya los entienden.
     expect(corto).toHaveAttribute("type", "radio");
     expect(corto).toHaveAttribute("name", completo.getAttribute("name") ?? "");
