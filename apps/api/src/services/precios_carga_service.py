@@ -355,7 +355,13 @@ def _redondeo_de_excel(valor: str, base: str) -> bool:
 
 def huella_decisiones(ov: dict | None) -> str:
     """Resume lo que las PERSONAS decidieron sobre un producto. Cambia cuando
-    alguien edita la ficha, y solo entonces: el motor no escribe en esa tabla."""
+    alguien edita la ficha, y solo entonces: el motor no escribe en esa tabla.
+
+    El periodo de vigencia entra SOLO si el producto tiene alguna fecha: para los que no
+    tienen -todos los de hoy- el valor es el mismo de siempre, y esta huella viaja en la
+    Referencia de cada archivo ya descargado. Si cambiara, todos esos archivos darian
+    conflicto en cada fila. Tampoco depende de la fecha de hoy: que un periodo venza no
+    escribe en `precio_override`, y por lo tanto no mueve la huella."""
     o = ov or {}
     partes = [
         o.get("tipo_manual") or "", o.get("procedencia_manual") or "",
@@ -364,6 +370,9 @@ def huella_decisiones(ov: dict | None) -> str:
         "1" if o.get("congelar") else "0", "1" if o.get("no_producto") else "0",
         _c_texto(o.get("obs")),
     ]
+    desde, hasta = ps._fecha(o.get("vigente_desde")), ps._fecha(o.get("vigente_hasta"))
+    if desde is not None or hasta is not None:
+        partes += [desde.isoformat() if desde else "", hasta.isoformat() if hasta else ""]
     return hashlib.sha1("\x1f".join(partes).encode("utf-8")).hexdigest()[:8]
 
 

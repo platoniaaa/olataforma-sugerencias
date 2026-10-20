@@ -19,10 +19,20 @@ Orden en que gana cada decision (ver `precios_service.calcular`):
                            stock cae a 0 como la regla. No convive con el fijo.
   4. `tipo_manual` / `procedencia_manual` -> cambian el factor que se aplica,
                            pero el precio se sigue calculando.
-"""
-from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, Text
+Vigencia (20-10-2026): un solo periodo por producto, `vigente_desde` y
+`vigente_hasta` (inclusivos, cada uno opcional), gobierna las TRES decisiones de
+precio: `precio_fijo`, `margen_fijo` y `congelar`. Fuera del periodo esas tres no
+rigen pero se CONSERVAN en la fila: por eso existen "Vencido" y "Renovar", y por
+eso el vencimiento no escribe aca (esta tabla sigue siendo solo de personas; el
+paso del tiempo lo resuelve `precios_service.calcular`, que ignora la decision
+cuando hoy esta fuera del periodo). `tipo_manual`, `procedencia_manual`,
+`no_producto` y `obs` no dependen del periodo. Las fechas solo existen mientras
+haya alguna de las tres decisiones: si se quita la ultima, se borran.
+"""
+from datetime import date, datetime, timezone
+
+from sqlalchemy import Boolean, Date, DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
@@ -48,6 +58,11 @@ class PrecioOverride(Base):
     # en cada corrida: si se recalculara, congelar no congelaria nada.
     congelado_precio: Mapped[float | None] = mapped_column(Float, nullable=True)
     congelado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # El periodo en que rigen precio fijo, margen fijo y congelar. Fechas de Chile,
+    # inclusivas; NULL = sin limite de ese lado. Ver el docstring del modulo.
+    vigente_desde: Mapped[date | None] = mapped_column(Date, nullable=True)
+    vigente_hasta: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     tipo_manual: Mapped[str | None] = mapped_column(String, nullable=True)
     procedencia_manual: Mapped[str | None] = mapped_column(String, nullable=True)

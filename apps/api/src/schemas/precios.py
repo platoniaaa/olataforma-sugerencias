@@ -1,7 +1,12 @@
 """Schemas del modulo de precios (contratos de /api/precios)."""
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+import re
+from datetime import date
+
+from pydantic import BaseModel, Field, field_validator
+
+_FECHA_ISO = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 class PrecioRow(BaseModel):
@@ -43,6 +48,21 @@ class PrecioRow(BaseModel):
     editado_por: str | None = None
     editado_en: str | None = None
     actualizado_en: str | None = None
+    # Vigencia: el periodo en que rigen precio fijo, margen fijo y congelar (fechas de
+    # Chile, aaaa-mm-dd, inclusivas; vacio = sin limite de ese lado). `precio_fijo`,
+    # `margen_fijo` y `congelar` son la decision GUARDADA aunque no rija; `estado`, `factor`
+    # y `precio_final` son lo que rige HOY.
+    vigente_desde: str | None = None
+    vigente_hasta: str | None = None
+    # "programada" | "vigente" | "vencida" | None (sin periodo o sin decision). Se calcula en
+    # vivo contra la fecha de hoy en Chile.
+    vigencia: str | None = None
+    # Vigente con Hasta: dias hasta el Hasta (0 = ultimo dia). Programada: dias hasta el
+    # Desde. Vencida: dias desde que vencio. Vigente sin Hasta: None.
+    vigencia_dias: int | None = None
+    # Solo en la ficha y solo si la vigencia es "vigente": el precio al que vuelve cuando el
+    # periodo termine, o sea lo que daria la regla sin la decision.
+    precio_regla: float | None = None
 
 
 class PrecioCambioOut(BaseModel):
@@ -109,8 +129,23 @@ class OverrideIn(BaseModel):
     procedencia_manual: str | None = Field(default=None, max_length=20)
     no_producto: bool | None = None
     obs: str | None = Field(default=None, max_length=500)
+    # El periodo en que rigen precio fijo, margen fijo y congelar: 'aaaa-mm-dd', fecha de
+    # Chile, inclusivas. Ausente = no tocar; null = quitar ese extremo (sin limite).
+    vigente_desde: date | None = None
+    vigente_hasta: date | None = None
 
     model_config = {"extra": "forbid"}
+
+    @field_validator("vigente_desde", "vigente_hasta", mode="before")
+    @classmethod
+    def _solo_fecha_iso(cls, v):
+        """Pydantic acepta un entero como fecha (un timestamp) y una fecha con hora: aca
+        un vencimiento es un dia, escrito aaaa-mm-dd. Lo demas es un error de quien llama."""
+        if v is None or (isinstance(v, date) and not hasattr(v, "hour")):
+            return v
+        if isinstance(v, str) and _FECHA_ISO.match(v):
+            return v
+        raise ValueError("la fecha tiene que ser aaaa-mm-dd")
 
 
 class ProductoNuevoIn(BaseModel):

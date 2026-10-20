@@ -12,9 +12,10 @@ Pantallas: `/precios` (la lista) y `/precios/politicas` (factores y rubros).
 
 En este orden; gana el primero que aplica (`services/precios_service.calcular`):
 
-1. **Precio fijo** (decision humana): ese es el precio, pase lo que pase.
+1. **Precio fijo** (decision humana): ese es el precio, pase lo que pase. Mientras
+   su periodo rija, si tiene uno (ver "Vigencia").
 2. **Congelado** (decision humana): el precio que tenia al congelar, aunque el
-   costo cambie despues.
+   costo cambie despues. Tambien con periodo.
 3. **Stock 0 y nada en transito**: precio 0 (el ERP no lo ofrece).
 4. **No es producto** (servicios, mano de obra): sin precio.
 5. **Margen fijo** (decision humana, % sobre la venta): `ROUND(costo x 1/(1 - margen))`.
@@ -51,8 +52,8 @@ REVISION` (queda sin precio hasta que alguien decida).
 
 | Tabla | Que es | Quien la escribe |
 |---|---|---|
-| `precio_producto` | Una fila por producto con todo lo calculado. Se pisa en cada recalculo. `origen` distingue lo que vino del ERP (`maestro`) de lo creado en la plataforma (`manual`): una recarga del maestro borra solo lo primero. | el recalculo y las cargas |
-| `precio_override` | Precio fijo, margen fijo, congelar, tipo/procedencia a mano, "no es producto", observacion. | solo personas |
+| `precio_producto` | Una fila por producto con todo lo calculado. Se pisa en cada recalculo. `origen` distingue lo que vino del ERP (`maestro`) de lo creado en la plataforma (`manual`): una recarga del maestro borra solo lo primero. `vigencia_aplicada` es el estado del periodo con que se calculo ese precio (interno: la API no lo expone). | el recalculo y las cargas |
+| `precio_override` | Precio fijo, margen fijo, congelar, tipo/procedencia a mano, "no es producto", observacion y el periodo de vigencia (`vigente_desde`, `vigente_hasta`). | solo personas |
 | `politica_precio` | Factor por (tipo, procedencia). | admin |
 | `politica_rubro` | Tipo y procedencia forzada por rubro. | admin |
 | `bodega_tipo` | Que bodegas cuentan para el stock: REAL, VIRT, ELIM y NODISP (ver "Bodegas"). | admin (carga) |
@@ -90,6 +91,89 @@ REVISION` (queda sin precio hasta que alguien decida).
   sus bodegas MENOS danados, devolucion y scrap (ver "Bodegas"): `stock_unificado`
   trae tambien Frontera porque el sugerido la usa (decision del 07-10-2026). El
   transito igual: solo las OC de Curifor, sin mirar bodega.
+
+## Vigencia: precio fijo, margen fijo y congelar con fecha (20-10-2026)
+
+Un precio fijo, un margen fijo o un congelado puede traer un **periodo**: `Desde` y
+`Hasta`. Antes eran permanentes hasta que alguien se acordaba de quitarlos (los 342
+precios fijos de produccion no tienen fecha y ninguna nota dice si eran temporales).
+
+**Reglas** (`services/precios_service.py`: `estado_vigencia`, `vigencia_de`, `calcular`):
+
+- **Un solo periodo por producto**: gobierna las tres decisiones a la vez. `tipo` y
+  `procedencia` a mano, `no es producto` y la `obs` no dependen del periodo.
+- **Desde y Hasta son inclusivos y cada uno opcional.** El dia del Hasta todavia rige.
+  Solo Hasta: rige desde ya. Solo Desde: empieza ese dia y no termina. Desde = Hasta es un
+  periodo de un dia.
+- **"Hoy" es el de Chile** (`calendario.hoy_chile`), nunca el del servidor: Render corre en
+  UTC y de 21:00 a 24:00 hora de Chile la fecha UTC ya es la del dia siguiente, o sea que un
+  Hasta venceria 3 horas antes. Un test impide usar la fecha del servidor en estas funciones.
+- **Tres estados, siempre en femenino**: `programada` (hoy < Desde), `vigente` y `vencida`
+  (hoy > Hasta). Sin periodo, o sin ninguna de las tres decisiones, no hay estado (`null`).
+- **Al vencer no se borra ni se edita nada.** `calcular` ignora precio fijo, margen fijo y
+  congelar cuando el periodo esta programado o vencido, ANTES de aplicar el orden de arriba
+  (que no cambia): el producto vuelve a la regla. La decision queda guardada, y por eso se
+  puede "renovar" con solo cambiar el Hasta. `precio_override` sigue siendo solo de
+  personas, y por eso el vencimiento no mueve la huella de la carga por Excel.
+- **Tabla de verdad** (costo 10.000, factor 1,78, la regla da 17.800): precio fijo 990, margen
+  35 % (15.385) y congelado 12.000 rigen solo en `vigente`; en `programada` y `vencida` el
+  producto cae a 17.800, estado `OK`.
+- **Sin periodo no cambia nada.** Hay una prueba con 59 combinaciones (fijo, margen, congelado,
+  no es producto, sin stock, Sugerido, tipo y procedencia a mano...) cuyos resultados se
+  congelaron corriendo la regla anterior, y la huella de decisiones de la carga por Excel
+  vale lo mismo de siempre cuando no hay fechas.
+
+**Que ve la API** (`GET /api/precios`, `GET /api/precios/{producto}` y la respuesta del PUT):
+
+| Campo | Que es |
+|---|---|
+| `vigente_desde`, `vigente_hasta` | El periodo guardado, `aaaa-mm-dd` o `null`. |
+| `vigencia` | `programada`, `vigente`, `vencida` o `null`. Se calcula en vivo contra hoy. |
+| `vigencia_dias` | Vigente con Hasta: dias hasta el Hasta (0 = ultimo dia). Programada: dias hasta el Desde. Vencida: dias desde que vencio. Vigente sin Hasta: `null`. |
+| `precio_regla` | Solo en la ficha y solo si la vigencia es `vigente`: el precio al que vuelve cuando termine. |
+| `precio_fijo`, `margen_fijo`, `congelar` | La decision GUARDADA, aunque no rija. |
+| `estado`, `factor`, `precio_final` | Lo que rige HOY segun el ultimo recalculo: una decision programada o vencida no aparece como FIJO, MARGEN ni CONGELADO. |
+
+**Guardar un periodo** (`PUT /api/precios/{producto}/override`). `vigente_desde` y
+`vigente_hasta` van como `aaaa-mm-dd`: ausente = no tocar, `null` = quitar ese extremo (otro
+formato da 422). Las reglas viven en `validar_vigencia`, una funcion pura que tambien va a usar
+la carga por Excel:
+
+- El Desde no puede ser posterior al Hasta.
+- Ninguna fecha puede estar a mas de 3 anos de hoy (frena el 2206 por el 2026).
+- El periodo no puede nacer vencido: si la llamada pone o cambia una decision o las fechas y el
+  Hasta ya paso, es 422. **Reenviar el estado completo de un producto ya vencido para cambiar
+  solo la nota se guarda**, porque la ficha manda todo en cada guardado. Quitar una decision
+  tampoco lo bloquea.
+- Congelar toma el precio de hoy: no se puede programar con un Desde futuro (se usa precio fijo).
+- Las fechas solo existen con una de las tres decisiones: si la llamada quita la ultima se
+  borran solas; si solo trae fechas, 422.
+- El aviso de "precio fijo o margen fijo, no los dos" dice cuando el que estorba es una
+  decision guardada vencida o programada (hay que borrarla o renovarla).
+
+Un congelado **vuelve a tomar el precio de hoy cada vez que pasa a regir**: al congelar, o al
+renovar uno vencido (el precio de hoy es el que da la regla, no el de la decision vencida).
+Renovar uno que todavia regia conserva su precio. La auditoria de cada guardado dice
+`periodo <antes> -> <despues>`.
+
+**Recalcular.** `recalcular` resuelve `hoy` UNA vez por corrida y se lo pasa a todas las filas
+(una corrida de 4 minutos que cruza la medianoche no puede dejar la lista con dos fechas). Acepta
+`hoy`, `accion` y `titulo` opcionales; sin ellos deja la misma fila de auditoria y la misma
+notificacion de siempre. Escribe `precio_producto.vigencia_aplicada` en cada recalculo, igual que
+`estado`. Un vencimiento solo deja una fila en `precio_cambio` si el precio cambio de verdad.
+
+**Todavia no hay barrido.** Hoy el vencimiento llega al precio en el proximo recalculo (el
+boton Recalcular o el del motor); no hay filtros por vigencia, ni el bloque `vigencias` del
+resumen, ni el endpoint del admin, ni columnas nuevas en los archivos de descarga. Eso viene en
+el paso siguiente del plan. Tampoco hay columnas de Desde y Hasta en la carga por Excel: si se
+sube un archivo que edita el `Precio final` de un producto con la decision vencida, el precio
+queda guardado pero no rige hasta renovar el periodo.
+
+**Migracion.** `db.py` agrega `precio_override.vigente_desde`, `precio_override.vigente_hasta` y
+`precio_producto.vigencia_aplicada` (las tres nullable, sin relleno: ningun precio cambia al
+desplegar). Una prueba quita las tres columnas, corre `create_all()` y comprueba que vuelven.
+**Volver atras**: las columnas extra no estorban a la version anterior, pero esa trataria una
+decision vencida como vigente; no se vuelve atras una vez que el equipo use periodos sin quitarlos.
 
 ## Bodegas: que stock cuenta (20-10-2026)
 

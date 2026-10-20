@@ -81,6 +81,13 @@ class PrecioProducto(Base):
     precio_final: Mapped[float | None] = mapped_column(Float, nullable=True)
     # "OK" | "FIJO" | "CONGELADO" | "SUGERIDO" | "SIN REVISION" | "NO PRODUCTO" | "SIN STOCK"
     estado: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    # El estado del periodo de vigencia con el que se calculo ESTE precio:
+    # "programada" | "vigente" | "vencida" | None (sin periodo o sin decision). Lo
+    # escribe `calcular` en cada recalculo, igual que `estado`. Es el marcador que
+    # deja saber que productos cambiaron de estado desde la ultima vez sin recorrer
+    # las 40 mil filas. NO es lo que muestra la API: ella calcula `vigencia` en vivo
+    # contra la fecha de hoy, y por eso este se llama distinto.
+    vigencia_aplicada: Mapped[str | None] = mapped_column(String, nullable=True)
     # Cambios detectados en la ultima corrida que nadie marco como vistos.
     cambios_pendientes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 

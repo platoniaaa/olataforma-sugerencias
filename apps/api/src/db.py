@@ -209,6 +209,13 @@ def create_all() -> None:
         # simultaneos pasaban los dos el control del router).
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_solicitud_viva ON solicitud_actualizacion "
         "(tenant_id) WHERE estado IN ('pendiente', 'en_curso')",
+        # 2026-10: vigencia de precio fijo, margen fijo y congelar. Un solo periodo por
+        # producto (precio_override) y el estado con que se calculo cada precio
+        # (precio_producto.vigencia_aplicada). Sin estas lineas el modelo pide columnas
+        # que la tabla no tiene y se cae TODA consulta de la lista de precios.
+        "ALTER TABLE precio_override ADD COLUMN IF NOT EXISTS vigente_desde DATE",
+        "ALTER TABLE precio_override ADD COLUMN IF NOT EXISTS vigente_hasta DATE",
+        "ALTER TABLE precio_producto ADD COLUMN IF NOT EXISTS vigencia_aplicada VARCHAR",
     ]
     # SQLite NO soporta "ADD COLUMN IF NOT EXISTS" (error de sintaxis que se
     # tragaba el try, dejando bases locales viejas sin las columnas nuevas):

@@ -177,7 +177,13 @@ def guardar_override(
     producto: str, payload: OverrideIn,
     db: Session = Depends(get_db), email: str = Depends(requiere_precios),
 ) -> dict:
-    """Precio fijo, congelar, tipo o procedencia a mano. Solo se tocan los campos que vienen."""
+    """Precio fijo, margen fijo, congelar, tipo o procedencia a mano. Solo se tocan los
+    campos que vienen.
+
+    `vigente_desde` y `vigente_hasta` (aaaa-mm-dd, fecha de Chile, inclusivas) ponen el
+    periodo en que rigen precio fijo, margen fijo y congelar: ausente = no tocar, null =
+    quitar ese extremo. Fuera del periodo la decision se conserva pero no rige. Un periodo
+    mal armado responde 422 con el motivo."""
     datos = payload.model_dump(exclude_unset=True)
     if not datos:
         raise HTTPException(status_code=422, detail="No viene ningun campo para cambiar")

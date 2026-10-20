@@ -59,6 +59,53 @@ def test_la_migracion_agrega_una_columna_que_falta(engine_con_tablas_viejas):
     )
 
 
+def test_las_columnas_de_la_vigencia_llegan_a_las_tablas_que_ya_existen(engine_con_tablas_viejas):
+    """El periodo de vigencia agrego tres columnas. Si falta una linea en `db.py`, el
+    modelo pide una columna que la tabla de produccion no tiene y se cae TODA consulta
+    de la lista de precios (el 23-08-2026 paso lo mismo con los avisos de FORD).
+
+    Se les quitan a las tablas, se corre `create_all()` y se comprueba que vuelven. Las
+    tablas viejas conservan sus filas: las columnas nuevas quedan en NULL, que es "sin
+    periodo".
+    """
+    eng = engine_con_tablas_viejas
+    with eng.begin() as cx:
+        cx.execute(text("ALTER TABLE precio_override DROP COLUMN vigente_desde"))
+        cx.execute(text("ALTER TABLE precio_override DROP COLUMN vigente_hasta"))
+        cx.execute(text("ALTER TABLE precio_producto DROP COLUMN vigencia_aplicada"))
+    assert not {"vigente_desde", "vigente_hasta"} & _columnas(eng, "precio_override")
+    assert "vigencia_aplicada" not in _columnas(eng, "precio_producto")
+
+    create_all()
+
+    assert {"vigente_desde", "vigente_hasta"} <= _columnas(eng, "precio_override"), (
+        "Faltan las columnas del periodo en `precio_override`: revisa `migraciones` en `db.py`.")
+    assert "vigencia_aplicada" in _columnas(eng, "precio_producto"), (
+        "Falta `precio_producto.vigencia_aplicada`: revisa `migraciones` en `db.py`.")
+
+
+def test_las_filas_de_antes_siguen_sin_periodo_tras_la_migracion(engine_con_tablas_viejas):
+    from src.models import PrecioOverride, PrecioProducto
+
+    eng = engine_con_tablas_viejas
+    with Session(eng) as s:
+        s.add(PrecioProducto(tenant_id="curifor", producto="71 AAA1", glosa="X", costo=1000.0))
+        s.add(PrecioOverride(tenant_id="curifor", producto="71 AAA1", precio_fijo=990.0))
+        s.commit()
+    with eng.begin() as cx:
+        cx.execute(text("ALTER TABLE precio_override DROP COLUMN vigente_desde"))
+        cx.execute(text("ALTER TABLE precio_override DROP COLUMN vigente_hasta"))
+        cx.execute(text("ALTER TABLE precio_producto DROP COLUMN vigencia_aplicada"))
+
+    create_all()
+
+    with Session(eng) as s:
+        o = s.query(PrecioOverride).one()
+        p = s.query(PrecioProducto).one()
+        assert (o.precio_fijo, o.vigente_desde, o.vigente_hasta) == (990.0, None, None)
+        assert p.vigencia_aplicada is None
+
+
 # --- La siembra de NODISP en `bodega_tipo` -----------------------------------------
 #
 # El 20-10-2026 la lista de precios paso a contar todas las bodegas MENOS las no
