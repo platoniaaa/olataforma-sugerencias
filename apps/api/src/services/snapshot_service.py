@@ -140,6 +140,64 @@ def _con_posiciones_instock(db: Session, registros: list[dict]) -> list[dict]:
     return registros
 
 
+COLUMNAS_EXPORT = (
+    "fecha", "producto", "descripcion", "proveedor", "sucursal_id", "clasificacion_abc",
+    "stock_activo_suc", "stock_en_transito_suc", "punto_de_pedido", "demanda_diaria",
+    "costo_unitario", "total_sugerido_suc",
+)
+
+
+def exportar_foto(db: Session, fecha: date) -> tuple[bytes, int]:
+    """CSV de la foto de un dia: una fila por producto x sucursal, con su clase ABC.
+
+    Sirve para responder "el ABC del mes pasado con el stock de cierre": el sugerido
+    se reemplaza completo en cada carga, y la foto es lo unico que guarda la clase
+    que el motor calculo ese dia. SOLO LECTURA. El proveedor y la descripcion no van
+    en la foto: se toman del sugerido y del catalogo de HOY (un producto que ya no
+    esta en el sugerido sale con el proveedor vacio).
+
+    Devuelve (contenido en UTF-8 con BOM, filas). Sin foto de esa fecha, 0 filas: la
+    retencion es de `snapshot_retencion_dias` (60) y los dias sin sync no tienen foto.
+    """
+    import csv
+    import io
+
+    from ..models import ProductoCatalogo
+
+    tenant = settings.default_tenant_id
+    filas = db.execute(
+        select(SugeridoSnapshot)
+        .where(SugeridoSnapshot.tenant_id == tenant, SugeridoSnapshot.fecha == fecha)
+        .order_by(SugeridoSnapshot.producto, SugeridoSnapshot.sucursal_id)
+    ).scalars().all()
+    proveedores: dict[str, str] = {}
+    descripciones: dict[str, str] = {}
+    if filas:
+        for prod, prov in db.execute(
+            select(Sugerido.producto, func.min(Sugerido.proveedor))
+            .where(Sugerido.tenant_id == tenant, Sugerido.proveedor.is_not(None))
+            .group_by(Sugerido.producto)
+        ).all():
+            proveedores[prod] = prov
+        for prod, glosa in db.execute(
+            select(ProductoCatalogo.producto, ProductoCatalogo.glosa)
+            .where(ProductoCatalogo.tenant_id == tenant)
+        ).all():
+            if glosa:
+                descripciones.setdefault(prod, glosa)
+    salida = io.StringIO()
+    w = csv.writer(salida, lineterminator="\r\n")
+    w.writerow(COLUMNAS_EXPORT)
+    for f in filas:
+        w.writerow([
+            f.fecha.isoformat(), f.producto, descripciones.get(f.producto, ""),
+            proveedores.get(f.producto, ""), f.sucursal_id, f.clasificacion_abc or "",
+            f.stock_activo_suc, f.stock_en_transito_suc, f.punto_de_pedido,
+            f.demanda_diaria, f.costo_unitario, f.total_sugerido_suc,
+        ])
+    return ("﻿" + salida.getvalue()).encode("utf-8"), len(filas)
+
+
 def purgar_antiguos(db: Session, dias: int | None = None) -> int:
     """Borra snapshots mas viejos que la retencion configurada."""
     dias = dias if dias is not None else settings.snapshot_retencion_dias

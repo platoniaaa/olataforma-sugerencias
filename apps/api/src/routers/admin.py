@@ -1,8 +1,10 @@
 """Endpoints de administracion: carga del sugerido (Excel/CSV o desde Power BI)."""
 import subprocess
+from datetime import date
 
 import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -451,6 +453,30 @@ def cargar_bodegas_tipo(
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
+
+
+@router.get("/snapshot/export")
+def exportar_snapshot(
+    fecha: date,
+    db: Session = Depends(get_db),
+    email: str = Depends(requiere_admin),
+) -> StreamingResponse:
+    """Baja en CSV la foto diaria del sugerido de una fecha (aaaa-mm-dd). Admin, solo lectura.
+
+    Trae producto x sucursal con su clase ABC, stock, transito, punto de pedido, demanda
+    y costo de ESE dia, mas proveedor y descripcion de hoy. 404 si no hay foto de esa
+    fecha (se guardan `snapshot_retencion_dias` dias, 60, y solo los dias con sync)."""
+    contenido, n = snapshot_service.exportar_foto(db, fecha)
+    if n == 0:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No hay foto del sugerido del {fecha.isoformat()} (se guardan los ultimos "
+                   f"{settings.snapshot_retencion_dias} dias, solo los que tuvieron sync).")
+    return StreamingResponse(
+        iter([contenido]), media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="sugerido_foto_{fecha.isoformat()}.csv"',
+                 "X-Filas": str(n)},
+    )
 
 
 @router.post("/precios/vigencias/aplicar")
