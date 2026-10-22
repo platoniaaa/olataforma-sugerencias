@@ -27,6 +27,7 @@ from src.canal_digital.clasificacion import (  # noqa: E402
     ESTADO_CLASIFICADO, ESTADO_NUEVO, ESTADO_SIN_MOVIMIENTO, ParametrosClasificacion,
     VentaProducto, clasificar, ejecutar_validaciones, resumen_por_cluster,
 )
+from src.canal_digital.corrida import DatosProducto, correr  # noqa: E402
 from src.canal_digital.paso_a_paso import explicar_producto, texto_completo  # noqa: E402
 from src.canal_digital.politica import CLUSTERS, MODO_FORMULA, politica_provisoria  # noqa: E402
 from src.canal_digital.reposicion import (  # noqa: E402
@@ -111,26 +112,14 @@ def construir(datos: pathlib.Path):
     st = c5[c5.en_universo].set_index("padre")
 
     padres = sorted(mes_u.index)
-    ventas = [
-        VentaProducto(p, [float(x) for x in mes_u.loc[p]], [float(x) for x in mes_v.loc[p]], primera.get(p))
-        for p in padres
-    ]
     parametros = ParametrosClasificacion()
-    res = clasificar(ventas, FECHA_REFERENCIA, parametros)
     pol = politica_provisoria()
     prep = ParametrosReposicion()
 
-    filas, reposiciones, sugerido_pesos = [], {}, {}
-    for c in res.productos:
-        p = c.codigo
+    datos_p = []
+    for p in padres:
         s = st.loc[p] if p in st.index else None
-        stock_ml = float(s.stock_BODEGA_ML) if s is not None else 0.0
-        stock_full = float(s.stock_BODEGA_ML_FULL) if s is not None else 0.0
-        stock_cd = float(s.stock_CD_REPUESTOS) if s is not None else 0.0
         tr = c6.loc[p] if p in c6.index else None
-        t430 = float(tr.transito_r1_d1) if tr is not None else 0.0
-        t430cd = float(tr.transito_r1_d2) if tr is not None else 0.0
-        tany = float(tr.transito_r1_d3) if tr is not None else 0.0
         l7 = c7.loc[p] if p in c7.index else None
         if l7 is not None:
             dias = float(l7.lt_prom5_con_tope_o_respaldo_dias) + GESTION_DIAS
@@ -143,17 +132,41 @@ def construir(datos: pathlib.Path):
         else:
             dias, cat, prov, lt_motor = 3.0 + GESTION_DIAS, "sin datos de compras", "", None
             origen = f"respaldo 3 dias + {GESTION_DIAS} dia de gestion (sin datos de compras)"
-        entrada = EntradaReposicion(
-            codigo=p, unidades_semana=sem[p], lead_time_semanas=dias / 7, origen_lead_time=origen,
-            stock_disponible=stock_ml, en_transito=t430,
-        )
-        fila_pol = pol.fila(c.cluster) if c.estado == ESTADO_CLASIFICADO else None
-        r = calcular_reposicion(entrada, fila_pol, cluster=c.cluster, estado=c.estado, parametros=prep)
-        reposiciones[p] = (r, fila_pol, entrada)
         costo = c4.costo_actual.get(p) if p in c4.index else None
         costo = float(costo) if costo is not None and pd.notna(costo) else None
         vig = str(c4.vigencia_costo_actual.get(p)) if p in c4.index else ""
-        pesos = r.sugerido * costo if costo is not None else 0.0
+        datos_p.append(DatosProducto(
+            codigo=p,
+            descripcion=str(c4.descripcion.get(p, "")) if p in c4.index else "",
+            codigos_vendidos=str(c4.codigos_vendidos.get(p, p)) if p in c4.index else p,
+            unidades_mes=[float(x) for x in mes_u.loc[p]], valor_mes=[float(x) for x in mes_v.loc[p]],
+            primera_venta=primera.get(p), unidades_semana=sem[p],
+            plazo_dias=dias, plazo_origen=origen, plazo_confianza=cat, proveedor=prov, plazo_motor_dias=lt_motor,
+            stock_disponible=float(s.stock_BODEGA_ML) if s is not None else 0.0,
+            stock_aparte=float(s.stock_BODEGA_ML_FULL) if s is not None else 0.0,
+            stock_cd=float(s.stock_CD_REPUESTOS) if s is not None else 0.0,
+            transito=float(tr.transito_r1_d1) if tr is not None else 0.0,
+            transito_430_cd=float(tr.transito_r1_d2) if tr is not None else 0.0,
+            transito_cualquier_destino=float(tr.transito_r1_d3) if tr is not None else 0.0,
+            costo_actual=costo,
+            costo_respaldo="sin respaldo de stock" if "sin stock" in vig
+            else ("sin costo" if costo is None else "con stock del 19-oct"),
+        ))
+    corrida = correr(datos_p, pol, FECHA_REFERENCIA, parametros, prep)
+    res = corrida.clasificacion
+
+    filas, reposiciones, sugerido_pesos = [], {}, {}
+    for pc in corrida.productos:
+        dp = pc.datos
+        p = dp.codigo
+        c = res.producto(p)
+        r, fila_pol = pc.reposicion, pc.fila_politica
+        stock_ml, stock_full, stock_cd = dp.stock_disponible, dp.stock_aparte, dp.stock_cd
+        t430, t430cd, tany = dp.transito, dp.transito_430_cd, dp.transito_cualquier_destino
+        dias, cat, prov, lt_motor = dp.plazo_dias, dp.plazo_confianza, dp.proveedor, dp.plazo_motor_dias
+        costo, pesos = dp.costo_actual, pc.sugerido_pesos
+        vig = "sin stock" if dp.costo_respaldo == "sin respaldo de stock" else dp.costo_respaldo
+        reposiciones[p] = (r, fila_pol, dp)
         sugerido_pesos[p] = pesos
         filas.append({
             "Producto (padre)": p,

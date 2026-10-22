@@ -36,6 +36,7 @@ from .routers import (
     sugerido,
     usuarios,
     ventas_historicas,
+    canal_digital,
 )
 from .services.auth import (
     requiere_admin,
@@ -139,6 +140,8 @@ app.include_router(catalogo.router, dependencies=_abastecimiento)
 app.include_router(precios.router, dependencies=_abastecimiento)
 app.include_router(auditoria.router, dependencies=_protegido)
 app.include_router(ventas_historicas.router, dependencies=_abastecimiento)
+# Canal Digital: lectura para Abastecimiento; publicar la venta exige admin (lo hace el motor).
+app.include_router(canal_digital.router, dependencies=_abastecimiento)
 app.include_router(inventario.router, dependencies=_abastecimiento)
 app.include_router(tablero.router, dependencies=_abastecimiento)
 # Inventario ciclico: _protegido y no _abastecimiento, porque bodega no es comprador.
