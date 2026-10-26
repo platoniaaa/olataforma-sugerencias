@@ -12,11 +12,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from ..canal_digital.politica import CLUSTERS, MODOS, FilaPolitica, Politica, PoliticaInvalida
+from ..canal_digital.politica import BODEGA_CANAL_DIGITAL, CLUSTERS, MODOS, FilaPolitica, Politica, PoliticaInvalida
 from ..canal_digital.ventas_semanales import normalizar_codigo
 from ..db import get_db
 from ..services import auditoria_service
 from ..services import canal_digital_calculo as calculo
+from ..services import canal_digital_datos as datos_cd
 from ..services import canal_digital_service as svc
 from ..services import canal_digital_vista as vista
 from ..services.auth import requiere_admin, requiere_escritura
@@ -51,6 +52,12 @@ def _corrida(db: Session, bodega: str):
     return corrida, aviso
 
 
+def _exigir_bodega(db: Session, bodega: str) -> None:
+    """Una lectura no crea bodegas: solo la por defecto se siembra sola; cualquier otra debe existir ya."""
+    if bodega != BODEGA_CANAL_DIGITAL and not svc.existe_bodega(db, bodega):
+        raise HTTPException(status_code=404, detail=f"La bodega {bodega} no existe")
+
+
 @router.get("/meta")
 def meta(bodega: str = "430", db: Session = Depends(get_db)) -> dict:
     """Que venta semanal y que lineas del ERP hay cargadas para la bodega.
@@ -59,6 +66,18 @@ def meta(bodega: str = "430", db: Session = Depends(get_db)) -> dict:
     (el motor) decide con las segundas: un mes con venta cargada por /ventas puede no tener lineas.
     """
     return svc.meta_ventas(db, bodega)
+
+
+@router.get("/datos")
+def datos(bodega: str = "430", db: Session = Depends(get_db)) -> dict:
+    """De donde sale lo que se calcula y si esta al dia: venta por mes, cobertura de datos, fuentes y validaciones.
+
+    Solo lectura y chico: se arma al momento con la corrida en cache, sin tablas ni historial propios. Una bodega
+    que no existe responde 404 y no se crea (la 430 si se siembra sola, como en el resto de las pantallas).
+    """
+    _exigir_bodega(db, bodega)
+    corrida, aviso = _corrida(db, bodega)
+    return datos_cd.armar(db, bodega, corrida, aviso)
 
 
 @router.get("/resumen")

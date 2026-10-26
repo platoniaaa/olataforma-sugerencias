@@ -87,6 +87,15 @@ def asegurar_bodega(db: Session, bodega: str = BODEGA_CANAL_DIGITAL) -> CanalDig
     return fila
 
 
+def existe_bodega(db: Session, bodega: str) -> bool:
+    """Si la bodega ya esta registrada. Solo lee: a diferencia de `asegurar_bodega`, no crea nada."""
+    return db.execute(
+        select(CanalDigitalBodega.id).where(
+            CanalDigitalBodega.tenant_id == _tenant(), CanalDigitalBodega.bodega == bodega
+        )
+    ).first() is not None
+
+
 def leer_politica(db: Session, bodega: str = BODEGA_CANAL_DIGITAL) -> Politica:
     """Las 27 filas guardadas. Falla (PoliticaInvalida) si la tabla no tiene exactamente los 27 clusters."""
     filas = db.execute(

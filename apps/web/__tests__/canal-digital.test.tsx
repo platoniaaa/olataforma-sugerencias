@@ -161,7 +161,9 @@ describe("CanalDigitalPage", () => {
     expect(screen.queryByText("Solo los que piden hoy")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Estado")).not.toBeInTheDocument();
     // el orden de las pestanas es el acordado
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Sugerido", "Clusters", "Productos", "Política"]);
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual([
+      "Sugerido", "Clusters", "Productos", "Datos", "Política",
+    ]);
   });
 
   it("muestra los totales arriba, lo provisorio y, en Clusters, las validaciones (con la que falla a la vista)", async () => {

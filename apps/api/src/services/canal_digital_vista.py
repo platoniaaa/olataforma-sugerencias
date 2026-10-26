@@ -43,6 +43,16 @@ def fila_producto(pc: ProductoCalculado, corrida: Corrida) -> dict:
     }
 
 
+def validaciones(corrida: Corrida) -> list[dict]:
+    """Las validaciones de la clasificacion, listas para mostrar (las usan el resumen y la pestana Datos)."""
+    res = corrida.clasificacion
+    total_u = sum((p.unidades_ventana for p in res.productos), Fraction(0))
+    return [
+        {"nombre": v.nombre, "ok": v.ok, "detalle": v.detalle}
+        for v in ejecutar_validaciones(res, total_unidades_universo=total_u)
+    ]
+
+
 def resumen(corrida: Corrida, aviso: dict) -> dict:
     res = corrida.clasificacion
     por_cluster: dict[str, dict] = {}
@@ -67,8 +77,6 @@ def resumen(corrida: Corrida, aviso: dict) -> dict:
             "unidades_sugeridas": por_cluster.get(r.cluster, {}).get("unidades_sugeridas", 0.0),
             "sugerido_pesos": float(r.sugerido_pesos or 0),
         })
-    total_u = sum((p.unidades_ventana for p in res.productos), Fraction(0))
-    validaciones = ejecutar_validaciones(res, total_unidades_universo=total_u)
     estados = {e: len(res.por_estado(e)) for e in (ESTADO_CLASIFICADO, ESTADO_NUEVO, ESTADO_SIN_MOVIMIENTO)}
     piden = [p for p in corrida.productos if p.reposicion.sugerido > 0]
     return {
@@ -78,7 +86,7 @@ def resumen(corrida: Corrida, aviso: dict) -> dict:
             "unidades_sugeridas": sum(p.reposicion.sugerido for p in piden),
             "sugerido_pesos": sum(p.sugerido_pesos for p in piden),
         },
-        "validaciones": [{"nombre": v.nombre, "ok": v.ok, "detalle": v.detalle} for v in validaciones],
+        "validaciones": validaciones(corrida),
         "provisorio": [
             "La politica de los 27 clusters son los valores del brief, sin confirmar.",
             "El comprometido no existe en el ERP (se muestra 0 sin dato); minimo y multiplo van en 1 por defecto.",

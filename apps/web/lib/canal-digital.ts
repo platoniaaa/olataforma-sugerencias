@@ -128,6 +128,58 @@ export interface PoliticaCanalDigital {
   filas: FilaPoliticaCD[];
 }
 
+export type EstadoFuente = "ok" | "aviso" | "falta";
+
+export interface FuenteDatos {
+  nombre: string;
+  detalle: string;
+  estado: EstadoFuente;
+}
+
+export interface VentaMesDatos {
+  periodo: string;
+  unidades_netas: number;
+  unidades_devueltas: number;
+  lineas: number;
+}
+
+export interface VentasDatos {
+  ultimo_periodo_cargado: string | null;
+  /** Meses cerrados que faltan cargar; 0 = al dia; null = no hay ningun mes cerrado cargado. */
+  meses_sin_cargar: number | null;
+  periodo_desde: string | null;
+  filas: number;
+  productos: number;
+  /** Lineas de documento del ERP guardadas (0 si la venta se cargo ya agregada). */
+  lineas: number;
+  lineas_periodo_hasta: string | null;
+  /** Los ultimos 14 periodos cargados como maximo, del mas reciente al mas antiguo. */
+  por_mes: VentaMesDatos[];
+}
+
+export interface CoberturaDatos {
+  productos: number;
+  con_proveedor: number;
+  sin_proveedor: number;
+  proveedor_menos_5_muestras: number;
+  con_costo: number;
+  sin_costo: number;
+  costo_sin_respaldo_stock: number;
+  con_stock_bodega: number;
+  sin_stock_bodega: number;
+  con_stock_aparte: number;
+  con_transito_a_la_bodega: number;
+  con_transito_otro_destino: number;
+}
+
+export interface DatosCanalDigital {
+  ventas: VentasDatos;
+  cobertura: CoberturaDatos;
+  fuentes: FuenteDatos[];
+  validaciones: ValidacionCD[];
+  como_cargar: string[];
+}
+
 export interface FiltrosProductosCD {
   cluster?: string;
   estado?: string;
@@ -152,6 +204,10 @@ function consulta(bodega: string, f: FiltrosProductosCD = {}): URLSearchParams {
   return p;
 }
 
+/** "202609" -> "09-2026". */
+export const periodoLegible = (p: string | null | undefined) =>
+  p && p.length === 6 ? `${p.slice(4)}-${p.slice(0, 4)}` : "—";
+
 export const NOMBRE_MODO: Record<ModoPolitica, string> = {
   formula: "Fórmula",
   contra_pedido: "Contra pedido",
@@ -161,6 +217,10 @@ export const NOMBRE_MODO: Record<ModoPolitica, string> = {
 export const canalDigitalApi = {
   resumen(bodega = "430"): Promise<ResumenCanalDigital> {
     return getJSON(`/api/canal-digital/resumen?bodega=${encodeURIComponent(bodega)}`, "No se pudo calcular el resumen");
+  },
+
+  datos(bodega = "430"): Promise<DatosCanalDigital> {
+    return getJSON(`/api/canal-digital/datos?bodega=${encodeURIComponent(bodega)}`, "No se pudieron cargar los datos");
   },
 
   productos(bodega: string, f: FiltrosProductosCD): Promise<ProductosCanalDigital> {

@@ -31,6 +31,15 @@ from .canal_digital_service import _tenant, asegurar_bodega, leer_politica
 
 PLAZO_RESPALDO_DIAS = 3.0
 N_SEMANAS = 52
+
+# Como se rotula la confianza del plazo y el respaldo del costo de cada producto. La pestana Datos cuenta con
+# estas mismas etiquetas, asi que viven aqui y no como texto suelto en dos lugares.
+CONFIANZA_PLAZO_SIN_PROVEEDOR = "sin proveedor (respaldo)"
+CONFIANZA_PLAZO_POCAS_MUESTRAS = "proveedor con menos de 5 muestras"
+CONFIANZA_PLAZO_MUESTRAS_OK = "proveedor con 5 o mas muestras"
+COSTO_SIN_COSTO = "sin costo"
+COSTO_CON_STOCK = "con stock hoy"
+COSTO_SIN_RESPALDO_STOCK = "sin respaldo de stock"
 _LOTE_IN = 500
 
 
@@ -266,11 +275,11 @@ def reunir_datos(db: Session, bodega: str, hoy: dt.date) -> tuple[list[DatosProd
             dias, n = plazo_prov[prov]
             origen = (f"plazo del motor del proveedor ({n if n is not None else '?'} muestras) "
                       f"+ {cfg.gestion_dias:g} dia de gestion")
-            confianza = "proveedor con 5 o mas muestras" if (n or 0) >= 5 else "proveedor con menos de 5 muestras"
+            confianza = CONFIANZA_PLAZO_MUESTRAS_OK if (n or 0) >= 5 else CONFIANZA_PLAZO_POCAS_MUESTRAS
         else:
             dias = PLAZO_RESPALDO_DIAS
             origen = f"respaldo {PLAZO_RESPALDO_DIAS:g} dias + {cfg.gestion_dias:g} dia de gestion (sin proveedor)"
-            confianza = "sin proveedor (respaldo)"
+            confianza = CONFIANZA_PLAZO_SIN_PROVEEDOR
             sin_proveedor += 1
         c_costo = costo.get(p) if p in costo else next((costo[c] for c in ms if c in costo), None)
         hay_stock = any(stock[c]["total"] > 0 for c in ms if c in stock)
@@ -289,8 +298,8 @@ def reunir_datos(db: Session, bodega: str, hoy: dt.date) -> tuple[list[DatosProd
             transito=sum(t_bodega[c] for c in ms if c in t_bodega),
             transito_cualquier_destino=sum(t_todos[c] for c in ms if c in t_todos),
             costo_actual=c_costo,
-            costo_respaldo=("sin costo" if c_costo is None
-                            else ("con stock hoy" if hay_stock else "sin respaldo de stock")),
+            costo_respaldo=(COSTO_SIN_COSTO if c_costo is None
+                            else (COSTO_CON_STOCK if hay_stock else COSTO_SIN_RESPALDO_STOCK)),
         ))
     aviso["sin_proveedor"] = sin_proveedor
     return datos, aviso

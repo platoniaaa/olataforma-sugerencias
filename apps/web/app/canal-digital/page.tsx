@@ -4,23 +4,23 @@
 import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, CircleAlert, Layers, TriangleAlert } from "lucide-react";
 import { EditorPolitica } from "@/components/canal-digital/editor-politica";
+import { PestanaDatos } from "@/components/canal-digital/pestana-datos";
 import { ResumenClusters } from "@/components/canal-digital/resumen-clusters";
 import { TablaProductos } from "@/components/canal-digital/tabla-productos";
 import { getSoloLectura } from "@/lib/auth";
-import { canalDigitalApi, type ResumenCanalDigital } from "@/lib/canal-digital";
+import { canalDigitalApi, periodoLegible, type ResumenCanalDigital } from "@/lib/canal-digital";
 import { formatoCLPCorto, formatoNumero } from "@/lib/formato";
 
 const BODEGA = "430";
-type Pestana = "sugerido" | "clusters" | "productos" | "politica";
+type Pestana = "sugerido" | "clusters" | "productos" | "datos" | "politica";
 const PESTANAS: { id: Pestana; texto: string }[] = [
   { id: "sugerido", texto: "Sugerido" },
   { id: "clusters", texto: "Clusters" },
   { id: "productos", texto: "Productos" },
+  { id: "datos", texto: "Datos" },
   { id: "politica", texto: "Política" },
 ];
 
-/** "202609" -> "09-2026". */
-const periodoLegible = (p: string | null | undefined) => (p && p.length === 6 ? `${p.slice(4)}-${p.slice(0, 4)}` : "—");
 /** "2026-10-19" -> "19-10-2026". */
 const fechaLegible = (f: string) => f.split("-").reverse().join("-");
 
@@ -155,6 +155,8 @@ export default function CanalDigitalPage() {
       {pestana === "productos" && (
         <TablaProductos bodega={BODEGA} modo="todos" clusterInicial={cluster} onLimpiarCluster={() => setCluster(null)} />
       )}
+
+      {pestana === "datos" && <PestanaDatos bodega={BODEGA} />}
 
       {pestana === "politica" && <EditorPolitica bodega={BODEGA} puedeEditar={puedeEditar} onGuardada={cargar} />}
     </div>
