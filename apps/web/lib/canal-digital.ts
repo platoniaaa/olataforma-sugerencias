@@ -133,6 +133,7 @@ export interface FiltrosProductosCD {
   estado?: string;
   q?: string;
   solo_pide?: boolean;
+  orden?: "ventas" | "sugerido";
 }
 
 async function getJSON<T>(path: string, fallback: string): Promise<T> {
@@ -147,6 +148,7 @@ function consulta(bodega: string, f: FiltrosProductosCD = {}): URLSearchParams {
   if (f.estado) p.set("estado", f.estado);
   if (f.q) p.set("q", f.q);
   if (f.solo_pide) p.set("solo_pide", "true");
+  if (f.orden) p.set("orden", f.orden);
   return p;
 }
 
