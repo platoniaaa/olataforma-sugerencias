@@ -1,6 +1,6 @@
 "use client";
 
-// Canal Digital: reposicion semanal de la bodega 430 (clusters Frecuencia-Piezas-Valor).
+// Sugerido Canal Digital: reposicion semanal de la bodega 430 (clusters Frecuencia-Piezas-Valor).
 import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, CircleAlert, Layers, TriangleAlert } from "lucide-react";
 import { EditorPolitica } from "@/components/canal-digital/editor-politica";
@@ -49,7 +49,7 @@ export default function CanalDigitalPage() {
     <div className="space-y-5">
       <div>
         <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight text-slate-900">
-          <Layers size={20} /> Canal Digital · bodega {BODEGA}
+          <Layers size={20} /> Sugerido Canal Digital · bodega {BODEGA}
         </h1>
         <p className="text-[13px] text-slate-500">
           {resumen && !sinVentas

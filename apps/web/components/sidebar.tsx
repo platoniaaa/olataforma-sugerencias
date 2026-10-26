@@ -81,7 +81,7 @@ const NAV: NavItem[] = [
   { href: "/modelo", label: "Modelo", icon: Sigma },
   { href: "/configuracion", label: "Configuración", icon: SlidersHorizontal, soloCalibracion: true },
   // Canal Digital: version provisoria, solo la ven los admin hasta que se decida mostrarla al equipo.
-  { href: "/canal-digital", label: "Canal Digital", icon: Layers, soloAdmin: true },
+  { href: "/canal-digital", label: "Sugerido Canal Digital", icon: Layers, soloAdmin: true },
   { href: "/cargar", label: "Cargar datos", icon: Database, soloAdmin: true },
   { href: "/usuarios", label: "Usuarios", icon: Users, soloAdmin: true },
 ];

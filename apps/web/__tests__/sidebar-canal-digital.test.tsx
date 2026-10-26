@@ -34,17 +34,17 @@ vi.mock("@/lib/inventario-ciclico", () => ({
 
 beforeEach(() => mocks.esAdmin.mockReset());
 
-describe("menu de Canal Digital", () => {
+describe("menu de Sugerido Canal Digital", () => {
   it("un admin lo ve", () => {
     mocks.esAdmin.mockReturnValue(true);
     render(<Sidebar open onClose={() => undefined} />);
-    expect(screen.getByRole("link", { name: "Canal Digital" })).toHaveAttribute("href", "/canal-digital");
+    expect(screen.getByRole("link", { name: "Sugerido Canal Digital" })).toHaveAttribute("href", "/canal-digital");
   });
 
   it("quien no es admin no ve nada nuevo", () => {
     mocks.esAdmin.mockReturnValue(false);
     render(<Sidebar open onClose={() => undefined} />);
-    expect(screen.queryByRole("link", { name: "Canal Digital" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Sugerido Canal Digital" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Sugerido" })).toBeInTheDocument();
   });
 });
