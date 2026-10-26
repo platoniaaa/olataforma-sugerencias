@@ -53,7 +53,11 @@ def _corrida(db: Session, bodega: str):
 
 @router.get("/meta")
 def meta(bodega: str = "430", db: Session = Depends(get_db)) -> dict:
-    """Que venta semanal hay cargada para la bodega."""
+    """Que venta semanal y que lineas del ERP hay cargadas para la bodega.
+
+    `periodo_hasta` es el ultimo mes con venta; `lineas_periodo_hasta` el ultimo con lineas. Quien sube lineas
+    (el motor) decide con las segundas: un mes con venta cargada por /ventas puede no tener lineas.
+    """
     return svc.meta_ventas(db, bodega)
 
 
@@ -181,7 +185,9 @@ def put_politica(
 
 @router.post("/ventas", dependencies=[Depends(requiere_admin)])
 def publicar_ventas(payload: dict, db: Session = Depends(get_db)) -> dict:
-    """El motor publica la venta semanal del canal. Reemplaza SOLO los periodos que vienen.
+    """Ruta heredada: el motor publica la venta semanal ya agregada. Reemplaza SOLO los periodos que vienen.
+
+    Un periodo que ya tiene lineas (ver /lineas) queda gobernado por ellas: se responde 409 y no se carga nada.
 
     payload: {"bodega": "430", "filas": [{producto, semana, periodo, unid_brutas,
     unid_devueltas, valor_costo, unid_liquidacion, n_lineas}]}
@@ -191,6 +197,54 @@ def publicar_ventas(payload: dict, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(status_code=400, detail="Falta la lista 'filas'")
     bodega = str(payload.get("bodega") or "430").strip()
     svc.asegurar_bodega(db, bodega)
-    resumen_carga = svc.reemplazar_ventas(db, bodega, filas)
+    try:
+        resumen_carga = svc.reemplazar_ventas(db, bodega, filas)
+    except svc.ConflictoCarga as e:
+        raise HTTPException(status_code=409, detail=e.detalle)
+    _invalidar()
+    return resumen_carga
+
+
+@router.post("/lineas")
+def publicar_lineas(
+    payload: dict, db: Session = Depends(get_db), email: str = Depends(requiere_admin),
+) -> dict:
+    """El motor publica las lineas de documento del canal (un mes por envio) y la plataforma arma la venta semanal.
+
+    Reemplaza SOLO los periodos que vienen y recalcula la venta de la bodega con todas las lineas guardadas,
+    para que una devolucion de un mes encuentre su venta de otro mes. Todo o nada. Un periodo cargado antes por
+    /ventas y despues por aca queda gobernado por las lineas.
+
+    payload: {"bodega": "430", "lineas": [{periodo, tipo_docto, numero, fecha, tipo_venta, producto, cantidad,
+    costo_neto, doc_ref, nro_doc_ref}], "forzar": false}
+
+    Respuestas distintas de 200:
+      409  el envio dejaria un periodo con menos de la mitad de sus lineas (parece un envio parcial); con
+           "forzar": true se carga igual.
+      422  ninguna linea sirvio (un campo renombrado, un formato nuevo): el detalle dice que campo fallo.
+    Con algunas lineas invalidas se carga lo que sirve y la respuesta las cuenta (`estadisticas`).
+    """
+    lineas = payload.get("lineas")
+    if not isinstance(lineas, list):
+        raise HTTPException(status_code=400, detail="Falta la lista 'lineas'")
+    bodega = str(payload.get("bodega") or "430").strip()
+    try:
+        resumen_carga = svc.reemplazar_lineas(db, bodega, lineas, forzar=payload.get("forzar") is True)
+    except svc.ConflictoCarga as e:
+        raise HTTPException(status_code=409, detail=e.detalle)
+    est = resumen_carga["estadisticas"]
+    if resumen_carga["lineas_cargadas"] == 0 and est["ignoradas_invalidas"]:
+        raise HTTPException(status_code=422, detail={
+            "mensaje": f"Ninguna de las {len(lineas)} lineas sirvio: revisa los nombres y formatos de los campos. "
+                       "No se cargo nada.",
+            "estadisticas": est,
+        })
+    if resumen_carga["lineas_cargadas"]:
+        periodos = ", ".join(f"{p} ({r['antes']} -> {r['despues']})" for p, r in resumen_carga["reemplazo"].items())
+        auditoria_service.registrar(
+            db, accion="canal_digital_lineas", entidad="canal_digital", entidad_id=bodega, usuario_email=email,
+            detalle=f"Lineas del canal {bodega}: {resumen_carga['lineas_cargadas']} lineas, periodos {periodos}",
+        )
+        db.commit()
     _invalidar()
     return resumen_carga

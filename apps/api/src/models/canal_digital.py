@@ -7,6 +7,9 @@ Son tablas NUEVAS e independientes: ninguna reemplaza ni lee de las del sugerido
   canal_digital_venta    la venta del canal por producto, semana y periodo del documento. Es
                          lo que `venta_historica` no trae (esa agrega por mes y sucursal y
                          descarta el tipo de venta y la fecha).
+  canal_digital_linea    las lineas de documento del ERP que originan esa venta (una fila por
+                         linea, repetidas incluidas). Con ellas la plataforma recalcula la venta
+                         completa y una devolucion de un mes encuentra su venta de otro mes.
   canal_digital_politica las 27 filas de politica (cluster Frecuencia-Piezas-Valor) por bodega.
 """
 from datetime import datetime
@@ -71,6 +74,32 @@ class CanalDigitalVenta(Base):
         Index("ix_cd_venta_prod", "bodega", "producto"),
         Index("ix_cd_venta_periodo", "bodega", "periodo"),
         Index("ix_cd_venta_semana", "bodega", "semana"),
+    )
+
+
+class CanalDigitalLinea(Base):
+    __tablename__ = "canal_digital_linea"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String, nullable=False, default="curifor", index=True)
+    bodega: Mapped[str] = mapped_column(String, nullable=False)
+
+    periodo: Mapped[str] = mapped_column(String, nullable=False)  # YYYYMM del documento
+    tipo_docto: Mapped[str] = mapped_column(String, nullable=False)
+    numero: Mapped[str] = mapped_column(String, nullable=False, default="")  # sin ceros a la izquierda
+    fecha: Mapped[str] = mapped_column(String, nullable=False)  # YYYY-MM-DD
+    tipo_venta: Mapped[str] = mapped_column(String, nullable=False)
+    producto: Mapped[str] = mapped_column(String, nullable=False)  # codigo normalizado
+    # Las notas de credito vienen con cantidad POSITIVA; el signo lo pone `ventas_semanales.agregar`.
+    cantidad: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    costo_neto: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)  # unitario
+    doc_ref: Mapped[str] = mapped_column(String, nullable=False, default="")
+    nro_doc_ref: Mapped[str] = mapped_column(String, nullable=False, default="")
+
+    # Sin unique: el origen trae lineas genuinamente repetidas y se guardan todas.
+    __table_args__ = (
+        Index("ix_cd_linea_periodo", "bodega", "periodo"),
+        Index("ix_cd_linea_doc", "bodega", "tipo_docto", "numero"),
     )
 
 
