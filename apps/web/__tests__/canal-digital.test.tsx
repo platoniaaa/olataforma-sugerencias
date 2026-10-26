@@ -153,34 +153,22 @@ describe("EditorPolitica", () => {
 });
 
 describe("CanalDigitalPage", () => {
-  it("abre en Sugerido: pide solo lo que hoy se debe pedir, ordenado por valor, sin filtros de estado", async () => {
-    render(<CanalDigitalPage />);
-    await waitFor(() => expect(mocks.productos).toHaveBeenCalled());
-    expect(mocks.productos.mock.calls[0][1]).toMatchObject({ solo_pide: true, orden: "sugerido" });
-    expect(screen.getByRole("tab", { name: "Sugerido" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.queryByText("Solo los que piden hoy")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Estado")).not.toBeInTheDocument();
-    // el orden de las pestanas es el acordado
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Sugerido", "Clusters", "Productos", "Política"]);
-  });
-
-  it("muestra los totales arriba, lo provisorio y, en Clusters, las validaciones (con la que falla a la vista)", async () => {
+  it("muestra los totales, lo provisorio y las validaciones (con la que falla a la vista)", async () => {
     render(<CanalDigitalPage />);
     expect(await screen.findByText("Piden reposición hoy")).toBeInTheDocument();
     expect(screen.getByText("170")).toBeInTheDocument();
     expect(screen.getByText(/Versión provisoria/)).toBeInTheDocument();
     expect(screen.getByText(/valores del brief/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "Clusters" }));
-    expect(await screen.findByLabelText("Falla")).toBeInTheDocument();
+    expect(screen.getByLabelText("Falla")).toBeInTheDocument();
     expect(screen.getByLabelText("Pasa")).toBeInTheDocument();
     expect(screen.getByText(/196 productos sin proveedor/)).toBeInTheDocument();
   });
 
   it("elegir un cluster lleva a Productos filtrado por ese cluster", async () => {
     render(<CanalDigitalPage />);
-    fireEvent.click(await screen.findByRole("tab", { name: "Clusters" }));
     fireEvent.click(await screen.findByLabelText("Cluster AAA: 30 productos"));
-    await waitFor(() => expect(mocks.productos.mock.calls.some((c) => c[1].cluster === "AAA")).toBe(true));
+    await waitFor(() => expect(mocks.productos).toHaveBeenCalled());
+    expect(mocks.productos.mock.calls[0][1]).toMatchObject({ cluster: "AAA" });
     expect(screen.getByText("Cluster AAA ✕")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Cluster AAA ✕"));
     await waitFor(() => expect(mocks.productos.mock.calls.at(-1)?.[1]).toMatchObject({ cluster: undefined }));
@@ -193,7 +181,6 @@ describe("CanalDigitalPage", () => {
     const { unmount } = render(<CanalDigitalPage />);
     expect(await screen.findByText(/faltan 2 meses cerrados/)).toBeInTheDocument();
     unmount();
-    cleanup();
     mocks.resumen.mockResolvedValue(resumen());
     render(<CanalDigitalPage />);
     await screen.findByText("Piden reposición hoy");

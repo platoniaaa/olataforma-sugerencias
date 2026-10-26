@@ -11,10 +11,9 @@ import { canalDigitalApi, type ResumenCanalDigital } from "@/lib/canal-digital";
 import { formatoCLPCorto, formatoNumero } from "@/lib/formato";
 
 const BODEGA = "430";
-type Pestana = "sugerido" | "clusters" | "productos" | "politica";
+type Pestana = "resumen" | "productos" | "politica";
 const PESTANAS: { id: Pestana; texto: string }[] = [
-  { id: "sugerido", texto: "Sugerido" },
-  { id: "clusters", texto: "Clusters" },
+  { id: "resumen", texto: "Resumen por cluster" },
   { id: "productos", texto: "Productos" },
   { id: "politica", texto: "Política" },
 ];
@@ -25,7 +24,7 @@ const periodoLegible = (p: string | null | undefined) => (p && p.length === 6 ? 
 const fechaLegible = (f: string) => f.split("-").reverse().join("-");
 
 export default function CanalDigitalPage() {
-  const [pestana, setPestana] = useState<Pestana>("sugerido");
+  const [pestana, setPestana] = useState<Pestana>("resumen");
   const [resumen, setResumen] = useState<ResumenCanalDigital | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cluster, setCluster] = useState<string | null>(null);
@@ -76,7 +75,7 @@ export default function CanalDigitalPage() {
       )}
 
       {resumen && resumen.provisorio.length > 0 && (
-        <details className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900">
+        <details className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900" open>
           <summary className="flex cursor-pointer items-center gap-1.5 font-medium">
             <TriangleAlert size={14} /> Versión provisoria: qué todavía no está confirmado
           </summary>
@@ -86,15 +85,6 @@ export default function CanalDigitalPage() {
             ))}
           </ul>
         </details>
-      )}
-
-      {resumen && !sinVentas && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Kpi titulo="Productos" valor={formatoNumero(resumen.totales.productos)} detalle={detalleEstados(resumen)} />
-          <Kpi titulo="Piden reposición hoy" valor={formatoNumero(resumen.totales.productos_que_piden)} />
-          <Kpi titulo="Unidades a pedir" valor={formatoNumero(resumen.totales.unidades_sugeridas)} />
-          <Kpi titulo="Valor al costo" valor={formatoCLPCorto(resumen.totales.sugerido_pesos)} />
-        </div>
       )}
 
       <div role="tablist" aria-label="Secciones" className="flex gap-1 border-b border-slate-200">
@@ -113,10 +103,15 @@ export default function CanalDigitalPage() {
         ))}
       </div>
 
-      {pestana === "sugerido" && <TablaProductos bodega={BODEGA} modo="sugerido" />}
-
-      {pestana === "clusters" && resumen && !sinVentas && (
+      {pestana === "resumen" && resumen && !sinVentas && (
         <div className="space-y-5">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Kpi titulo="Productos" valor={formatoNumero(resumen.totales.productos)} detalle={detalleEstados(resumen)} />
+            <Kpi titulo="Piden reposición hoy" valor={formatoNumero(resumen.totales.productos_que_piden)} />
+            <Kpi titulo="Unidades a pedir" valor={formatoNumero(resumen.totales.unidades_sugeridas)} />
+            <Kpi titulo="Valor al costo" valor={formatoCLPCorto(resumen.totales.sugerido_pesos)} />
+          </div>
+
           <ResumenClusters
             clusters={resumen.clusters}
             seleccionado={cluster}
@@ -153,7 +148,7 @@ export default function CanalDigitalPage() {
       )}
 
       {pestana === "productos" && (
-        <TablaProductos bodega={BODEGA} modo="todos" clusterInicial={cluster} onLimpiarCluster={() => setCluster(null)} />
+        <TablaProductos bodega={BODEGA} clusterInicial={cluster} onLimpiarCluster={() => setCluster(null)} />
       )}
 
       {pestana === "politica" && <EditorPolitica bodega={BODEGA} puedeEditar={puedeEditar} onGuardada={cargar} />}

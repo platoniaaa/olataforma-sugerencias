@@ -71,17 +71,14 @@ def productos(
     estado: str | None = Query(None, description="CLASIFICADO, NUEVO o SIN MOVIMIENTO"),
     q: str | None = Query(None, description="Parte del codigo o de la descripcion"),
     solo_pide: bool = Query(False, description="Solo los que hoy tienen sugerido"),
-    orden: str = Query("ventas", description="ventas (mayor venta primero) o sugerido (mayor valor a pedir primero)"),
     limit: int = Query(500, ge=1, le=5000),
     db: Session = Depends(get_db),
 ) -> dict:
-    if orden not in ("ventas", "sugerido"):
-        raise HTTPException(status_code=400, detail="orden debe ser 'ventas' o 'sugerido'")
     corrida, aviso = _corrida(db, bodega)
-    return {"total": 0, **_filtrar(corrida, cluster, estado, q, solo_pide, limit, orden), "aviso": aviso}
+    return {"total": 0, **_filtrar(corrida, cluster, estado, q, solo_pide, limit), "aviso": aviso}
 
 
-def _filtrar(corrida, cluster, estado, q, solo_pide, limit, orden="ventas") -> dict:
+def _filtrar(corrida, cluster, estado, q, solo_pide, limit) -> dict:
     filas = []
     texto = (q or "").strip().upper()
     for pc in corrida.productos:
@@ -95,20 +92,17 @@ def _filtrar(corrida, cluster, estado, q, solo_pide, limit, orden="ventas") -> d
         if texto and texto not in f["producto"].upper() and texto not in (f["descripcion"] or "").upper():
             continue
         filas.append(f)
-    if orden == "sugerido":
-        filas.sort(key=lambda f: (-(f["sugerido_pesos"] or 0), -(f["sugerido"] or 0), f["producto"]))
-    else:
-        filas.sort(key=lambda f: (-(f["unidades_12m"] or 0), f["producto"]))
+    filas.sort(key=lambda f: (-(f["unidades_12m"] or 0), f["producto"]))
     return {"total": len(filas), "items": filas[:limit]}
 
 
 @router.get("/productos/export-csv")
 def export_csv(
     bodega: str = "430", cluster: str | None = None, estado: str | None = None, q: str | None = None,
-    solo_pide: bool = False, orden: str = "ventas", db: Session = Depends(get_db),
+    solo_pide: bool = False, db: Session = Depends(get_db),
 ):
     corrida, _ = _corrida(db, bodega)
-    datos = _filtrar(corrida, cluster, estado, q, solo_pide, 100_000, "sugerido" if orden == "sugerido" else "ventas")["items"]
+    datos = _filtrar(corrida, cluster, estado, q, solo_pide, 100_000)["items"]
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";")
     cols = list(datos[0].keys()) if datos else ["producto"]

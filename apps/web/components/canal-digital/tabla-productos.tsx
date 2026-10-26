@@ -15,8 +15,6 @@ import {
 
 interface Props {
   bodega: string;
-  /** "sugerido": solo lo que hoy pide, de mayor a menor valor; "todos": cualquier producto con sus filtros. */
-  modo?: "sugerido" | "todos";
   clusterInicial?: string | null;
   onLimpiarCluster?: () => void;
 }
@@ -30,26 +28,18 @@ const NOMBRE_AVISO: Record<string, string> = {
   COMPROMETIDO_SIN_DATO: "El ERP no informa reservas: comprometido 0",
 };
 
-export function TablaProductos({ bodega, modo = "todos", clusterInicial, onLimpiarCluster }: Props) {
-  const sugerido = modo === "sugerido";
+export function TablaProductos({ bodega, clusterInicial, onLimpiarCluster }: Props) {
   const [q, setQ] = useState("");
   const [estado, setEstado] = useState("");
-  const [soloPideManual, setSoloPide] = useState(false);
-  const soloPide = sugerido || soloPideManual;
+  const [soloPide, setSoloPide] = useState(false);
   const [data, setData] = useState<ProductosCanalDigital | null>(null);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [elegido, setElegido] = useState<ProductoCanalDigital | null>(null);
 
   const filtros = useCallback(
-    () => ({
-      cluster: clusterInicial ?? undefined,
-      estado: estado || undefined,
-      q: q.trim() || undefined,
-      solo_pide: soloPide,
-      orden: sugerido ? ("sugerido" as const) : undefined,
-    }),
-    [clusterInicial, estado, q, soloPide, sugerido]
+    () => ({ cluster: clusterInicial ?? undefined, estado: estado || undefined, q: q.trim() || undefined, solo_pide: soloPide }),
+    [clusterInicial, estado, q, soloPide]
   );
 
   const cargar = useCallback(async () => {
@@ -68,7 +58,7 @@ export function TablaProductos({ bodega, modo = "todos", clusterInicial, onLimpi
     cargar();
     // Se vuelve a consultar al cambiar estado, "solo pide" o el cluster; el texto, al apretar Buscar o Enter.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bodega, clusterInicial, estado, soloPide, sugerido]);
+  }, [bodega, clusterInicial, estado, soloPide]);
 
   return (
     <div className="space-y-3">
@@ -83,28 +73,24 @@ export function TablaProductos({ bodega, modo = "todos", clusterInicial, onLimpi
             className="w-64 rounded-md border border-slate-300 px-3 py-1.5 text-[13px]"
           />
         </label>
-        {!sugerido && (
-          <>
-            <label className="block">
-              <span className="mb-1 block text-[12px] font-medium text-slate-600">Estado</span>
-              <select
-                value={estado}
-                onChange={(e) => setEstado(e.target.value)}
-                className="rounded-md border border-slate-300 px-2 py-1.5 text-[13px]"
-              >
-                {ESTADOS.map((s) => (
-                  <option key={s} value={s}>
-                    {s || "Todos"}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex min-h-[34px] items-center gap-2 text-[13px] text-slate-700">
-              <input type="checkbox" checked={soloPideManual} onChange={(e) => setSoloPide(e.target.checked)} />
-              Solo los que piden hoy
-            </label>
-          </>
-        )}
+        <label className="block">
+          <span className="mb-1 block text-[12px] font-medium text-slate-600">Estado</span>
+          <select
+            value={estado}
+            onChange={(e) => setEstado(e.target.value)}
+            className="rounded-md border border-slate-300 px-2 py-1.5 text-[13px]"
+          >
+            {ESTADOS.map((s) => (
+              <option key={s} value={s}>
+                {s || "Todos"}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex min-h-[34px] items-center gap-2 text-[13px] text-slate-700">
+          <input type="checkbox" checked={soloPide} onChange={(e) => setSoloPide(e.target.checked)} />
+          Solo los que piden hoy
+        </label>
         {clusterInicial && (
           <button
             type="button"
@@ -135,10 +121,8 @@ export function TablaProductos({ bodega, modo = "todos", clusterInicial, onLimpi
 
       {data && (
         <p className="text-[12px] text-slate-500">
-          {formatoNumero(data.total)} {sugerido ? "productos para pedir, de mayor a menor valor" : "productos"}
-          {!sugerido && data.total > data.items.length
-            ? ` · se muestran los ${formatoNumero(data.items.length)} de mayor venta`
-            : ""}
+          {formatoNumero(data.total)} productos
+          {data.total > data.items.length ? ` · se muestran los ${formatoNumero(data.items.length)} de mayor venta` : ""}
         </p>
       )}
 
