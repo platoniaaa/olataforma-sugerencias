@@ -3,14 +3,17 @@ import csv
 import datetime as dt
 import importlib.util
 import itertools
+import json
 import math
 import os
 import pathlib
+import threading
 
 import pytest
+from sqlalchemy import event
 
 from src.main import app
-from src.models import CanalDigitalBodega, CanalDigitalLinea, CanalDigitalVenta
+from src.models import AuditoriaLog, CanalDigitalBodega, CanalDigitalLinea, CanalDigitalVenta
 from src.routers import canal_digital as router_cd
 from src.services import canal_digital_service as svc
 from src.canal_digital.ventas_semanales import LineaVenta, agregar, indice_originales
@@ -80,7 +83,14 @@ MALAS = [
     lin(fecha="", periodo="202610"), lin(fecha="20261009", periodo="202610"),
     lin(producto=""), lin(producto="   "), lin(tipo_docto=""),
     lin(cantidad=None), lin(cantidad="abc"), lin(cantidad=float("nan")), lin(cantidad=float("inf")),
-    lin(cantidad=True), lin(costo=float("inf")), lin(costo="x"), "no es un dict", None, 7,
+    lin(cantidad=True), "no es un dict", None, 7,
+    # los que antes pasaban la validacion y reventaban despues, o se guardaban con un periodo no ASCII
+    lin(periodo="20261²"),  # superindice: isdigit() lo acepta, int() lanza
+    lin(periodo="٢٠٢٦١١"),  # digitos arabes
+    lin(periodo="２０２６１０"),  # digitos de ancho completo
+    lin(fecha="2026-10- 9", periodo="202610"), lin(fecha="２０２６-10-09", periodo="202610"),
+    lin(fecha="2026-W41-3", periodo="202610"), lin(cantidad=10 ** 400),
+    {k: v for k, v in lin().items() if k != "costo_neto"},  # sin el campo: es una deriva del contrato, no un blanco
 ]
 
 
@@ -97,6 +107,62 @@ def test_numeros_como_texto_y_costo_ausente_si_valen(db_session):
     assert r["lineas_cargadas"] == 2
     por = {l.numero: l for l in db_session.query(CanalDigitalLinea).all()}
     assert por["1"].cantidad == 3.0 and por["1"].costo_neto == 5600.5 and por["2"].costo_neto == 0.0
+
+
+def test_un_costo_que_no_sirve_no_pierde_las_unidades(db_session):
+    """Un Costo Neto en blanco que pandas manda como NaN (o texto, o infinito) vale 0: la venta no se descarta."""
+    r = svc.reemplazar_lineas(db_session, "430", [
+        lin(numero="1", cantidad=3, costo=float("nan")), lin(numero="2", costo=float("inf")), lin(numero="3", costo="x"),
+        lin(numero="4", costo=""), lin(numero="5", costo=None), lin(numero="6", costo=100.0),
+    ])
+    assert r["lineas_cargadas"] == 6 and r["lineas_ignoradas"] == 0
+    assert r["estadisticas"]["ignoradas_invalidas"] == 0 and r["estadisticas"]["costo_en_cero"] == 5
+    por = {l.numero: l.costo_neto for l in db_session.query(CanalDigitalLinea).all()}
+    assert por == {"1": 0.0, "2": 0.0, "3": 0.0, "4": 0.0, "5": 0.0, "6": 100.0}
+    assert _ventas(db_session)[("P1", "2026-10-12", "202610")][:3] == (8.0, 0.0, 100.0)  # 3+1+1+1+1+1 unidades
+
+
+def test_un_nan_en_el_json_del_envio_tampoco_pierde_la_linea(client, db_session):
+    app.dependency_overrides[requiere_admin] = lambda: "motor"
+    cuerpo = json.dumps({"bodega": "430", "lineas": [lin(cantidad=3, costo=float("nan"))]})  # json.dumps escribe NaN
+    r = client.post("/api/canal-digital/lineas", content=cuerpo, headers={"Content-Type": "application/json"})
+    assert r.status_code == 200, r.text
+    assert r.json()["lineas_cargadas"] == 1 and r.json()["lineas_ignoradas"] == 0
+    assert _ventas(db_session)[("P1", "2026-10-12", "202610")][0] == 3.0
+
+
+@pytest.mark.parametrize("fecha", ["2026-10-14T00:00:00", "2026-10-14 00:00:00", "2026-10-14T00:00:00.000Z"])
+def test_una_fecha_con_hora_se_acepta_y_se_guarda_solo_la_fecha(db_session, fecha):
+    r = svc.reemplazar_lineas(db_session, "430", [lin(fecha=fecha, periodo="202610")])
+    assert r["lineas_cargadas"] == 1 and r["lineas_ignoradas"] == 0
+    assert db_session.query(CanalDigitalLinea).one().fecha == "2026-10-14"
+    assert list(_ventas(db_session)) == [("P1", "2026-10-12", "202610")]
+
+
+def test_un_periodo_como_texto_con_punto_cero_se_acepta(db_session):
+    r = svc.reemplazar_lineas(db_session, "430", [lin(periodo="202610.0"), lin(numero="2", periodo=202610.0)])
+    assert r["lineas_cargadas"] == 2 and r["periodos"] == ["202610"]
+    assert {l.periodo for l in db_session.query(CanalDigitalLinea).all()} == {"202610"}
+
+
+def test_si_todas_las_lineas_son_invalidas_el_endpoint_responde_422_y_dice_que_campo(client, db_session):
+    app.dependency_overrides[requiere_admin] = lambda: "motor"
+    svc.reemplazar_lineas(db_session, "430", [lin(numero="1")])
+    antes = (_lineas(db_session), _ventas(db_session))
+    # el motor renombro un campo del contrato: ninguna linea sirve
+    mala ={k: v for k, v in lin().items() if k != "cantidad"}
+    r = client.post("/api/canal-digital/lineas", json={"bodega": "430", "lineas": [mala, mala]})
+    assert r.status_code == 422, r.text
+    detalle = r.json()["detail"]
+    assert detalle["estadisticas"]["invalida_campo:cantidad"] == 2 and detalle["estadisticas"]["ignoradas_invalidas"] == 2
+    assert (_lineas(db_session), _ventas(db_session)) == antes
+    # un envio vacio, o que solo trae otros tipos de venta, sigue siendo un 200 sin cambios
+    assert client.post("/api/canal-digital/lineas", json={"lineas": []}).status_code == 200
+    assert client.post("/api/canal-digital/lineas", json={"lineas": [lin(tipo_venta="VTA CNT")]}).status_code == 200
+    # y si solo algunas son invalidas, entra lo que sirve y la respuesta lo cuenta por campo
+    r = client.post("/api/canal-digital/lineas", json={"lineas": [lin(numero="2"), mala]})
+    assert r.status_code == 200 and r.json()["lineas_ignoradas"] == 1
+    assert r.json()["estadisticas"]["invalida_campo:cantidad"] == 1
 
 
 # ---------------------------------------------------------------- reemplazo por periodo
@@ -218,6 +284,182 @@ def test_recalcular_deja_la_venta_de_periodos_sin_lineas_salvo_que_se_pida_todo(
     assert list(_ventas(db_session)) == [("P1", "2026-10-12", "202610")] and r["filas_venta"] == 1
 
 
+# ---------------------------------------------------------------- que mes hay de cada cosa (/meta)
+
+def test_meta_dice_hasta_que_mes_hay_lineas_aunque_la_venta_venga_de_la_ruta_vieja(client, db_session):
+    app.dependency_overrides[requiere_admin] = lambda: "motor"
+    vacio = client.get("/api/canal-digital/meta").json()
+    assert (vacio["n_lineas"], vacio["lineas_periodo_desde"], vacio["lineas_periodo_hasta"]) == (0, None, None)
+    # octubre llego como venta ya agregada (ruta /ventas): hay venta hasta 202610 pero ninguna linea
+    fila = {"producto": "P1", "semana": "2026-10-12", "periodo": "202610", "unid_brutas": 5, "unid_devueltas": 0,
+            "valor_costo": 500, "unid_liquidacion": 0, "n_lineas": 2}
+    assert client.post("/api/canal-digital/ventas", json={"bodega": "430", "filas": [fila]}).status_code == 200
+    m = client.get("/api/canal-digital/meta").json()
+    assert m["periodo_hasta"] == "202610"  # la venta
+    assert (m["n_lineas"], m["lineas_periodo_desde"], m["lineas_periodo_hasta"]) == (0, None, None)  # las lineas
+    client.post("/api/canal-digital/lineas", json={"lineas": [lin("2026-08-10", numero="1"), lin("2026-09-10", numero="2"),
+                                                              lin("2026-09-11", numero="3")]})
+    m = client.get("/api/canal-digital/meta").json()
+    assert m["periodo_hasta"] == "202610"
+    assert (m["n_lineas"], m["lineas_periodo_desde"], m["lineas_periodo_hasta"]) == (3, "202608", "202609")
+    # otra bodega no mezcla
+    otra = client.get("/api/canal-digital/meta?bodega=999").json()
+    assert (otra["n_lineas"], otra["lineas_periodo_hasta"]) == (0, None)
+
+
+# ---------------------------------------------------------------- un envio no pisa en silencio lo cargado
+
+def test_la_respuesta_dice_cuantas_lineas_tenia_cada_periodo_antes_y_despues(db_session):
+    r = svc.reemplazar_lineas(db_session, "430", [lin("2026-09-10", numero="1"), lin("2026-09-11", numero="2")])
+    assert r["reemplazo"] == {"202609": {"antes": 0, "despues": 2}}
+    r = svc.reemplazar_lineas(db_session, "430", [lin("2026-09-12", numero="3"), lin("2026-10-14", numero="4")])
+    assert r["reemplazo"] == {"202609": {"antes": 2, "despues": 1}, "202610": {"antes": 0, "despues": 1}}
+    assert svc.reemplazar_lineas(db_session, "430", [])["reemplazo"] == {}
+
+
+def _mes_grande(db_session, n=30):
+    svc.reemplazar_lineas(db_session, "430", [lin("2026-09-10", numero=str(i), producto=f"P{i}") for i in range(n)])
+
+
+def test_una_linea_rezagada_no_borra_un_mes_completo_sin_forzar(db_session):
+    _mes_grande(db_session)
+    antes = (_lineas(db_session), _ventas(db_session))
+    with pytest.raises(svc.ConflictoCarga) as e:
+        svc.reemplazar_lineas(db_session, "430", [lin("2026-09-30", numero="999"), lin("2026-10-14", numero="1000")])
+    assert e.value.detalle["periodos"] == {"202609": {"antes": 30, "despues": 1}}
+    assert (_lineas(db_session), _ventas(db_session)) == antes  # ni el mes sospechoso ni el nuevo
+    # con forzar el reemplazo se hace, y queda dicho en la respuesta
+    r = svc.reemplazar_lineas(db_session, "430", [lin("2026-09-30", numero="999")], forzar=True)
+    assert r["reemplazo"] == {"202609": {"antes": 30, "despues": 1}}
+    assert db_session.query(CanalDigitalLinea).count() == 1
+
+
+def test_reenviar_el_mes_completo_o_con_pocas_menos_lineas_no_es_sospechoso(db_session):
+    _mes_grande(db_session)
+    r = svc.reemplazar_lineas(db_session, "430", [lin("2026-09-10", numero=str(i), producto=f"P{i}") for i in range(16)])
+    assert r["reemplazo"] == {"202609": {"antes": 30, "despues": 16}}  # justo la mitad o mas: pasa
+    # un mes chico no dispara la guarda: 3 lineas a 1 es ruido, no un accidente
+    svc.reemplazar_lineas(db_session, "430", [lin("2026-08-10", numero=str(i)) for i in range(3)])
+    assert svc.reemplazar_lineas(db_session, "430", [lin("2026-08-10", numero="9")])["lineas_cargadas"] == 1
+
+
+def test_el_endpoint_responde_409_con_el_detalle_y_acepta_forzar_y_deja_auditoria(client, db_session):
+    app.dependency_overrides[requiere_admin] = lambda: "motor"
+    _mes_grande(db_session)
+    r = client.post("/api/canal-digital/lineas", json={"lineas": [lin("2026-09-30", numero="999")]})
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["periodos"] == {"202609": {"antes": 30, "despues": 1}}
+    assert db_session.query(AuditoriaLog).filter_by(accion="canal_digital_lineas").count() == 0
+    r = client.post("/api/canal-digital/lineas", json={"lineas": [lin("2026-09-30", numero="999")], "forzar": True})
+    assert r.status_code == 200 and r.json()["reemplazo"] == {"202609": {"antes": 30, "despues": 1}}
+    log = db_session.query(AuditoriaLog).filter_by(accion="canal_digital_lineas").one()
+    assert (log.entidad, log.entidad_id, log.usuario_email) == ("canal_digital", "430", "motor")
+    assert "202609 (30 -> 1)" in log.detalle and "1 lineas" in log.detalle
+    # "forzar" tiene que ser el booleano true, no cualquier cosa que parezca verdadera
+    _mes_grande(db_session)
+    assert client.post("/api/canal-digital/lineas",
+                       json={"lineas": [lin("2026-09-30", numero="9")], "forzar": "true"}).status_code == 409
+
+
+def test_la_ruta_vieja_de_ventas_no_pisa_un_periodo_que_ya_tiene_lineas(client, db_session):
+    app.dependency_overrides[requiere_admin] = lambda: "motor"
+    client.post("/api/canal-digital/lineas", json={"lineas": [lin("2026-10-14", cantidad=3)]})
+    fila = {"producto": "P1", "semana": "2026-10-12", "periodo": "202610", "unid_brutas": 50, "unid_devueltas": 0,
+            "valor_costo": 5000, "unid_liquidacion": 0, "n_lineas": 1}
+    otra = {**fila, "semana": "2026-09-14", "periodo": "202609"}
+    antes = _ventas(db_session)
+    r = client.post("/api/canal-digital/ventas", json={"bodega": "430", "filas": [otra, fila]})
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["periodos_con_lineas"] == ["202610"]
+    assert _ventas(db_session) == antes  # ni siquiera el periodo que si se podia cargar
+    # un periodo sin lineas sigue entrando, y el siguiente /lineas no lo toca
+    assert client.post("/api/canal-digital/ventas", json={"bodega": "430", "filas": [otra]}).status_code == 200
+    client.post("/api/canal-digital/lineas", json={"lineas": [lin("2026-10-15", numero="2", cantidad=4)]})
+    assert _ventas(db_session)[("P1", "2026-09-14", "202609")][0] == 50.0
+
+
+# ---------------------------------------------------------------- cuanto se escribe en cada envio
+
+def _contar_viajes(db_session):
+    """Cuenta los viajes que un INSERT en las tablas de lineas y de venta le cuesta al driver: un `executemany` con
+    lista de filas es un viaje POR FILA en pg8000; un INSERT de varias filas con RETURNING (insertmanyvalues) es uno."""
+    visto = {"viajes": 0, "inserts": 0}
+
+    def _antes(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith(("INSERT INTO CANAL_DIGITAL_LINEA", "INSERT INTO CANAL_DIGITAL_VENTA")):
+            visto["inserts"] += 1
+            visto["viajes"] += len(parameters) if isinstance(parameters, list) else 1
+
+    engine = db_session.get_bind()
+    event.listen(engine, "before_cursor_execute", _antes)
+    return visto, lambda: event.remove(engine, "before_cursor_execute", _antes)
+
+
+def test_los_inserts_no_van_fila_por_fila(db_session):
+    """En Postgres con pg8000 un executemany sin RETURNING es un viaje a la base por fila."""
+    visto, quitar = _contar_viajes(db_session)
+    try:
+        lineas = [lin("2026-10-14", numero=str(i), producto=f"P{i}") for i in range(2500)]
+        r = svc.reemplazar_lineas(db_session, "430", lineas)
+    finally:
+        quitar()
+    assert r["lineas_cargadas"] == 2500 and r["filas_venta"] == 2500
+    assert 0 < visto["viajes"] < 25, visto  # por lotes de varias filas, no uno por fila (antes: 5.000)
+
+
+def test_un_envio_solo_escribe_lo_que_cambio_de_la_venta(db_session):
+    mes_viejo = [lin("2026-09-10", numero=str(i), producto=f"P{i}") for i in range(400)]
+    mes_nuevo = [lin("2026-10-14", numero=str(i), producto=f"P{i}") for i in range(400)]
+    svc.reemplazar_lineas(db_session, "430", mes_viejo)
+    r = svc.reemplazar_lineas(db_session, "430", mes_nuevo)
+    est = r["estadisticas"]
+    assert r["filas_venta"] == 800 and est["filas_recalculadas"] == 800
+    assert est["filas_escritas"] == 400 and est["filas_sin_cambio"] == 400  # septiembre no se reescribe
+    ids = {(v.producto, v.periodo): v.id for v in db_session.query(CanalDigitalVenta).all()}
+    # reenviar el mismo mes no cambia nada
+    r = svc.reemplazar_lineas(db_session, "430", mes_nuevo)
+    assert r["estadisticas"]["filas_escritas"] == 0 and r["estadisticas"]["filas_sin_cambio"] == 800
+    assert {(v.producto, v.periodo): v.id for v in db_session.query(CanalDigitalVenta).all()} == ids
+    # una linea cambiada de octubre reescribe una sola fila; la que desaparece se borra
+    cambiado = [lin("2026-10-14", numero="0", producto="P0", cantidad=9)] + mes_nuevo[2:]
+    r = svc.reemplazar_lineas(db_session, "430", cambiado)
+    assert r["estadisticas"]["filas_escritas"] == 1 and r["filas_venta"] == 799
+    venta = _ventas(db_session)
+    assert venta[("P0", "2026-10-12", "202610")][0] == 9.0 and ("P1", "2026-10-12", "202610") not in venta
+    assert len({k for k in venta if k[2] == "202609"}) == 400
+
+
+def test_la_devolucion_de_un_mes_nuevo_mueve_solo_la_fila_de_la_semana_que_anula(db_session):
+    svc.reemplazar_lineas(db_session, "430", [lin("2026-10-14", numero="10", cantidad=4),
+                                              lin("2026-10-15", numero="11", producto="P2")])
+    r = svc.reemplazar_lineas(db_session, "430", [nc("2026-11-03", ref="10", cantidad=4)])
+    assert r["estadisticas"]["filas_escritas"] == 1 and r["estadisticas"]["filas_sin_cambio"] == 2
+    assert _ventas(db_session) == {
+        ("P1", "2026-10-12", "202610"): (4.0, 0.0, 400.0, 0.0, 1),
+        ("P2", "2026-10-12", "202610"): (1.0, 0.0, 100.0, 0.0, 1),
+        ("P1", "2026-10-12", "202611"): (0.0, 4.0, -400.0, 0.0, 1),
+    }
+
+
+# ---------------------------------------------------------------- un envio a la vez
+
+def test_dos_envios_a_la_vez_se_ponen_en_fila(db_session):
+    """El reintento del motor sobre un envio que sigue en curso espera al primero en vez de pisarlo."""
+    terminado = threading.Event()
+
+    def envio():
+        svc.reemplazar_lineas(db_session, "430", [lin()])
+        terminado.set()
+
+    with svc.CARGA_CANAL_DIGITAL:  # alguien esta cargando
+        hilo = threading.Thread(target=envio)
+        hilo.start()
+        assert not terminado.wait(0.3)
+    assert terminado.wait(10)
+    hilo.join()
+    assert db_session.query(CanalDigitalLinea).count() == 1
+
+
 # ---------------------------------------------------------------- atomicidad
 
 def _boom(*a, **k):
@@ -259,7 +501,7 @@ def test_endpoint_de_lineas_carga_y_meta_lo_ve(client, db_session):
     assert r.status_code == 200, r.text
     j = r.json()
     assert (j["lineas_cargadas"], j["lineas_ignoradas"], j["periodos"], j["filas_venta"]) == (2, 1, ["202610"], 2)
-    assert set(j) == {"lineas_cargadas", "lineas_ignoradas", "periodos", "filas_venta", "estadisticas"}
+    assert set(j) == {"lineas_cargadas", "lineas_ignoradas", "periodos", "reemplazo", "filas_venta", "estadisticas"}
     m = client.get("/api/canal-digital/meta").json()
     assert m["filas"] == 2 and m["productos"] == 2 and m["periodo_hasta"] == "202610"
 
@@ -361,6 +603,39 @@ def test_el_script_publica_y_la_plataforma_arma_lo_mismo_que_la_regla_local(clie
     assert guardado == {k: pytest.approx(v) for k, v in esperado.items()}
     # la devolucion de noviembre quedo en la semana de la venta de octubre
     assert ("20 BXO5W30AA", "2026-10-12", "202611") in guardado
+
+
+def test_el_script_avisa_cuantas_lineas_dejo_fuera_por_no_tener_periodo(script, capsys):
+    sin = [LineaVenta(p, "FA-ELECTR REPTO", "1", dt.date(2026, 10, 1), "VTA ML", "P9", 1.0, 1.0)
+           for p in ("None", "", "2026-10", "٢٠٢٦١١")]
+    por_mes = script.lineas_por_mes(_lineas_del_erp() + sin)
+    assert list(por_mes) == ["202610", "202611"] and [len(v) for v in por_mes.values()] == [2, 2]
+    assert "4 lineas sin periodo YYYYMM" in capsys.readouterr().err
+    script.lineas_por_mes(_lineas_del_erp())
+    assert capsys.readouterr().err == ""
+
+
+def _respuesta(cargadas, ignoradas, **est):
+    return {"lineas_cargadas": cargadas, "lineas_ignoradas": ignoradas, "periodos": [], "reemplazo": {},
+            "filas_venta": 0, "estadisticas": {"ignoradas_invalidas": 0, "ignoradas_tipo_venta": 0, **est}}
+
+
+@pytest.mark.parametrize("respuesta", [
+    _respuesta(3, 1, ignoradas_invalidas=1, **{"invalida_campo:fecha": 1}),  # una linea mal formada
+    _respuesta(0, 4, ignoradas_tipo_venta=4),  # el servidor no reconocio ninguna como del canal
+])
+def test_el_script_se_detiene_si_la_plataforma_ignora_lineas_que_el_envio_si_traia(script, monkeypatch, respuesta):
+    enviados = []
+    monkeypatch.setattr(script, "_enviar", lambda ruta, cuerpo: enviados.append(cuerpo) or respuesta)
+    with pytest.raises(SystemExit) as e:
+        script.publicar_lineas(script.lineas_por_mes(_lineas_del_erp()), "430")
+    assert "202610" in str(e.value) and "corrige el origen" in str(e.value)
+    assert len(enviados) == 1  # no sigue con noviembre
+
+
+def test_el_script_sigue_si_no_se_ignoro_nada(script, monkeypatch):
+    monkeypatch.setattr(script, "_enviar", lambda ruta, cuerpo: _respuesta(len(cuerpo["lineas"]), 0))
+    assert len(script.publicar_lineas(script.lineas_por_mes(_lineas_del_erp()), "430")) == 2
 
 
 def test_el_script_no_sale_a_la_red_sin_las_variables_de_entorno(script, monkeypatch):

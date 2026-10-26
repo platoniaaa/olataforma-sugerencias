@@ -8,10 +8,13 @@ Por defecto NO publica nada: escribe un CSV con las filas y muestra el resumen. 
 publicar, el motor llama como admin (variables CANAL_DIGITAL_API y CANAL_DIGITAL_TOKEN, nunca
 por argumento) a uno de dos endpoints:
 
-  --publicar         POST /api/canal-digital/ventas: las filas ya agregadas.
+  --publicar         POST /api/canal-digital/ventas: las filas ya agregadas (ruta heredada: un periodo
+                     que ya tiene lineas responde 409).
   --publicar-lineas  POST /api/canal-digital/lineas: las lineas del ERP, UN envio por mes (el
                      endpoint reemplaza el periodo que viene) y la plataforma recalcula la venta
                      completa, de modo que una devolucion de un mes encuentre su venta de otro mes.
+                     Se detiene si la plataforma ignora lineas; un 409 es un envio que dejaria un mes
+                     con menos de la mitad de sus lineas (no se carga nada).
 
     python scripts/canal_digital_cargar_ventas.py --carpeta "<...>/Bases de datos/Ventas" \
         --anios 2025 2026 --salida ventas_canal.csv
@@ -146,26 +149,45 @@ def lineas_por_mes(lineas: list[LineaVenta], desde_periodo: str | None = None) -
     """periodo -> sus lineas en formato del contrato. El endpoint reemplaza el periodo entero: un mes no se parte.
 
     Con `desde_periodo` los meses anteriores no se envian: tienen que estar ya cargados en la plataforma para que
-    una devolucion de un mes nuevo encuentre su venta. Las lineas sin periodo YYYYMM se dejan fuera.
+    una devolucion de un mes nuevo encuentre su venta. Las lineas sin periodo YYYYMM no se pueden asignar a un mes:
+    se dejan fuera y se avisa cuantas.
     """
     por_mes: dict[str, list[dict]] = {}
+    sin_periodo = 0
     for l in lineas:
-        if len(l.periodo) != 6 or not l.periodo.isdigit():
+        if len(l.periodo) != 6 or not (l.periodo.isascii() and l.periodo.isdigit()):
+            sin_periodo += 1
             continue
         if desde_periodo and l.periodo < desde_periodo:
             continue
         por_mes.setdefault(l.periodo, []).append(linea_a_dict(l))
+    if sin_periodo:
+        print(f"AVISO: {sin_periodo:,} lineas sin periodo YYYYMM quedaron fuera del envio.", file=sys.stderr, flush=True)
     return dict(sorted(por_mes.items()))
 
 
 def publicar_lineas(por_mes: dict[str, list[dict]], bodega: str) -> list[dict]:
-    """Un envio por mes, del mas antiguo al mas nuevo. Devuelve la respuesta de cada uno."""
+    """Un envio por mes, del mas antiguo al mas nuevo. Devuelve la respuesta de cada uno.
+
+    Se detiene si la plataforma ignora alguna linea (campo mal formado) o no carga ninguna de las enviadas: el mes
+    ya quedo reemplazado con lo que si sirvio, asi que hay que corregir el origen y repetir (el envio es idempotente).
+    """
     respuestas = []
     for periodo, lineas in por_mes.items():
         r = _enviar("/api/canal-digital/lineas", {"bodega": bodega, "lineas": lineas})
-        print(f"  {periodo}: {r['lineas_cargadas']:,} lineas ({r['lineas_ignoradas']:,} ignoradas), "
+        antes = r.get("reemplazo", {}).get(periodo, {}).get("antes")
+        tenia = "" if antes is None else f", el mes tenia {antes:,}"
+        print(f"  {periodo}: {r['lineas_cargadas']:,} lineas ({r['lineas_ignoradas']:,} ignoradas{tenia}), "
               f"{r['filas_venta']:,} filas de venta", flush=True)
         respuestas.append(r)
+        est = r.get("estadisticas", {})
+        if est.get("ignoradas_invalidas") or (lineas and not r["lineas_cargadas"]):
+            campos = {k.split(":", 1)[1]: v for k, v in est.items() if k.startswith("invalida_campo:")}
+            raise SystemExit(
+                f"{periodo}: la plataforma ignoro {r['lineas_ignoradas']:,} de {len(lineas):,} lineas "
+                f"(invalidas por campo: {campos or 'sin detalle'}; de otro tipo de venta: "
+                f"{est.get('ignoradas_tipo_venta', 0)}). Se detiene el envio: corrige el origen y repite."
+            )
     return respuestas
 
 
