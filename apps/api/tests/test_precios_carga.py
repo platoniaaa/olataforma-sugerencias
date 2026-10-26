@@ -76,7 +76,10 @@ def test_el_archivo_para_editar_trae_las_columnas_y_la_referencia(client, lista)
     filas = _bajar(client)
     cab = filas[0]
 
-    assert cab[-4:] == ["Obs", "Congelar", "No es producto", "Referencia"]
+    # Cambia a proposito (20-10-2026): al final se agregan Precio fijo, Margen fijo %, Desde,
+    # Hasta y Vigencia. El orden completo de las 25 esta en test_precios_carga_v2.py.
+    assert cab[-9:] == ["Obs", "Congelar", "No es producto", "Precio fijo", "Margen fijo %",
+                        "Desde", "Hasta", "Vigencia", "Referencia"]
     assert {"Producto", "Tipo", "Procedencia", "Factor", "Precio final", "Estado"} <= set(cab)
     por = {f[0]: dict(zip(cab, f)) for f in filas[1:]}
     aaa1 = por["71 AAA1"]
@@ -84,10 +87,14 @@ def test_el_archivo_para_editar_trae_las_columnas_y_la_referencia(client, lista)
     assert aaa1["Congelar"] == "No" and aaa1["No es producto"] == "No"
     # La referencia lleva lo que mostraba el archivo (la observacion, como huella), la
     # huella de las decisiones de las personas y la huella del codigo.
+    # Cambia a proposito (20-10-2026): la Referencia v2 tiene 14 partes (la v1, 10): suma las
+    # cuatro columnas de precio fijo, margen fijo, desde y hasta antes de la huella de las
+    # decisiones.
     partes = aaa1["Referencia"].split("|")
-    assert len(partes) == 10 and partes[0] == carga._h("71 AAA1")        # el codigo, primero
+    assert len(partes) == 14 and partes[0] == carga._h("71 AAA1")        # el codigo, primero
     assert partes[1:8] == ["Liviano", "Nacional", "1.78", "17800", carga._h(""), carga._h(""), "0"]
     assert partes[8] == "0"
+    assert partes[9:13] == ["", "", "", ""]                               # sin decision ni periodo
     # Lo que decidio una persona se ve en su fila.
     assert por["13 BBB2"]["Obs"] == "piso" and por["13 BBB2"]["Precio final"] == "990"
     assert por["71 CCC3"]["Congelar"] == "Sí"

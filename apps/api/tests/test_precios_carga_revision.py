@@ -273,8 +273,9 @@ def test_si_alguien_edita_justo_entre_comparar_y_escribir_no_se_pisa(client, lis
     filas = _editar(_bajar(client), "71 AAA1", Tipo="Pesado")
     real = carga.planificar
 
-    def con_carrera(db, nombre, contenido):
-        plan = real(db, nombre, contenido)
+    # Cambia a proposito (20-10-2026): `planificar` recibe `modo` (corto | completo | auto).
+    def con_carrera(db, nombre, contenido, modo="auto"):
+        plan = real(db, nombre, contenido, modo)
         db.add(PrecioOverride(tenant_id="curifor", producto="71 AAA1", obs="de otra persona"))
         db.commit()                                  # otra persona edita la ficha despues de comparar
         return plan
@@ -292,8 +293,8 @@ def test_un_producto_que_se_borra_entre_comparar_y_escribir_no_da_500(client, li
     filas = _editar(_bajar(client), "71 AAA1", Tipo="Pesado")
     real = carga.planificar
 
-    def con_carrera(db, nombre, contenido):
-        plan = real(db, nombre, contenido)
+    def con_carrera(db, nombre, contenido, modo="auto"):     # ver arriba: `planificar` recibe `modo`
+        plan = real(db, nombre, contenido, modo)
         db.query(PrecioProducto).filter_by(producto="71 AAA1").delete()
         db.commit()
         return plan

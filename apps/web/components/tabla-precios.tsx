@@ -7,12 +7,16 @@ import { ExternalLink, Trash2 } from "lucide-react";
 import { COLUMNAS_PRECIOS, claseEstado, type DefColPrecio } from "@/lib/columnas-precios";
 import { formatoCLP, formatoFecha, formatoNumero } from "@/lib/formato";
 import type { PrecioRow } from "@/lib/types";
+import { compararVencimiento, decisionRige, etiquetaVigencia } from "@/lib/vigencia";
+import { ChipVigencia } from "@/components/chip-vigencia";
 import { FiltroMultiSelect } from "@/components/filtro-multiselect";
 
 interface Props {
   rows: PrecioRow[];
   columnasVisibles: string[];
   onFila: (fila: PrecioRow) => void;
+  /** La fecha de hoy en Chile, del servidor, para el chip de vigencia. */
+  hoy?: string;
   /** Con clic derecho sobre una fila. Si no viene, el usuario no puede editar y
    *  el menu solo ofrece abrir la ficha. */
   onEliminar?: (fila: PrecioRow) => void;
@@ -47,7 +51,7 @@ function formateador(def: DefColPrecio) {
   };
 }
 
-function colDef(def: DefColPrecio): ColDef {
+export function colDef(def: DefColPrecio, hoy?: string): ColDef {
   const numerica = ["clp", "numero", "decimal", "pct"].includes(def.tipo);
   const base: ColDef = {
     field: def.key as string,
@@ -56,7 +60,8 @@ function colDef(def: DefColPrecio): ColDef {
     pinned: def.pin,
     sortable: true,
     resizable: true,
-    minWidth: def.tipo === "texto" ? 130 : 110,
+    minWidth: def.ancho ?? (def.tipo === "texto" ? 130 : 110),
+    width: def.ancho,
     flex: def.key === "glosa" ? 2 : undefined,
     valueFormatter: formateador(def),
   };
@@ -72,6 +77,22 @@ function colDef(def: DefColPrecio): ColDef {
   if (def.key === "cambios_pendientes") {
     base.cellRenderer = CambiosCell;
     base.cellClass = "text-center";
+  }
+  // La vigencia se dibuja con el chip (ícono + palabra), que lee varias columnas de la fila;
+  // por eso el renderer usa p.data. Ordena por la fecha de termino con los vacios SIEMPRE al
+  // final, y el filtro de la columna lista lo que se ve («Fijo hasta 30-11»), no fechas crudas.
+  if (def.tipo === "vigencia") {
+    base.cellRenderer = (p: { data?: PrecioRow }) => (p.data ? <ChipVigencia fila={p.data} hoy={hoy} /> : null);
+    // El chip ya trae su propio aire: con el relleno normal de la celda «Programado desde 05-11» no cabe en 180 px.
+    base.cellStyle = { paddingLeft: "6px", paddingRight: "6px" };
+    base.comparator = (a: string | null, b: string | null, _na: unknown, _nb: unknown, descendente: boolean) =>
+      compararVencimiento(a, b, descendente);
+    base.filterValueGetter = (p: { data?: PrecioRow }) => (p.data ? etiquetaVigencia(p.data, hoy)?.texto ?? "" : "");
+  }
+  // Precio fijo y Congelado son la decision GUARDADA. Una programada o vencida no es el precio
+  // de nadie: mostrarla en estas columnas haria creer que rige (la ficha si la muestra).
+  if (def.key === "precio_fijo" || def.key === "congelar") {
+    base.valueGetter = (p: { data?: PrecioRow }) => (p.data && decisionRige(p.data) ? p.data[def.key] ?? null : null);
   }
   return base;
 }
@@ -94,7 +115,7 @@ function CambiosCell(p: { value: number | null }) {
   );
 }
 
-export function TablaPrecios({ rows, columnasVisibles, onFila, onEliminar }: Props) {
+export function TablaPrecios({ rows, columnasVisibles, onFila, onEliminar, hoy }: Props) {
   const gridRef = useRef<AgGridReact<PrecioRow>>(null);
   // AG Grid Community no trae menu contextual (es de la version paga), asi que
   // se dibuja uno propio sobre el clic derecho de la fila.
@@ -127,8 +148,8 @@ export function TablaPrecios({ rows, columnasVisibles, onFila, onEliminar }: Pro
   };
 
   const columnDefs = useMemo<ColDef[]>(
-    () => COLUMNAS_PRECIOS.filter((c) => columnasVisibles.includes(c.key as string)).map(colDef),
-    [columnasVisibles]
+    () => COLUMNAS_PRECIOS.filter((c) => columnasVisibles.includes(c.key as string)).map((c) => colDef(c, hoy)),
+    [columnasVisibles, hoy]
   );
 
   const defaultColDef = useMemo<ColDef>(

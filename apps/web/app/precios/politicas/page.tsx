@@ -584,7 +584,8 @@ export default function PoliticasPreciosPage() {
                             No cambian
                             {r.por_glosa > 0 ? ` ${formatoNumero(r.por_glosa)} neumáticos (por su glosa)` : ""}
                             {r.por_glosa > 0 && r.decididos > 0 ? " ni" : ""}
-                            {r.decididos > 0 ? ` ${formatoNumero(r.decididos)} con precio fijo, congelado o margen fijo` : ""}.
+                            {/* Solo los que rigen hoy: uno programado o vencido sigue la regla, y la política sí lo mueve. */}
+                            {r.decididos > 0 ? ` ${formatoNumero(r.decididos)} con precio fijo, congelado o margen fijo vigente` : ""}.
                           </p>
                         )}
                       </div>

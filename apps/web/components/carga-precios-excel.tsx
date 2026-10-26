@@ -1,47 +1,35 @@
 "use client";
 
-// Editar la lista de precios en Excel: se baja el archivo, se edita y se vuelve a
-// cargar. Antes de guardar se ve que cambia, producto por producto.
+// Editar la lista de precios en Excel, con DOS modos que la persona elige:
 //
-// El archivo que se sube es el que se bajo aca: trae una columna "Referencia" con los
-// valores que tenia cada producto al bajarlo. Con ella el servidor sabe QUE cambio la
-// persona (y no confunde con edicion lo que el motor recalculo de noche), a que
-// producto pertenece cada fila y si otra persona edito el producto mientras tanto.
+// - Excel corto: se baja una plantilla vacia (Codigo, Precio fijo, Desde, Hasta, Obs), se llena
+//   con los pocos productos que se quieren tocar y se sube. Se aplica TAL CUAL, solo a esos codigos.
+// - Excel completo: se baja la lista entera, se edita (once columnas se pueden tocar) y se sube.
+//
+// El archivo completo trae una columna "Referencia" con los valores que tenia cada producto al
+// bajarlo. Con ella el servidor sabe QUE cambio la persona (y no confunde con edicion lo que el
+// motor recalculo de noche), a que producto pertenece cada fila y si otra persona edito el
+// producto mientras tanto. El corto no la necesita: no compara contra una descarga.
+//
+// Los dos modos comparten el paso de subir el archivo y la vista previa "Qué cambia", antes de
+// guardar. El modo se declara al servidor (si el archivo no es de ese modo, da un error claro en
+// vez de cargarlo como otra cosa), se recuerda en el navegador y, al cambiarlo, se descarta lo que
+// habia a medias.
 import { useEffect, useRef, useState } from "react";
-import { AlertCircle, CheckCircle2, Download, FileSpreadsheet, Loader2, Upload } from "lucide-react";
+import { AlertCircle, CheckCircle2, FileSpreadsheet, Loader2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { api } from "@/lib/api-client";
 import { formatoNumero } from "@/lib/formato";
-import type { CargaPreciosError, CargaPreciosResultado, CargaPreciosVistaPrevia } from "@/lib/types";
+import type { CargaPreciosResultado, CargaPreciosVistaPrevia, ModoCarga } from "@/lib/types";
+import { PasosCompleto } from "@/components/carga-precios/pasos-completo";
+import { PasosCorto } from "@/components/carga-precios/pasos-corto";
+import { SelectorModo, guardarModo, modoGuardado } from "@/components/carga-precios/selector-modo";
+import { VistaPrevia, cantidad, derivadosDePrevia } from "@/components/carga-precios/vista-previa";
 
-/** Las siete columnas que se pueden editar y que hace cada una al cargarla. */
-export const COLUMNAS_EDITABLES = [
-  { columna: "Tipo", hace: "Escribe el tipo a mano en ese producto.", vacia: "Vuelve a seguir al rubro." },
-  { columna: "Procedencia", hace: "Escribe la procedencia a mano (Nacional o Importado).", vacia: "Vuelve a la regla de compras." },
-  { columna: "Factor", hace: "Le da al producto un factor propio (margen fijo).", vacia: "Lo quita: vuelve al factor de la política." },
-  { columna: "Precio final", hace: "Lo deja como precio fijo.", vacia: "Quita el precio fijo." },
-  { columna: "Obs", hace: "Cambia la observación.", vacia: "La borra." },
-  { columna: "Congelar", hace: "Sí congela el precio de hoy; No lo descongela.", vacia: "Cuenta como No." },
-  { columna: "No es producto", hace: "Sí lo saca del cálculo (servicios, mano de obra).", vacia: "Cuenta como No." },
-] as const;
-
-/** Como se llama cada decision que una carga puede quitar. */
-const DECISION: Record<string, string> = {
-  tipo: "tipo a mano",
-  procedencia: "procedencia a mano",
-  factor: "factor propio",
-  precio_fijo: "precio fijo",
-  obs: "observación",
-  congelar: "congelado",
-  no_producto: "«no es producto»",
-};
-
-/** Las decisiones que una carga puede PONER en bloque, en singular y plural. */
-const FIJAN: Record<string, [string, string]> = {
-  precio_fijo: ["precio fijo", "precios fijos"],
-  factor: ["factor propio", "factores propios"],
-};
+// Las columnas del archivo completo (las once que se editan y las trece de solo lectura) viven con
+// sus pasos; se exportan desde aca porque es lo que el resto del codigo y las pruebas importan.
+export { COLUMNAS_EDITABLES, COLUMNAS_SOLO_LECTURA } from "@/components/carga-precios/pasos-completo";
 
 type Fase = "inicio" | "leyendo" | "previa" | "cargando" | "listo";
 
@@ -54,27 +42,10 @@ interface Props {
   onClose: () => void;
   /** Se llama cuando la carga terminó, para que la lista se refresque. */
   onCargado?: () => void;
-}
-
-const pesos = (n: number | null) => (n == null ? "sin precio" : `$${formatoNumero(n)}`);
-
-/** "1 producto", "2 productos". */
-const cantidad = (n: number, uno: string, varios: string) => `${formatoNumero(n)} ${n === 1 ? uno : varios}`;
-
-function textoFijan(clave: string, n: number): string {
-  const [uno, varios] = FIJAN[clave] ?? [clave, clave];
-  return cantidad(n, uno, varios);
-}
-
-/** "1 sube, 0 bajan, ...": el verbo concuerda con la cantidad. */
-function efectoTexto(e: CargaPreciosVistaPrevia["efecto"]): string {
-  const v = (n: number, uno: string, varios: string) => (n === 1 ? uno : varios);
-  return (
-    `Precios: ${formatoNumero(e.suben)} ${v(e.suben, "sube", "suben")}, ` +
-    `${formatoNumero(e.bajan)} ${v(e.bajan, "baja", "bajan")}, ` +
-    `${formatoNumero(e.con_precio_nuevo)} ${v(e.con_precio_nuevo, "pasa", "pasan")} de sin precio a tener uno y ` +
-    `${formatoNumero(e.sin_cambio_de_precio)} no ${v(e.sin_cambio_de_precio, "cambia", "cambian")} de precio.`
-  );
+  /** Cuantos productos tiene la lista: con eso, el Excel corto dice cuantos quedan como estan. */
+  totalProductos?: number;
+  /** La fecha de hoy en Chile (la del servidor), para decir que empieza mas adelante. */
+  hoy?: string;
 }
 
 /** Lo que una carga dejo sin cargar, solo lo que no es cero. */
@@ -88,30 +59,22 @@ function textoOmitidos(o: CargaPreciosResultado["omitidos"]): string {
   return partes.join(", ");
 }
 
-function ListaErrores({ items, total, tono }: { items: CargaPreciosError[]; total: number; tono: "rojo" | "ambar" }) {
-  const clase = tono === "rojo" ? "text-rose-800" : "text-amber-800";
-  return (
-    <ul className={`mt-1 max-h-40 space-y-0.5 overflow-y-auto text-[12px] ${clase}`}>
-      {items.map((e, i) => (
-        <li key={`${e.fila}-${i}`}>
-          <span className="font-medium">Fila {e.fila}</span> · <span className="font-mono">{e.producto}</span>: {e.mensaje}
-        </li>
-      ))}
-      {total > items.length && <li>… y {formatoNumero(total - items.length)} más.</li>}
-    </ul>
-  );
+/** "Listo: 12 productos actualizados, 9 cambiaron de precio. 3 empiezan más adelante y se aplican
+ *  ese día. Los precios nuevos salen en el próximo «Solo diferencias»." */
+function textoListo(r: CargaPreciosResultado, programados: number): string {
+  const empiezan = programados > 0
+    ? ` ${programados === 1 ? "1 empieza más adelante y se aplica ese día." : `${formatoNumero(programados)} empiezan más adelante y se aplican ese día.`}`
+    : "";
+  const base = `Listo: ${cantidad(r.aplicados, "producto actualizado", "productos actualizados")}`;
+  if (r.precios_distintos > 0) {
+    const cambiaron = r.precios_distintos === 1 ? "1 cambió" : `${formatoNumero(r.precios_distintos)} cambiaron`;
+    return `${base}, ${cambiaron} de precio.${empiezan} Los precios nuevos salen en el próximo "Solo diferencias".`;
+  }
+  return `${base}. Ningún precio cambió.${empiezan}`;
 }
 
-function ListaCodigos({ codigos, total }: { codigos: string[]; total: number }) {
-  return (
-    <p className="mt-1 max-h-24 overflow-y-auto font-mono text-[12px]">
-      {codigos.join(", ")}
-      {total > codigos.length && ` … y ${formatoNumero(total - codigos.length)} más.`}
-    </p>
-  );
-}
-
-export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
+export function CargaPreciosExcel({ open, onClose, onCargado, totalProductos, hoy }: Props) {
+  const [modo, setModo] = useState<ModoCarga>(modoGuardado);
   const [fase, setFase] = useState<Fase>("inicio");
   const [archivo, setArchivo] = useState<File | null>(null);
   const [previa, setPrevia] = useState<CargaPreciosVistaPrevia | null>(null);
@@ -126,18 +89,19 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
   const [confirmaMasiva, setConfirmaMasiva] = useState(false);
   const entrada = useRef<HTMLInputElement>(null);
   const botonElegir = useRef<HTMLButtonElement>(null);
+  // El boton de bajar el archivo (la lista o la plantilla: en pantalla hay uno solo).
   const botonDescargar = useRef<HTMLButtonElement>(null);
   const panelResultado = useRef<HTMLDivElement>(null);
   const alerta = useRef<HTMLParagraphElement>(null);
   const panelPrevia = useRef<HTMLElement>(null);
   // Cada lectura y cada descarga lleva un numero. Si cuando termina ya no es el
-  // vigente -se eligio otro archivo, o se cerro el dialogo-, su respuesta se descarta:
-  // sin esto, una lectura lenta que llegaba tarde dejaba el nombre de un archivo y la
+  // vigente -se eligio otro archivo, se cambio de modo o se cerro el dialogo-, su respuesta se
+  // descarta: sin esto, una lectura lenta que llegaba tarde dejaba el nombre de un archivo y la
   // tabla de otro, y "Cargar" subia uno distinto del que se habia mirado.
   const lectura = useRef(0);
   const descarga = useRef(0);
-  // Cuantas descargas siguen en curso. Cerrar el dialogo no cancela la peticion: si el
-  // boton se rehabilitara al reabrir, se podia lanzar otra descarga de 11 MB encima.
+  // Cuantas descargas siguen en curso. Cerrar el dialogo (o cambiar de modo) no cancela la
+  // peticion: si el boton se rehabilitara, se podia lanzar otra descarga de 11 MB encima.
   const enVuelo = useRef(0);
   // La lectura vigente se puede cancelar: sin esto una lectura descartada seguia
   // reintentando y re-subiendo el archivo (hasta 30 MB) a un servidor de 512 MB.
@@ -150,7 +114,7 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
   const enfocarPrevia = useRef(false);
 
   // Al cerrarse el dialogo se empieza de cero: un archivo viejo en pantalla invita a
-  // cargarlo despues de que la lista ya cambio.
+  // cargarlo despues de que la lista ya cambio. El modo elegido NO se borra: es una preferencia.
   useEffect(() => {
     if (open) return;
     lectura.current += 1;
@@ -191,30 +155,52 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
     if (fase === "listo") panelResultado.current?.focus();
   }, [fase]);
 
-  async function descargar() {
+  /** Baja un archivo (la lista para editar o la plantilla) con su aviso propio. `pedir` hace la
+   *  descarga y devuelve lo que se le dice a la persona al terminar. */
+  async function bajar(
+    pedir: (alReintentar: (intento: number, total: number) => void) => Promise<string>,
+    errorPorDefecto: string,
+  ) {
     const id = ++descarga.current;
     enVuelo.current += 1;
     setDescargando(true);
     setError(null);
     try {
-      const n = await api.exportarPrecios(
-        { soloDiferencias: false, formato: "editable" },
-        (i, t) => { if (id === descarga.current) setAvisoDescarga(`Descarga: el servidor no responde. Reintentando (${i} de ${t})…`); },
-      );
-      if (id === descarga.current) {
-        setAvisoDescarga(`Archivo descargado: ${cantidad(n, "producto", "productos")}. Ábrelo con Excel, edita y vuelve aquí.`);
-      }
+      const aviso = await pedir((i, t) => {
+        if (id === descarga.current) setAvisoDescarga(`Descarga: el servidor no responde. Reintentando (${i} de ${t})…`);
+      });
+      if (id === descarga.current) setAvisoDescarga(aviso);
     } catch (e) {
       if (id === descarga.current) {
         setAvisoDescarga(null);
         const activo = typeof document !== "undefined" ? document.activeElement : null;
         enfocarError.current = activo === botonDescargar.current || activo === document.body;
-        setError(e instanceof Error ? e.message : "No se pudo descargar el archivo.");
+        setError(e instanceof Error ? e.message : errorPorDefecto);
       }
     } finally {
       enVuelo.current -= 1;
       setDescargando(enVuelo.current > 0);
     }
+  }
+
+  function descargarLista() {
+    return bajar(
+      async (alReintentar) => {
+        const n = await api.exportarPrecios({ soloDiferencias: false, formato: "editable" }, alReintentar);
+        return `Archivo descargado: ${cantidad(n, "producto", "productos")}. Ábrelo con Excel, edita y vuelve aquí.`;
+      },
+      "No se pudo descargar el archivo.",
+    );
+  }
+
+  function descargarPlantilla() {
+    return bajar(
+      async (alReintentar) => {
+        const nombre = await api.descargarPlantillaCarga("xlsx", alReintentar);
+        return `Plantilla descargada (${nombre}). Ábrela con Excel, llena tus productos y vuelve aquí.`;
+      },
+      "No se pudo descargar la plantilla.",
+    );
   }
 
   async function elegir(f: File | null) {
@@ -240,6 +226,7 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
         f,
         (i, t) => { if (id === lectura.current) setAvisoLectura(`Lectura: el servidor no responde. Reintentando (${i} de ${t})…`); },
         control.signal,
+        modo,
       );
       if (id !== lectura.current) return;
       setAvisoLectura(null);
@@ -260,7 +247,7 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
     setFase("cargando");
     setError(null);
     try {
-      const r = await api.cargarPrecios(archivo, { confirmarQuitas: confirmaQuitas, confirmarMasiva: confirmaMasiva });
+      const r = await api.cargarPrecios(archivo, { confirmarQuitas: confirmaQuitas, confirmarMasiva: confirmaMasiva, modo });
       setResultado(r);
       setFase("listo");
       onCargado?.();
@@ -275,21 +262,30 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
     }
   }
 
+  /** Cambiar de modo es empezar de nuevo, como "Descartar": el archivo y la vista previa eran de
+   *  otro modo. Una descarga en curso no se puede cancelar y sigue (el boton espera), pero su
+   *  aviso ya no corresponde a este modo, asi que se descarta. */
+  function cambiarModo(nuevo: ModoCarga) {
+    if (nuevo === modo) return;
+    void elegir(null);
+    descarga.current += 1;
+    setAvisoDescarga(null);
+    setModo(nuevo);
+    guardarModo(nuevo);
+  }
+
   const leyendo = fase === "leyendo";
   const cargando = fase === "cargando";
-  const hayErrores = (previa?.errores_total ?? 0) > 0;
-  const quitan = previa?.quitan_total ?? 0;
-  const pideConfirmar = previa !== null && quitan >= previa.umbral_quitas;
-  const fijan = previa?.fijan_total ?? 0;
-  const pideConfirmarMasiva = previa !== null && fijan > previa.umbral_masiva;
+  const { hayErrores, pideConfirmar, pideConfirmarMasiva } = derivadosDePrevia(previa);
   const puedeCargar = fase === "previa" && previa !== null && previa.a_cambiar > 0 && !hayErrores
     && (!pideConfirmar || confirmaQuitas) && (!pideConfirmarMasiva || confirmaMasiva);
-  const omitidos = previa
-    ? previa.conflictos_total + previa.desconocidos_total + previa.sin_referencia_total
-    : 0;
   const omitidosCarga = resultado
     ? resultado.omitidos.conflictos + resultado.omitidos.desconocidos + resultado.omitidos.sin_referencia
     : 0;
+  // Los que la vista previa dijo que empiezan mas adelante (el resultado no lo repite), sin
+  // contar mas de los que se cargaron.
+  const programados = resultado ? Math.min(previa?.programados_total ?? 0, resultado.aplicados) : 0;
+  const bloqueaDescarga = descargando || leyendo || cargando;
 
   return (
     <Dialog
@@ -297,7 +293,7 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
       // Mientras se guarda no se cierra: la respuesta es lo unico que dice si quedo cargado.
       onClose={() => { if (!cargando) onClose(); }}
       title="Editar la lista con Excel"
-      description="Baja el archivo, edítalo y vuelve a cargarlo. Antes de guardar ves qué cambia."
+      description="Elige cómo cargar. Antes de guardar ves qué cambia."
       className="max-w-4xl"
     >
       <div className="space-y-5 text-[13px] text-slate-700">
@@ -319,10 +315,7 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
                 <span>
                   {resultado.aplicados === 0
                     ? "No había nada que cargar: la lista ya estaba como dice el archivo."
-                    : `Listo: ${cantidad(resultado.aplicados, "producto actualizado", "productos actualizados")}` +
-                      (resultado.precios_distintos > 0
-                        ? `, ${resultado.precios_distintos === 1 ? "1 cambió" : `${formatoNumero(resultado.precios_distintos)} cambiaron`} de precio. Los precios nuevos salen en el próximo "Solo diferencias".`
-                        : ". Ningún precio cambió.")}
+                    : textoListo(resultado, programados)}
                 </span>
               </p>
             )}
@@ -333,54 +326,30 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
               </p>
             )}
             <div className="flex justify-end">
-              <Button size="sm" onClick={onClose}>Cerrar</Button>
+              <Button size="sm" className="[@media(pointer:coarse)]:h-11" onClick={onClose}>Cerrar</Button>
             </div>
           </div>
         ) : (
           <>
-            <section className="space-y-2">
-              <h3 className="text-[13px] font-semibold text-slate-900">1. Descarga la lista</h3>
-              <p>Baja un archivo con todos los productos y sus precios de hoy.</p>
-              <Button ref={botonDescargar} variant="outline" size="sm" onClick={() => void descargar()} disabled={descargando || leyendo || cargando}>
-                {descargando ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
-                Descargar para editar
-              </Button>
-              {avisoDescarga && (
-                <p role="status" className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700">{avisoDescarga}</p>
-              )}
-            </section>
+            <SelectorModo modo={modo} onCambiar={cambiarModo} deshabilitado={leyendo || cargando} />
 
-            <section className="space-y-2">
-              <h3 className="text-[13px] font-semibold text-slate-900">2. Edítala en Excel</h3>
-              <p>Cambia solo las columnas de esta tabla:</p>
-              <div className="overflow-x-auto rounded-md border border-slate-200">
-                <table className="w-full text-[12px]">
-                  <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
-                    <tr>
-                      <th className="px-3 py-1.5">Columna</th>
-                      <th className="px-3 py-1.5">Al cargarla</th>
-                      <th className="px-3 py-1.5">Si la dejas vacía</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {COLUMNAS_EDITABLES.map((c) => (
-                      <tr key={c.columna} className="border-t border-slate-100">
-                        <td className="px-3 py-1.5 font-medium text-slate-900">{c.columna}</td>
-                        <td className="px-3 py-1.5">{c.hace}</td>
-                        <td className="px-3 py-1.5 text-slate-500">{c.vacia}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <ul className="list-disc space-y-0.5 pl-5 text-[12px] text-slate-600">
-                <li>No toques la última columna, <b>Referencia</b>, ni ordenes columnas sueltas: con ella la plataforma sabe qué cambiaste.</li>
-                <li>Guarda el archivo en el formato que quieras: CSV o libro de Excel (.xlsx). Los dos sirven.</li>
-                <li>Solo se carga lo que cambies. Lo demás (costo, stock, precio ERP, estado, descuento) viene del ERP y se recalcula cada día.</li>
-                <li>Un producto no puede tener precio fijo y factor propio a la vez: cambia uno, o deja vacía la celda del otro.</li>
-                <li>Un factor para todo un rubro conviene cambiarlo en <b>Política</b>: es un solo cambio y alcanza a los productos nuevos.</li>
-              </ul>
-            </section>
+            {modo === "corto" ? (
+              <PasosCorto
+                descargando={descargando}
+                deshabilitado={bloqueaDescarga}
+                aviso={avisoDescarga}
+                onDescargar={() => void descargarPlantilla()}
+                botonRef={botonDescargar}
+              />
+            ) : (
+              <PasosCompleto
+                descargando={descargando}
+                deshabilitado={bloqueaDescarga}
+                aviso={avisoDescarga}
+                onDescargar={() => void descargarLista()}
+                botonRef={botonDescargar}
+              />
+            )}
 
             <section className="space-y-2">
               <h3 className="text-[13px] font-semibold text-slate-900">3. Súbelo</h3>
@@ -391,7 +360,7 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
                 accept=".csv,.xlsx,.xlsm"
                 className="sr-only"
                 tabIndex={-1}
-                aria-label="Archivo editado"
+                aria-label={modo === "corto" ? "Archivo con tus productos" : "Archivo editado"}
                 disabled={cargando}
                 onChange={(e) => {
                   void elegir(e.target.files?.[0] ?? null);
@@ -399,7 +368,7 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
                 }}
               />
               <div className="flex flex-wrap items-center gap-2">
-                <Button ref={botonElegir} variant="outline" size="sm" onClick={() => entrada.current?.click()} disabled={cargando}>
+                <Button ref={botonElegir} variant="outline" size="sm" className="[@media(pointer:coarse)]:h-11" onClick={() => entrada.current?.click()} disabled={cargando}>
                   <Upload size={15} /> Elegir archivo
                 </Button>
                 {archivo && (
@@ -419,214 +388,21 @@ export function CargaPreciosExcel({ open, onClose, onCargado }: Props) {
             </section>
 
             {previa && (
-              <section ref={panelPrevia} tabIndex={-1} className="space-y-3 outline-none" aria-label="Qué cambia">
-                <h3 className="text-[13px] font-semibold text-slate-900">Qué cambia</h3>
-                <div className="flex flex-wrap gap-2 text-[12px]">
-                  <span className="rounded-md bg-slate-100 px-2 py-1">{cantidad(previa.filas, "fila leída", "filas leídas")}</span>
-                  <span className="rounded-md bg-slate-100 px-2 py-1">{formatoNumero(previa.sin_cambios)} sin cambios</span>
-                  {hayErrores ? (
-                    <span className="rounded-md bg-slate-100 px-2 py-1">
-                      {cantidad(previa.a_cambiar, "producto con cambios válido", "productos con cambios válidos")}
-                    </span>
-                  ) : (
-                    <span className="rounded-md bg-brand-50 px-2 py-1 font-medium text-brand">
-                      {previa.a_cambiar === 1 ? "1 producto se cargará" : `${formatoNumero(previa.a_cambiar)} productos se cargarán`}
-                    </span>
-                  )}
-                  {omitidos > 0 && (
-                    <span className="rounded-md bg-amber-50 px-2 py-1 text-amber-800">
-                      {omitidos === 1 ? "1 se omite" : `${formatoNumero(omitidos)} se omiten`}
-                    </span>
-                  )}
-                </div>
-
-                {hayErrores && (
-                  <div role="alert" className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-rose-800">
-                    <p className="font-medium">
-                      {previa.errores_total === 1
-                        ? "El archivo tiene 1 error. No se carga nada hasta corregirlo: arréglalo en Excel y vuelve a subirlo."
-                        : `El archivo tiene ${formatoNumero(previa.errores_total)} errores. No se carga nada hasta corregirlos: arréglalos en Excel y vuelve a subirlo.`}
-                    </p>
-                    <ListaErrores items={previa.errores} total={previa.errores_total} tono="rojo" />
-                  </div>
-                )}
-
-                {quitan > 0 && !hayErrores && (
-                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
-                    <p className="font-medium">
-                      Esta carga quita {cantidad(quitan, "decisión", "decisiones")}:{" "}
-                      {Object.entries(previa.quitan).map(([k, n]) => `${formatoNumero(n)} ${DECISION[k] ?? k}`).join(", ")}.
-                    </p>
-                    {previa.quitan_ejemplos.length > 0 && (
-                      <p className="mt-0.5 text-[12px]">
-                        Por ejemplo:{" "}
-                        {previa.quitan_ejemplos.slice(0, 5).map((e) => `${e.producto} (${e.campo.toLowerCase()})`).join(", ")}
-                        {quitan > Math.min(5, previa.quitan_ejemplos.length) && "…"}
-                      </p>
-                    )}
-                    <p className="mt-0.5 text-[12px]">
-                      Una celda vacía quita la decisión del producto. Si no dejaste esas celdas vacías a propósito, puede
-                      que el Excel tenga celdas con error (#N/D, #REF!), que se leen como vacías.
-                    </p>
-                    {pideConfirmar && (
-                      <label className="mt-2 flex items-start gap-2 text-[13px]">
-                        <input
-                          type="checkbox"
-                          className="mt-0.5"
-                          checked={confirmaQuitas}
-                          disabled={cargando}
-                          onChange={(e) => setConfirmaQuitas(e.target.checked)}
-                        />
-                        <span>Entiendo que se quitan {formatoNumero(quitan)} decisiones y quiero cargarlas.</span>
-                      </label>
-                    )}
-                  </div>
-                )}
-
-                {pideConfirmarMasiva && !hayErrores && (
-                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
-                    <p className="font-medium">
-                      Esta carga deja {formatoNumero(fijan)} precios fijos o factores propios nuevos:{" "}
-                      {Object.entries(previa.fijan).map(([k, n]) => textoFijan(k, n)).join(", ")}.
-                    </p>
-                    <p className="mt-0.5 text-[12px]">
-                      Son muchos para una edición a mano. Si ordenaste una sola columna del Excel (por ejemplo Precio final
-                      o Factor), cada valor quedó en la fila de otro producto: descarga el archivo de nuevo y edítalo sin
-                      ordenar columnas sueltas.
-                    </p>
-                    <label className="mt-2 flex items-start gap-2 text-[13px]">
-                      <input
-                        type="checkbox"
-                        className="mt-0.5"
-                        checked={confirmaMasiva}
-                        disabled={cargando}
-                        onChange={(e) => setConfirmaMasiva(e.target.checked)}
-                      />
-                      <span>Entiendo que se fijan {formatoNumero(fijan)} valores y quiero cargarlos.</span>
-                    </label>
-                  </div>
-                )}
-
-                {previa.factor_redondeado_total > 0 && (
-                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
-                    <p className="font-medium">
-                      {previa.factor_redondeado_total === 1
-                        ? "1 producto trae el Factor redondeado (por ejemplo 1,14 en vez de 1,1429) y se toma como sin cambios."
-                        : `${formatoNumero(previa.factor_redondeado_total)} productos traen el Factor redondeado (por ejemplo 1,14 en vez de 1,1429) y se toman como sin cambios.`}
-                    </p>
-                    <ListaCodigos codigos={previa.factor_redondeado} total={previa.factor_redondeado_total} />
-                    <p className="mt-1 text-[12px]">
-                      Excel lo hace al mostrar menos decimales. Si querías justo ese valor, no se cargará: cámbialo en la ficha del producto.
-                    </p>
-                  </div>
-                )}
-
-                {previa.conflictos_total > 0 && (
-                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
-                    <p className="font-medium">
-                      {previa.conflictos_total === 1
-                        ? "1 producto no se cargará: cambió en la plataforma"
-                        : `${formatoNumero(previa.conflictos_total)} productos no se cargarán: cambiaron en la plataforma`}{" "}
-                      después de que bajaste el archivo.
-                    </p>
-                    <ListaErrores items={previa.conflictos} total={previa.conflictos_total} tono="ambar" />
-                    <p className="mt-1 text-[12px]">Descarga el archivo de nuevo y repite el cambio en esos productos.</p>
-                  </div>
-                )}
-
-                {previa.desconocidos_total > 0 && (
-                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
-                    <p className="font-medium">
-                      {previa.desconocidos_total === 1
-                        ? "1 código no está en la lista y se ignora."
-                        : `${formatoNumero(previa.desconocidos_total)} códigos no están en la lista y se ignoran.`}
-                    </p>
-                    <ListaCodigos codigos={previa.desconocidos} total={previa.desconocidos_total} />
-                  </div>
-                )}
-
-                {previa.sin_referencia_total > 0 && (
-                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
-                    <p className="font-medium">
-                      {previa.sin_referencia_total === 1
-                        ? "1 fila no trae Referencia y se ignora (¿fila agregada a mano?)."
-                        : `${formatoNumero(previa.sin_referencia_total)} filas no traen Referencia y se ignoran (¿filas agregadas a mano?).`}
-                    </p>
-                    <ListaCodigos codigos={previa.sin_referencia} total={previa.sin_referencia_total} />
-                  </div>
-                )}
-
-                {previa.a_cambiar > 0 && !hayErrores && (
-                  <>
-                    <p className="text-slate-700">{efectoTexto(previa.efecto)}</p>
-                    <div className="max-h-72 overflow-auto rounded-md border border-slate-200">
-                      <table className="w-full text-[12px]">
-                        <thead className="sticky top-0 bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
-                          <tr>
-                            <th className="px-3 py-1.5">Producto</th>
-                            <th className="px-3 py-1.5">Qué cambia</th>
-                            <th className="px-3 py-1.5 text-right">Precio</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {previa.cambios.map((c) => (
-                            <tr key={c.producto} className="border-t border-slate-100 align-top">
-                              <td className="px-3 py-1.5">
-                                <span className="font-mono">{c.producto}</span>
-                                {c.glosa && <span className="block text-slate-500">{c.glosa}</span>}
-                              </td>
-                              <td className="px-3 py-1.5">
-                                {c.campos.map((f) => (
-                                  <span key={f.campo} className="block">
-                                    <span className="font-medium">{f.campo}:</span> {f.antes} → {f.despues}
-                                  </span>
-                                ))}
-                              </td>
-                              <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums">
-                                {c.precio_antes === c.precio_despues ? "no cambia" : `${pesos(c.precio_antes)} → ${pesos(c.precio_despues)}`}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                      {previa.cambios_total > previa.cambios.length && (
-                        <p className="border-t border-slate-100 px-3 py-1.5 text-[12px] text-slate-500">
-                          … y {cantidad(previa.cambios_total - previa.cambios.length, "producto más", "productos más")} con cambios.
-                        </p>
-                      )}
-                    </div>
-                  </>
-                )}
-
-                {previa.a_cambiar === 0 && !hayErrores && (
-                  <p className="text-slate-600">
-                    {omitidos > 0
-                      ? "No hay nada que cargar: los cambios del archivo se omiten (detalle arriba)."
-                      : "El archivo no trae ningún cambio que cargar."}
-                  </p>
-                )}
-
-                <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    // El boton desaparece con la seccion: el foco pasa a "Elegir archivo".
-                    onClick={() => { void elegir(null); setTimeout(() => botonElegir.current?.focus(), 0); }}
-                    disabled={cargando}
-                  >
-                    Descartar
-                  </Button>
-                  <Button size="sm" onClick={() => void cargar()} disabled={!puedeCargar}>
-                    {cargando ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
-                    {cargando ? "Cargando…" : `Cargar ${cantidad(previa.a_cambiar, "producto", "productos")}`}
-                  </Button>
-                </div>
-                {cargando && (
-                  <p role="status" className="text-right text-[12px] text-slate-500">
-                    Guardando y recalculando solo los productos editados. No cierres esta ventana.
-                  </p>
-                )}
-              </section>
+              <VistaPrevia
+                previa={previa}
+                panelRef={panelPrevia}
+                cargando={cargando}
+                puedeCargar={puedeCargar}
+                confirmaQuitas={confirmaQuitas}
+                confirmaMasiva={confirmaMasiva}
+                onConfirmaQuitas={setConfirmaQuitas}
+                onConfirmaMasiva={setConfirmaMasiva}
+                // El boton desaparece con la seccion: el foco pasa a "Elegir archivo".
+                onDescartar={() => { void elegir(null); setTimeout(() => botonElegir.current?.focus(), 0); }}
+                onCargar={() => void cargar()}
+                totalProductos={totalProductos}
+                hoy={hoy}
+              />
             )}
           </>
         )}

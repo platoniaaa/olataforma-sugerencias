@@ -1,8 +1,10 @@
 """Endpoints de administracion: carga del sugerido (Excel/CSV o desde Power BI)."""
 import subprocess
+from datetime import date
 
 import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
@@ -27,6 +29,7 @@ from ..services import (
     transito_service,
     ventas_historicas_service,
 )
+from ..schemas.precios import VigenciasAplicarIn
 from ..services.auth import requiere_admin
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -420,20 +423,84 @@ def publicar_compras_precios(payload: dict, db: Session = Depends(get_db)) -> di
 
 
 @router.post("/precios/bodegas-tipo")
-def cargar_bodegas_tipo(payload: dict, db: Session = Depends(get_db)) -> dict:
-    """Clasifica las bodegas en REAL / VIRT / ELIM. Admin.
+def cargar_bodegas_tipo(
+    payload: dict,
+    db: Session = Depends(get_db),
+    email: str = Depends(requiere_admin),
+) -> dict:
+    """Clasifica las bodegas en REAL / VIRT / ELIM / NODISP. Admin.
 
-    payload: {"filas": [{"bodega": "BODEGA SCRAP", "tipo": "VIRT"}, ...]}
+    payload: {"filas": [{"bodega": "BODEGA SCRAP", "tipo": "NODISP"}, ...],
+              "sin_no_disponibles": false}
 
-    La lista de precios solo cuenta el stock de las REAL: el ERP mezcla bodegas
-    fisicas con bodegas de proceso -danados, devolucion, scrap, PE por
-    regularizar- y ese stock no se puede vender. Se reemplaza entera.
+    La lista de precios cuenta el stock de todas las bodegas MENOS las NODISP (no
+    disponibles): el ERP mezcla bodegas fisicas con bodegas de proceso -danados,
+    devolucion, scrap- y ese stock no se puede vender. REAL, VIRT y ELIM solo
+    describen la bodega. El tipo acepta "NO DISPONIBLE" y variantes. Se reemplaza
+    entera y queda guardado quien la cargo.
+
+    Se rechaza (422) una carga con un tipo que no existe y una carga sin ninguna
+    NODISP, salvo `sin_no_disponibles: true`: recargar un Excel viejo volveria a
+    contar danados y devolucion sin que nadie lo note. La respuesta nombra las
+    NODISP y las bodegas con stock que quedaron sin clasificar. La regla se aplica
+    en el proximo recalculo que relea el stock (el del motor o el boton Recalcular).
     """
     filas = payload.get("filas") or []
     try:
-        return precios_service.cargar_bodegas_tipo(db, filas, usuario=None)
+        return precios_service.cargar_bodegas_tipo(
+            db, filas, usuario=email,
+            sin_no_disponibles=payload.get("sin_no_disponibles") is True,
+        )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
+
+
+@router.get("/snapshot/export")
+def exportar_snapshot(
+    fecha: date,
+    db: Session = Depends(get_db),
+    email: str = Depends(requiere_admin),
+) -> StreamingResponse:
+    """Baja en CSV la foto diaria del sugerido de una fecha (aaaa-mm-dd). Admin, solo lectura.
+
+    Trae producto x sucursal con su clase ABC, stock, transito, punto de pedido, demanda
+    y costo de ESE dia, mas proveedor y descripcion de hoy. 404 si no hay foto de esa
+    fecha (se guardan `snapshot_retencion_dias` dias, 60, y solo los dias con sync)."""
+    contenido, n = snapshot_service.exportar_foto(db, fecha)
+    if n == 0:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No hay foto del sugerido del {fecha.isoformat()} (se guardan los ultimos "
+                   f"{settings.snapshot_retencion_dias} dias, solo los que tuvieron sync).")
+    return StreamingResponse(
+        iter([contenido]), media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="sugerido_foto_{fecha.isoformat()}.csv"',
+                 "X-Filas": str(n)},
+    )
+
+
+@router.post("/precios/vigencias/aplicar")
+def aplicar_vigencias_precios(
+    payload: VigenciasAplicarIn | None = None,
+    db: Session = Depends(get_db),
+    email: str = Depends(requiere_admin),
+) -> dict:
+    """Lleva al precio los periodos de vigencia que vencieron o empezaron. Admin.
+
+    body (opcional): {"previsualizar": true} cuenta y simula, sin escribir nada.
+
+    Precio fijo, margen fijo y congelar pueden traer un Desde y un Hasta; fuera del
+    periodo no rigen y el producto vuelve a la regla. La plataforma lo aplica sola cuando
+    alguien abre la lista o baja un archivo; este endpoint es para hacerlo a pedido (y para
+    que lo llame el motor). Idempotente: la segunda llamada seguida responde ceros y no
+    escribe ninguna fila (ni auditoria ni notificacion). No tiene tope de productos. Si
+    hay otro barrido en curso responde `omitido: true` sin hacer nada.
+
+    Responde {hoy, con_periodo, al_dia, pendientes, vencieron, comenzaron, recalculados,
+    precios_cambiados, omitido, previsualizar, ejemplos}. Nunca modifica `precio_override`.
+    """
+    return precios_service.aplicar_vigencias(
+        db, usuario=email, previsualizar=bool(payload and payload.previsualizar), espera_s=0.0)
 
 
 @router.post("/precios/eliminar")

@@ -54,10 +54,18 @@ def _filtros(
     origen: str | None = Query(None, description="maestro | manual"),
     con_cambios: bool = Query(False, description="Solo productos con cambios sin revisar"),
     con_stock: bool = Query(False),
+    vigencia: list[str] = Query(
+        default=[], description="programada | vigente | vencida | vence_7d (repetible)"),
 ) -> PrecioFiltros:
+    invalidos = sorted(set(vigencia) - set(precios_service.FILTROS_VIGENCIA))
+    if invalidos:
+        raise HTTPException(
+            status_code=422,
+            detail=(f"Vigencia no válida: {', '.join(invalidos)}. "
+                    f"Usa {', '.join(precios_service.FILTROS_VIGENCIA)}."))
     return PrecioFiltros(
         q=q, rubro=rubro, tipo=tipo, procedencia=procedencia, estado=estado,
-        origen=origen, con_cambios=con_cambios, con_stock=con_stock,
+        origen=origen, con_cambios=con_cambios, con_stock=con_stock, vigencia=vigencia,
     )
 
 
@@ -86,7 +94,10 @@ def resumen(db: Session = Depends(get_db)) -> dict:
 
 @router.get("/bodegas")
 def bodegas(db: Session = Depends(get_db)) -> list[dict]:
-    """Que bodegas cuentan para el stock de la lista y cuales no."""
+    """Que bodegas cuentan para el stock de la lista y cuales no.
+
+    Cada fila trae `cuenta` (si su stock suma a la lista). Las bodegas con stock de
+    Curifor que nadie clasifico van al final con `sin_clasificar: true`."""
     return precios_service.bodegas_tipo(db)
 
 
@@ -118,16 +129,39 @@ def exportar(
 
     Sube el proceso 190 a 230 MB: no se arma durante la carga del sugerido ni junto
     a otra descarga grande (services/operacion_pesada.py). Si le toca esperar de
-    mas responde 503, que la web reintenta sola (`reqConReintentos`)."""
-    with operacion_pesada.descarga_pesada():
-        contenido, nombre, n = precios_service.exportar(
-            db, solo_diferencias=solo_diferencias, registrar=registrar and formato == "erp",
-            usuario=email, formato=formato, lote_id=lote,
-        )
+    mas responde 503, que la web reintenta sola (`reqConReintentos`).
+
+    Antes de armar el archivo aplica los vencimientos de vigencia pendientes. Si no pudo
+    y el archivo del ERP saldria con un precio que ya no rige, tambien responde 503."""
+    try:
+        with operacion_pesada.descarga_pesada():
+            contenido, nombre, n = precios_service.exportar(
+                db, solo_diferencias=solo_diferencias, registrar=registrar and formato == "erp",
+                usuario=email, formato=formato, lote_id=lote,
+            )
+    except precios_service.VigenciasSinAplicar as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     tipo = "text/csv; charset=utf-8" if nombre.endswith(".csv") else _XLSX
     return StreamingResponse(
         iter([contenido]), media_type=tipo,
         headers={"Content-Disposition": f'attachment; filename="{nombre}"', "X-Filas": str(n)},
+    )
+
+
+@router.get("/carga/plantilla")
+def plantilla_carga(
+    archivo: str = Query("xlsx", pattern="^(xlsx|csv)$", description="xlsx (por defecto) | csv"),
+    email: str = Depends(requiere_precios),
+):
+    """La plantilla vacia del Excel corto: Codigo, Precio fijo, Desde, Hasta, Obs. Se llena con
+    los productos que se quieren tocar y se sube en "Editar con Excel". Pesa unos KB.
+
+    Va ANTES del catch-all `/{producto:path}`: declarada despues, FastAPI la lee como un
+    producto y responde 404 "El producto no esta en la lista"."""
+    contenido, nombre, tipo = carga.plantilla_corta(archivo)
+    return StreamingResponse(
+        iter([contenido]), media_type=tipo,
+        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
     )
 
 
@@ -148,7 +182,7 @@ def recalcular(
     email: str = Depends(requiere_precios),
 ) -> dict:
     """Recalcula toda la lista con el stock, costo y compras que tiene la plataforma."""
-    return precios_service.recalcular(db, usuario=email, refrescar_insumos=refrescar_insumos)
+    return precios_service.recalcular_a_solas(db, usuario=email, refrescar_insumos=refrescar_insumos)
 
 
 @router.post("/cambios/vistos")
@@ -174,7 +208,13 @@ def guardar_override(
     producto: str, payload: OverrideIn,
     db: Session = Depends(get_db), email: str = Depends(requiere_precios),
 ) -> dict:
-    """Precio fijo, congelar, tipo o procedencia a mano. Solo se tocan los campos que vienen."""
+    """Precio fijo, margen fijo, congelar, tipo o procedencia a mano. Solo se tocan los
+    campos que vienen.
+
+    `vigente_desde` y `vigente_hasta` (aaaa-mm-dd, fecha de Chile, inclusivas) ponen el
+    periodo en que rigen precio fijo, margen fijo y congelar: ausente = no tocar, null =
+    quitar ese extremo. Fuera del periodo la decision se conserva pero no rige. Un periodo
+    mal armado responde 422 con el motivo."""
     datos = payload.model_dump(exclude_unset=True)
     if not datos:
         raise HTTPException(status_code=422, detail="No viene ningun campo para cambiar")
@@ -233,7 +273,7 @@ def guardar_factores(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     # Un factor nuevo cambia precios: se recalcula con los insumos que ya hay.
-    r["recalculo"] = precios_service.recalcular(db, usuario=email, refrescar_insumos=False)
+    r["recalculo"] = precios_service.recalcular_a_solas(db, usuario=email, refrescar_insumos=False)
     return r
 
 
@@ -245,7 +285,7 @@ def guardar_rubros(
         r = politica.guardar_rubros(db, [f.model_dump() for f in payload.filas], email)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
-    r["recalculo"] = precios_service.recalcular(db, usuario=email, refrescar_insumos=False)
+    r["recalculo"] = precios_service.recalcular_a_solas(db, usuario=email, refrescar_insumos=False)
     return r
 
 
@@ -290,8 +330,8 @@ def guardar_politica(
         rs = precios_service.seguir_al_rubro(db, payload.seguir_al_rubro, email)
         # La sesion no hace autoflush: sin esto el recalculo leeria la politica vieja.
         db.flush()
-        recalculo = (precios_service.recalcular(db, usuario=email, refrescar_insumos=False,
-                                                productos=afectados)
+        recalculo = (precios_service.recalcular_a_solas(db, usuario=email, refrescar_insumos=False,
+                                                       productos=afectados)
                      if afectados else None)
         db.commit()
     except ValueError as e:
@@ -313,15 +353,19 @@ def _leer_subida(archivo: UploadFile) -> bytes:
 
 @router.post("/carga/vista-previa")
 def carga_vista_previa(
-    archivo: UploadFile = File(...), db: Session = Depends(get_db),
-    email: str = Depends(requiere_precios),
+    archivo: UploadFile = File(...), modo: str = Form("auto"),
+    db: Session = Depends(get_db), email: str = Depends(requiere_precios),
 ) -> dict:
     """Lee el archivo editado y dice que cambiaria, sin guardar nada.
+
+    `modo`: `completo` (el archivo que se bajo para editar, con Referencia), `corto` (la
+    plantilla de cinco columnas) o `auto` (por defecto: se deduce de las columnas). Si lo
+    declarado contradice al archivo responde 422.
 
     Es `def` y no `async def`: leer 40 mil filas es trabajo de CPU, y en una
     corrutina bloquearia a todos los demas mientras tanto."""
     try:
-        return carga.vista_previa(db, archivo.filename or "", _leer_subida(archivo))
+        return carga.vista_previa(db, archivo.filename or "", _leer_subida(archivo), modo)
     except carga.ErrorCarga as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
 
@@ -329,15 +373,16 @@ def carga_vista_previa(
 @router.post("/carga")
 def carga_aplicar(
     archivo: UploadFile = File(...), confirmar_quitas: bool = Form(False),
-    confirmar_masiva: bool = Form(False),
+    confirmar_masiva: bool = Form(False), modo: str = Form("auto"),
     db: Session = Depends(get_db), email: str = Depends(requiere_precios),
 ) -> dict:
     """Carga los cambios del archivo editado: todos o ninguno. Vuelve a leer el
     archivo y a compararlo contra lo que hay AHORA, asi lo que se aplica es lo que
-    dice el archivo y no una vista previa vieja."""
+    dice el archivo y no una vista previa vieja. `modo` como en la vista previa."""
     try:
         return carga.aplicar(db, archivo.filename or "", _leer_subida(archivo), email,
-                            confirmar_quitas=confirmar_quitas, confirmar_masiva=confirmar_masiva)
+                            confirmar_quitas=confirmar_quitas, confirmar_masiva=confirmar_masiva,
+                            modo=modo)
     except carga.ErrorCarga as e:
         db.rollback()
         raise HTTPException(status_code=422, detail=str(e)) from e

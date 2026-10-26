@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  AlertCircle, Bell, Columns3, Download, FileSpreadsheet, Loader2, Plus, RefreshCw, Search, Sigma, Tag, Trash2,
+  AlertCircle, Bell, Columns3, Download, FileSpreadsheet, Loader2, Plus, RefreshCw, Search, Sigma, Tag,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -17,20 +17,26 @@ import { MultiSelect } from "@/components/ui/multiselect";
 import { TablaPrecios } from "@/components/tabla-precios";
 import { ConfigurarColumnasPrecios } from "@/components/configurar-columnas-precios";
 import { CargaPreciosExcel } from "@/components/carga-precios-excel";
+import { ModalProducto, PROCEDENCIAS } from "@/components/ficha-precio";
 import { ResumenDiferencias } from "@/components/resumen-diferencias";
 import { TutorialPrecios } from "@/components/tutorial-precios";
 import { api } from "@/lib/api-client";
 import { getPuedePrecios } from "@/lib/auth";
-import { KEYS_PRECIOS_DEFAULT, claseEstado, explicacionPrecio } from "@/lib/columnas-precios";
-import { factorDesdeMargen } from "@/lib/margen";
-import { formatoCLP, formatoFecha, formatoFechaHora, formatoNumero } from "@/lib/formato";
-import type {
-  PrecioDetalle, PrecioFiltros, PrecioOpciones, PrecioResumen, PrecioRow,
-} from "@/lib/types";
+import { KEYS_PRECIOS_DEFAULT, LS_COLUMNAS_PRECIOS, leerColumnasGuardadas } from "@/lib/columnas-precios";
+import { formatoFechaHora, formatoNumero } from "@/lib/formato";
+import type { PrecioFiltros, PrecioOpciones, PrecioResumen, PrecioRow } from "@/lib/types";
 
-const LS_COLUMNAS = "precios_columnas_visibles";
 const LIMITE = 2000;
-const PROCEDENCIAS = ["Nacional", "Importado"];
+
+/** Lo que ofrece el filtro de vigencia. «Vence en 7 días» es un subconjunto de «Vigente». */
+const OPCIONES_VIGENCIA = [
+  { value: "vigente", label: "Vigente" },
+  { value: "vence_7d", label: "Vence en 7 días" },
+  { value: "programada", label: "Programada" },
+  { value: "vencida", label: "Vencida" },
+];
+/** Lo que pide el recuadro «Vencen en 7 días»: lo que vence pronto y lo que ya venció. */
+const VIGENCIA_POR_REVISAR = ["vence_7d", "vencida"];
 
 export default function PreciosPage() {
   const [filtros, setFiltros] = useState<PrecioFiltros>({});
@@ -52,19 +58,18 @@ export default function PreciosPage() {
 
   useEffect(() => {
     setPuedeEditar(getPuedePrecios());
-    const saved = localStorage.getItem(LS_COLUMNAS);
-    if (saved) {
-      try {
-        const arr = JSON.parse(saved);
-        if (Array.isArray(arr) && arr.length) setColsVisibles(arr);
-      } catch {
-        /* noop */
-      }
-    }
+    // La seleccion guardada manda sobre los defaults: se le suman, una sola vez, las columnas
+    // nuevas visibles por defecto (Vigencia), si no quien ya uso la pantalla nunca las veria.
+    const guardadas = leerColumnasGuardadas();
+    if (guardadas) setColsVisibles(guardadas);
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(LS_COLUMNAS, JSON.stringify(colsVisibles));
+    try {
+      localStorage.setItem(LS_COLUMNAS_PRECIOS, JSON.stringify(colsVisibles));
+    } catch {
+      /* sin almacenamiento (ventana privada): la seleccion dura lo que dure la pagina */
+    }
   }, [colsVisibles]);
 
   const cargarAuxiliares = useCallback(async () => {
@@ -141,9 +146,15 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
 
   const hayFiltros = useMemo(
     () => Boolean(filtros.q || filtros.rubro?.length || filtros.tipo?.length || filtros.procedencia?.length
-      || filtros.estado?.length || filtros.con_cambios || filtros.con_stock),
+      || filtros.estado?.length || filtros.vigencia?.length || filtros.con_cambios || filtros.con_stock),
     [filtros]
   );
+
+  // El recuadro de vigencias aparece cuando ya hay algun periodo: antes no hay nada que contar.
+  const hayVigencias = Boolean(resumen?.vigencias
+    && resumen.vigencias.vigentes + resumen.vigencias.programadas + resumen.vigencias.vencidas > 0);
+  const porRevisar = (filtros.vigencia ?? []).length === VIGENCIA_POR_REVISAR.length
+    && VIGENCIA_POR_REVISAR.every((v) => filtros.vigencia?.includes(v));
 
   return (
     <div className="space-y-4">
@@ -187,7 +198,7 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
             <Columns3 size={15} /> Columnas
           </Button>
           {puedeEditar && (
-            <Button variant="outline" size="sm" onClick={() => setModalExcel(true)}>
+            <Button variant="outline" size="sm" onClick={() => setModalExcel(true)} data-tour="excel">
               <FileSpreadsheet size={15} /> Editar con Excel
             </Button>
           )}
@@ -241,6 +252,24 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
           <Kpi etiqueta="Con cambios sin revisar" valor={formatoNumero(resumen.con_cambios)}
                destacar={resumen.con_cambios > 0}
                onClick={() => set({ con_cambios: !filtros.con_cambios })} activo={Boolean(filtros.con_cambios)} />
+          {hayVigencias && resumen.vigencias && (
+            // Que precios fijos se acaban esta semana, sin recorrer 40 mil filas. Si ademas hay
+            // vencidos (ya volvieron a la regla pero siguen guardados) los suma al filtro.
+            <Kpi etiqueta="Vencen en 7 días" valor={formatoNumero(resumen.vigencias.vencen_7_dias)}
+                 nota={resumen.vigencias.vencidas > 0
+                   ? `y ${formatoNumero(resumen.vigencias.vencidas)} ya vencidos`
+                   : undefined}
+                 destacar={resumen.vigencias.vencen_7_dias > 0 || resumen.vigencias.vencidas > 0}
+                 onClick={porRevisar ? () => set({ vigencia: undefined }) : () => set({ vigencia: VIGENCIA_POR_REVISAR })}
+                 activo={porRevisar}
+                 deshabilitado={!porRevisar && resumen.vigencias.vencen_7_dias === 0 && resumen.vigencias.vencidas === 0} />
+          )}
+          {(resumen.vigencias?.vencidas_sin_precio ?? 0) > 0 && resumen.vigencias && (
+            // Al vencer, el producto quedo sin precio (falta factor o costo): el archivo del ERP no lo
+            // manda y el ERP seguiria con el precio de la campana. Hay que revisarlo a mano.
+            <Kpi etiqueta="Vencidos sin precio" valor={formatoNumero(resumen.vigencias.vencidas_sin_precio ?? 0)}
+                 nota="el ERP sigue con el precio de la campaña" destacar />
+          )}
           <Kpi etiqueta="Último recálculo" valor={resumen.ultimo_recalculo ? formatoFechaHora(resumen.ultimo_recalculo) : "—"} />
         </div>
       )}
@@ -270,6 +299,9 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
           <MultiSelect label="Estado" className="w-[150px]"
             opciones={opciones.estados.map((s) => ({ value: s, label: s }))}
             seleccionados={filtros.estado ?? []} onChange={(v) => set({ estado: v })} />
+          <MultiSelect label="Vigencia" className="w-[150px]"
+            opciones={OPCIONES_VIGENCIA}
+            seleccionados={filtros.vigencia ?? []} onChange={(v) => set({ vigencia: v })} />
           <label className="flex items-center gap-1.5 text-[13px] text-slate-600">
             <input type="checkbox" className="accent-brand" checked={Boolean(filtros.con_stock)}
                    onChange={(e) => set({ con_stock: e.target.checked })} />
@@ -321,6 +353,7 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
       <div data-tour="tabla">
         <TablaPrecios
           rows={rows}
+          hoy={resumen?.vigencias?.hoy}
           columnasVisibles={colsVisibles}
           onFila={setSeleccion}
           onEliminar={puedeEditar ? sacarDeLaLista : undefined}
@@ -354,6 +387,8 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
         open={modalExcel}
         onClose={() => setModalExcel(false)}
         onCargado={() => { void cargar(); void cargarAuxiliares(); }}
+        totalProductos={resumen?.productos}
+        hoy={resumen?.vigencias?.hoy}
       />
 
       {seleccion && (
@@ -361,6 +396,7 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
           producto={seleccion.producto}
           puedeEditar={puedeEditar}
           tipos={Array.from(new Set([...opciones.tipos, "Sugerido"])).sort()}
+          hoy={resumen?.vigencias?.hoy}
           onCerrar={() => setSeleccion(null)}
           onGuardado={async () => {
             await Promise.all([cargar(), cargarAuxiliares()]);
@@ -382,8 +418,10 @@ Si tiene precio fijo o congelado, esa decisión se conserva por si el producto v
   );
 }
 
-function Kpi({ etiqueta, valor, nota, destacar, onClick, activo }: {
+function Kpi({ etiqueta, valor, nota, destacar, onClick, activo, deshabilitado }: {
   etiqueta: string; valor: string; nota?: string; destacar?: boolean; onClick?: () => void; activo?: boolean;
+  /** Se ve pero no filtra: no hay nada que mostrar. */
+  deshabilitado?: boolean;
 }) {
   // Las tarjetas se dimensionan por su contenido y no estiradas a un tercio de
   // la pantalla: con cinco KPI quedaban justas, con tres quedaban de 600px con
@@ -399,360 +437,14 @@ function Kpi({ etiqueta, valor, nota, destacar, onClick, activo }: {
       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{etiqueta}</p>
       <p className="font-mono text-2xl font-semibold tabular-nums tracking-tight text-slate-900">{valor}</p>
       {nota && <p className="text-[11px] text-slate-400">{nota}</p>}
-      {onClick && (
+      {onClick && !deshabilitado && (
         <p className="text-[11px] text-brand">{activo ? "Filtrando · clic para quitar" : "Clic para filtrar"}</p>
       )}
     </>
   );
-  return onClick
+  return onClick && !deshabilitado
     ? <button className={`${cls} transition-colors hover:border-brand`} onClick={onClick}>{inner}</button>
     : <div className={cls}>{inner}</div>;
-}
-
-/** Ficha del producto: como se llego al precio, la decision humana, y su historia. */
-function ModalProducto({ producto, puedeEditar, tipos, onCerrar, onGuardado }: {
-  producto: string; puedeEditar: boolean; tipos: string[];
-  onCerrar: () => void; onGuardado: () => Promise<void>;
-}) {
-  const [d, setD] = useState<PrecioDetalle | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [guardando, setGuardando] = useState(false);
-  const [precioFijo, setPrecioFijo] = useState<string>("");
-  const [margenFijo, setMargenFijo] = useState<string>("");
-  const [congelar, setCongelar] = useState(false);
-  const [tipoManual, setTipoManual] = useState("");
-  const [procManual, setProcManual] = useState("");
-  const [noProducto, setNoProducto] = useState(false);
-  const [obs, setObs] = useState("");
-
-  const cargar = useCallback(async () => {
-    try {
-      const det = await api.precioDetalle(producto);
-      setD(det);
-      setPrecioFijo(det.precio_fijo === null ? "" : String(det.precio_fijo));
-      setMargenFijo(det.margen_fijo === null ? "" : String(det.margen_fijo));
-      setCongelar(det.congelar);
-      setTipoManual(det.tipo_manual ?? "");
-      setProcManual(det.procedencia_manual ?? "");
-      setNoProducto(det.no_producto);
-      setObs(det.obs ?? "");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo cargar el producto.");
-    }
-  }, [producto]);
-
-  useEffect(() => {
-    void cargar();
-  }, [cargar]);
-
-  async function guardar() {
-    if (!d) return;
-    setGuardando(true);
-    setError(null);
-    try {
-      await api.guardarPrecioOverride(producto, {
-        precio_fijo: precioFijo.trim() === "" ? null : Number(precioFijo.replace(",", ".")),
-        margen_fijo: margenFijo.trim() === "" ? null : Number(margenFijo.replace(",", ".")),
-        congelar,
-        tipo_manual: tipoManual || null,
-        procedencia_manual: procManual || null,
-        no_producto: noProducto,
-        obs: obs || null,
-      });
-      await cargar();
-      await onGuardado();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo guardar.");
-    } finally {
-      setGuardando(false);
-    }
-  }
-
-  async function sacarDeLaLista() {
-    // Se avisa lo que NO hace: nadie espera que "eliminar" deje el producto
-    // intacto en el ERP, y esa es justo la parte que confunde.
-    if (!confirm(
-      `¿Sacar ${producto} de la lista de precios?
-
-Deja de tener precio calculado y no va a salir en el envío al ERP. NO lo da de baja en el ERP.
-
-Si tiene precio fijo o congelado, esa decisión se conserva por si el producto vuelve.`
-    )) return;
-    setGuardando(true);
-    setError(null);
-    try {
-      await api.eliminarPrecioProducto(producto);
-      await onGuardado();
-      onCerrar();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo sacar de la lista.");
-      setGuardando(false);
-    }
-  }
-
-  async function volverALaRegla() {
-    if (!confirm(`¿Quitar toda decisión manual de ${producto} y volver a la regla?`)) return;
-    setGuardando(true);
-    setError(null);
-    try {
-      await api.quitarPrecioOverride(producto);
-      await cargar();
-      await onGuardado();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "No se pudo volver a la regla.");
-    } finally {
-      setGuardando(false);
-    }
-  }
-
-  const tieneOverride = d && (d.precio_fijo !== null || d.margen_fijo !== null || d.congelar || d.tipo_manual || d.procedencia_manual || d.no_producto || d.obs);
-  const campo = "h-9 w-full rounded-md border border-ink-200 px-2 text-sm outline-none focus:border-brand disabled:bg-ink-50";
-
-  return (
-    <Dialog open onClose={onCerrar} title={producto} description={d?.glosa ?? undefined} className="max-w-3xl">
-      {!d ? (
-        <p className="flex items-center gap-2 text-sm text-ink-500"><Loader2 className="h-4 w-4 animate-spin" /> Cargando…</p>
-      ) : (
-        <div className="space-y-4">
-          {/* El resultado primero. Antes el precio final era una fila más entre
-              once, del mismo tamaño que "Rubro", y la diferencia contra el ERP
-              -que es lo que hace que alguien abra esta ficha- había que
-              calcularla mentalmente restando dos filas separadas. */}
-          <div className="flex flex-wrap items-end justify-between gap-4 rounded-lg border border-ink-100 bg-ink-50/60 px-4 py-3"
-               data-tour="ficha-precio">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">Precio final</p>
-              <p className="flex items-baseline gap-2">
-                <span className="font-mono text-3xl font-semibold tabular-nums tracking-tight text-ink-900">
-                  {formatoCLP(d.precio_final)}
-                </span>
-                <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${claseEstado(d.estado)}`}>
-                  {d.estado}
-                </span>
-              </p>
-              <p className="mt-0.5 font-mono text-[12px] text-ink-500">{explicacionPrecio(d)}</p>
-            </div>
-            <div className="text-right">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">Precio en el ERP hoy</p>
-              <p className="font-mono text-xl tabular-nums text-ink-700">{formatoCLP(d.precio_erp)}</p>
-              {d.desviacion_pct !== null && d.desviacion_pct !== undefined && (
-                <p className={`text-[12px] font-semibold ${Math.abs(d.desviacion_pct) >= 20 ? "text-accent-700" : "text-ink-500"}`}>
-                  {d.desviacion_pct > 0 ? "+" : ""}{formatoNumero(d.desviacion_pct, 1)}% vs. el nuevo
-                </p>
-              )}
-            </div>
-          </div>
-
-          <div className="grid gap-5 md:grid-cols-2">
-            <section className="space-y-2 text-sm" data-tour="ficha-origen">
-              <h3 className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">De dónde sale</h3>
-              {/* El origen va como etiqueta y no entre paréntesis: dice de un
-                  vistazo qué está decidido a mano y qué lo pone la regla. */}
-              <FilaOrigen k="Tipo" v={d.tipo ?? "—"} origen={d.tipo_origen} />
-              <FilaOrigen k="Procedencia" v={d.procedencia_final ?? "—"} origen={d.procedencia_origen} />
-              <Fila k="Rubro" v={d.rubro ?? "—"} />
-              <FilaOrigen k="Factor" v={d.factor ? formatoNumero(d.factor, 2) : "—"}
-                          origen={d.margen_fijo !== null ? `margen ${formatoNumero(d.margen_fijo, 1)} %` : null} />
-              <Fila k="Costo" v={formatoCLP(d.costo)} />
-              {d.precio_sugerido !== null && <Fila k="Precio proveedor" v={formatoCLP(d.precio_sugerido)} />}
-
-              <div className="!mt-4 space-y-2 border-t border-ink-100 pt-3">
-                <Fila k="Stock / en tránsito" v={`${formatoNumero(d.stock ?? 0)} / ${formatoNumero(d.stock_transito ?? 0)}`} />
-                {(d.ult_recep_importado || d.ult_pe_nacional) && (
-                  <Fila k="Última compra"
-                        v={`imp. ${formatoFecha(d.ult_recep_importado)} · nac. ${formatoFecha(d.ult_pe_nacional)}`} />
-                )}
-                <Fila k="Última venta" v={d.ultima_venta ? formatoFecha(d.ultima_venta) : "sin venta registrada"} />
-              </div>
-
-              {(d.envios ?? []).length > 0 && (
-                <p className="!mt-3 text-[12px] text-ink-500">
-                  Último envío al ERP: {formatoCLP((d.envios ?? [])[0].precio)} el {formatoFecha((d.envios ?? [])[0].enviado_en)}
-                  {(d.envios ?? [])[0].enviado_por ? ` por ${(d.envios ?? [])[0].enviado_por}` : ""}
-                </p>
-              )}
-            </section>
-
-            <section className="space-y-4" data-tour="ficha-decision">
-              <h3 className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">Decisión sobre este precio</h3>
-              {!puedeEditar && (
-                <p className="rounded-md bg-ink-50 px-3 py-2 text-[12px] text-ink-500">
-                  Tu usuario puede ver la lista pero no editarla.
-                </p>
-              )}
-
-              {/* Tres grupos, no seis controles sueltos: fijar el precio,
-                  corregir la clasificación, sacarlo del cálculo. */}
-              <div className="space-y-2">
-                <p className="text-[12px] font-semibold text-ink-700">Fijar el precio</p>
-                <label className="block text-sm">
-                  <input className={campo} type="number" min="0" step="1" disabled={!puedeEditar}
-                         value={precioFijo} onChange={(e) => setPrecioFijo(e.target.value)}
-                         placeholder="Precio fijo — vacío sigue la regla" />
-                  <span className="text-[11px] text-ink-400">Gana a todo, incluso sin stock.</span>
-                </label>
-                {/* Margen fijo: a diferencia del precio fijo, sigue al costo. Se
-                    escribe como lo mira contabilidad (% sobre la venta) y se ve
-                    al tiro a qué factor y precio equivale con el costo de hoy. */}
-                <label className="block text-sm">
-                  <input className={campo} type="number" min="0" max="99.9" step="0.1" disabled={!puedeEditar}
-                         value={margenFijo} onChange={(e) => setMargenFijo(e.target.value)}
-                         placeholder="Margen fijo en % sobre la venta — vacío sigue la regla" />
-                  <span className="text-[11px] text-ink-400">{explicacionMargen(margenFijo, d.costo)}</span>
-                </label>
-                <label className="flex items-start gap-2 text-sm text-ink-700">
-                  <input type="checkbox" className="mt-0.5 accent-brand" disabled={!puedeEditar}
-                         checked={congelar} onChange={(e) => setCongelar(e.target.checked)} />
-                  <span>
-                    Congelar el precio actual
-                    {d.congelar && d.congelado_precio !== null && (
-                      <span className="block text-[11px] text-ink-400">
-                        Congelado en {formatoCLP(d.congelado_precio)}{d.editado_en ? `, ${formatoFecha(d.editado_en)}` : ""}
-                      </span>
-                    )}
-                  </span>
-                </label>
-              </div>
-
-              <div className="space-y-2 border-t border-ink-100 pt-3">
-                <p className="text-[12px] font-semibold text-ink-700">Corregir la clasificación</p>
-                <div className="grid grid-cols-2 gap-2">
-                  <label className="block text-sm">
-                    <span className="text-[12px] text-ink-500">Tipo</span>
-                    <select className={campo} disabled={!puedeEditar} value={tipoManual} onChange={(e) => setTipoManual(e.target.value)}>
-                      <option value="">(según regla)</option>
-                      {tipos.map((t) => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </label>
-                  <label className="block text-sm">
-                    <span className="text-[12px] text-ink-500">Procedencia</span>
-                    <select className={campo} disabled={!puedeEditar} value={procManual} onChange={(e) => setProcManual(e.target.value)}>
-                      <option value="">(según regla)</option>
-                      {PROCEDENCIAS.map((p) => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                  </label>
-                </div>
-                <p className="text-[11px] text-ink-400">
-                  Con «(según regla)» la procedencia sigue a la última compra sola.
-                </p>
-              </div>
-
-              <div className="space-y-2 border-t border-ink-100 pt-3">
-                <label className="flex items-start gap-2 text-sm text-ink-700">
-                  <input type="checkbox" className="mt-0.5 accent-brand" disabled={!puedeEditar}
-                         checked={noProducto} onChange={(e) => setNoProducto(e.target.checked)} />
-                  <span>
-                    No es un producto
-                    <span className="block text-[11px] text-ink-400">Servicio, cargo o mano de obra: queda sin precio.</span>
-                  </span>
-                </label>
-                <label className="block text-sm">
-                  <span className="text-[12px] text-ink-500">Observación</span>
-                  <textarea className={`${campo} h-14 py-1`} disabled={!puedeEditar} maxLength={500}
-                            value={obs} onChange={(e) => setObs(e.target.value)}
-                            placeholder="Por qué este precio no sigue la regla" />
-                </label>
-              </div>
-
-              {d.editado_por && (
-                <p className="text-[11px] text-ink-400">
-                  Última edición: {d.editado_por}{d.editado_en ? ` · ${formatoFechaHora(d.editado_en)}` : ""}
-                </p>
-              )}
-              {error && <p className="text-sm text-rose-700">{error}</p>}
-            </section>
-          </div>
-
-          {/* El historial es consulta, no la razón por la que se abre la ficha:
-              va plegado y con el número afuera, para que no compita con el
-              precio. */}
-          {(d.cambios ?? []).length > 0 && (
-            <details className="rounded-lg border border-ink-100 px-3 py-2">
-              <summary className="cursor-pointer text-[12px] font-semibold text-ink-600">
-                Cambios detectados ({(d.cambios ?? []).length})
-                {(d.cambios ?? []).some((c) => !c.visto) && (
-                  <span className="ml-2 rounded bg-amber-100 px-1.5 text-[10px] font-semibold text-amber-800">sin revisar</span>
-                )}
-              </summary>
-              <ul className="mt-2 max-h-40 space-y-1 overflow-auto text-[12px]">
-                {(d.cambios ?? []).map((c, i) => (
-                  <li key={i} className={c.visto ? "text-ink-400" : "text-ink-700"}>
-                    {formatoFecha(c.detectado_en)} · <b>{c.campo}</b>: {c.antes ?? "—"} → {c.despues ?? "—"}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
-
-          {puedeEditar && (
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-ink-100 pt-3">
-              <div className="flex gap-2">
-                {tieneOverride && (
-                  <Button variant="ghost" size="sm" disabled={guardando} onClick={() => void volverALaRegla()}>
-                    Volver a la regla
-                  </Button>
-                )}
-                {/* Sacar de la lista es distinto de "volver a la regla": el
-                    producto deja de existir acá y de salir en el envío al ERP.
-                    Por eso pide confirmación y dice que NO lo da de baja en el
-                    ERP, que es lo primero que alguien va a suponer. */}
-                <Button variant="ghost" size="sm" disabled={guardando}
-                        className="text-rose-700 hover:bg-rose-50"
-                        onClick={() => void sacarDeLaLista()}>
-                  <Trash2 size={14} /> Sacar de la lista
-                </Button>
-              </div>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={onCerrar}>Cerrar</Button>
-                <Button size="sm" disabled={guardando} onClick={() => void guardar()}>
-                  {guardando && <Loader2 size={14} className="animate-spin" />} Guardar
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </Dialog>
-  );
-}
-
-/** Una fila con el valor y, al lado, de dónde salió. */
-/** Lo que se ve bajo el campo de margen mientras se escribe. */
-function explicacionMargen(texto: string, costo: number | null): string {
-  if (texto.trim() === "") return "Sobre la venta. El precio sigue al costo; sin stock queda en $0.";
-  const factor = factorDesdeMargen(Number(texto.replace(",", ".")));
-  if (factor === null) return "El margen tiene que estar entre 0 y 100.";
-  const precio = costo && costo > 0 ? ` → ${formatoCLP(Math.floor(costo * factor + 0.5))} con el costo de hoy` : "";
-  return `Factor ${formatoNumero(factor, 2)}${precio}. Sin stock queda en $0.`;
-}
-
-function FilaOrigen({ k, v, origen }: { k: string; v: string; origen?: string | null }) {
-  // "manual" y "margen" son lo único que conviene que salte a la vista: significa
-  // que alguien decidió y que la regla no lo va a tocar.
-  const esManual = origen === "manual" || (origen ?? "").startsWith("margen");
-  return (
-    <div className="flex items-baseline justify-between gap-3">
-      <span className="text-ink-500">{k}</span>
-      <span className="flex items-baseline gap-1.5 text-right">
-        <span className="text-ink-800">{v}</span>
-        {origen && (
-          <span className={`rounded px-1 py-px text-[10px] font-medium ${
-            esManual ? "bg-brand-50 text-brand" : "bg-ink-100 text-ink-500"}`}>
-            {origen}
-          </span>
-        )}
-      </span>
-    </div>
-  );
-}
-
-function Fila({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="flex items-baseline justify-between gap-3">
-      <span className="text-ink-500">{k}</span>
-      <span className="text-right tabular-nums text-ink-800">{v}</span>
-    </div>
-  );
 }
 
 function ModalNuevo({ tipos, onCerrar, onGuardado }: {

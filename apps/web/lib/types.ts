@@ -1311,6 +1311,14 @@ export interface Tablero {
 
 // ----------------------------------------------------------- Lista de precios
 
+/** El estado de un periodo de vigencia respecto de hoy (fecha de Chile). Siempre en
+ *  femenino: es el de la vigencia. null = sin periodo, o sin ninguna decision que vigilar. */
+export type EstadoVigencia = "programada" | "vigente" | "vencida";
+
+/** Lo que se puede pedir al filtro de vigencia de la lista. `vence_7d` = vigente con el
+ *  Hasta entre hoy y dentro de 7 dias. */
+export type FiltroVigencia = EstadoVigencia | "vence_7d";
+
 /** Una fila de la lista de precios: lo calculado mas lo decidido a mano. */
 export interface PrecioRow {
   producto: string;
@@ -1354,6 +1362,19 @@ export interface PrecioRow {
   editado_por: string | null;
   editado_en: string | null;
   actualizado_en: string | null;
+  /** Periodo de `precio_fijo`, `margen_fijo` y `congelar` (aaaa-mm-dd, sin hora, los dos dias
+   *  incluidos; vacio = sin limite de ese lado). Esas tres columnas son la decision GUARDADA
+   *  aunque no rija; `estado`, `factor` y `precio_final` son lo que rige HOY. Opcionales: una
+   *  API anterior no las trae. */
+  vigente_desde?: string | null;
+  vigente_hasta?: string | null;
+  vigencia?: EstadoVigencia | null;
+  /** Vigente con Hasta: dias hasta el Hasta (0 = ultimo dia). Programada: dias hasta el
+   *  Desde. Vencida: dias desde que vencio. Vigente sin Hasta: null. */
+  vigencia_dias?: number | null;
+  /** Solo en la ficha y solo si la vigencia es "vigente": a que precio vuelve cuando el
+   *  periodo termine (lo que daria la regla sin precio fijo, margen ni congelado). */
+  precio_regla?: number | null;
 }
 
 export interface PrecioCambio {
@@ -1372,9 +1393,18 @@ export interface PrecioEnvio {
   enviado_por: string | null;
 }
 
+/** De que bodega sale el stock de un producto y si suma al de la lista. */
+export interface StockBodega {
+  bodega: string;
+  stock: number;
+  cuenta: boolean;
+}
+
 export interface PrecioDetalle extends PrecioRow {
   cambios: PrecioCambio[];
   envios: PrecioEnvio[];
+  /** Solo Curifor y solo lo distinto de 0, la bodega con mas stock primero. */
+  stock_bodegas?: StockBodega[];
 }
 
 export interface PrecioPage {
@@ -1393,6 +1423,8 @@ export interface PrecioFiltros {
   origen?: string;
   con_cambios?: boolean;
   con_stock?: boolean;
+  /** Varios valores son una union. Ver `FiltroVigencia`. */
+  vigencia?: string[];
 }
 
 export interface PrecioOpciones {
@@ -1410,6 +1442,22 @@ export interface PrecioResumen {
   ultimo_envio: string | null;
   overrides: number;
   pendientes_envio: number;
+  /** Los periodos de vigencia. `hoy` viene del servidor (fecha de Chile) para que los atajos
+   *  de la ficha no dependan del reloj del navegador. */
+  vigencias?: PrecioVigencias;
+}
+
+export interface PrecioVigencias {
+  hoy: string;
+  vigentes: number;
+  programadas: number;
+  vencidas: number;
+  vencen_7_dias: number;
+  /** Productos cuyo precio todavia no refleja el cambio de estado de su periodo. */
+  por_aplicar: number;
+  /** Periodos vencidos que dejaron al producto sin precio y que ya se habian enviado al ERP:
+   * el ERP conserva el de la campana porque el archivo no lleva precios vacios. */
+  vencidas_sin_precio?: number;
 }
 
 /** Lo que una persona decide sobre un precio. Solo viajan los campos que se tocan. */
@@ -1421,6 +1469,11 @@ export interface PrecioOverrideIn {
   procedencia_manual?: string | null;
   no_producto?: boolean;
   obs?: string | null;
+  /** Ausente = no tocar; null = quitar ese extremo. La ficha los manda solo si la persona
+   *  los cambio: la API valida con `extra=forbid`, y una web nueva contra una API sin
+   *  vigencia no debe romper el guardado de toda la ficha. */
+  vigente_desde?: string | null;
+  vigente_hasta?: string | null;
 }
 
 export interface PrecioProductoNuevo {
@@ -1554,15 +1607,33 @@ export interface CargaPreciosError {
   mensaje: string;
 }
 
+/** Cómo se carga la lista: "completo" es el archivo que se baja para editar (con la columna
+ *  Referencia); "corto" es la plantilla de cinco columnas para tocar pocos productos. */
+export type ModoCarga = "corto" | "completo";
+
 export interface CargaPreciosCambio {
   producto: string;
   glosa: string | null;
   campos: { campo: string; antes: string; despues: string }[];
   precio_antes: number | null;
   precio_despues: number | null;
+  /** El periodo en que rige la decisión de precio que queda, ya interpretado por el servidor
+   *  ("Rige del 01-11-2026 al 30-11-2026"). Nulo si el producto no tiene periodo. */
+  vigencia?: string | null;
+}
+
+/** Un precio fijo del Excel corto que pisa el margen fijo o el congelado que el producto tenía. */
+export interface CargaPreciosReemplazo {
+  producto: string;
+  /** "Margen fijo 35 % (vencido el 30-09-2026)", "Congelado en 2.160". */
+  decision_anterior: string;
+  editado_por: string | null;
+  editado_en: string | null;
 }
 
 export interface CargaPreciosVistaPrevia {
+  /** Qué modo leyó el servidor. Ausente en un servidor anterior al Excel corto. */
+  modo?: ModoCarga;
   archivo: string;
   filas: number;
   sin_cambios: number;
@@ -1574,7 +1645,8 @@ export interface CargaPreciosVistaPrevia {
   quitan: Record<string, number>;
   quitan_ejemplos: { producto: string; campo: string }[];
   umbral_quitas: number;
-  /** Precios fijos y factores propios que la carga PONE, y desde cuántos pide confirmación. */
+  /** Lo que la carga PONE (precios fijos, factores propios, congelados y fechas del periodo), y
+   *  desde cuántos pide confirmación. */
   fijan_total: number;
   fijan: Record<string, number>;
   umbral_masiva: number;
@@ -1591,9 +1663,25 @@ export interface CargaPreciosVistaPrevia {
   sin_referencia_total: number;
   cambios: CargaPreciosCambio[];
   cambios_total: number;
+  /** Filas de un archivo bajado antes de las columnas de periodo: sus Precio fijo, Margen fijo %,
+   *  Desde y Hasta no se leen. */
+  archivo_viejo_total?: number;
+  /** Productos que el archivo deja con una decisión que empieza más adelante (Desde futuro):
+   *  hoy su precio no cambia. */
+  programados_total?: number;
+  /** Columnas del archivo que no se leen (por ejemplo Margen fijo % en el Excel corto). */
+  columnas_ignoradas?: string[];
+  /** Solo en el Excel corto: precios fijos que quedan sin Hasta (permanentes), los que pisan otra
+   *  decisión, y un mensaje cuando el archivo no trae ningún producto. */
+  sin_hasta_total?: number;
+  sin_hasta?: string[];
+  reemplazos_total?: number;
+  reemplazos?: CargaPreciosReemplazo[];
+  mensaje?: string | null;
 }
 
 export interface CargaPreciosResultado {
+  modo?: ModoCarga;
   aplicados: number;
   por_campo: Record<string, number>;
   precios_distintos: number;

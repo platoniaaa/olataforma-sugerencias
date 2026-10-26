@@ -18,9 +18,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TutorialPrecios } from "@/components/tutorial-precios";
 
-const TOTAL_PASOS = 15;
+const TOTAL_PASOS = 16;
 const PASO_FICHA = 6;      // "La ficha: el precio y su porqué"
 const PASO_RECALCULAR = 10;
+const PASO_EXPORTAR = 13;  // "Exportar al ERP"
+const PASO_EXCEL = 14;     // "Editar con Excel", justo despues de exportar
 
 beforeEach(() => {
   localStorage.clear();
@@ -219,5 +221,57 @@ describe("Tutorial de la lista de precios", () => {
     darPorPerdidoElElemento();
     expect(screen.getByText(/puede ver la lista pero no editarla/)).toBeInTheDocument();
     expect(screen.queryByTestId("recorrido-recorte")).toBeNull();
+  });
+
+  it("el paso de Editar con Excel va despues de Exportar y destaca el boton", () => {
+    const boton = document.createElement("button");
+    boton.setAttribute("data-tour", "excel");
+    boton.getBoundingClientRect = () =>
+      ({ top: 120, left: 300, width: 160, height: 36, right: 460, bottom: 156, x: 300, y: 120, toJSON: () => ({}) }) as DOMRect;
+    document.body.appendChild(boton);
+    try {
+      abrirDesdeElBoton();
+
+      irAlPaso(PASO_EXPORTAR);
+      expect(screen.getByText("Exportar al ERP")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: /Siguiente/i }));
+      expect(screen.getByText(`Paso ${PASO_EXCEL} de ${TOTAL_PASOS}`)).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Editar con Excel" })).toBeInTheDocument();
+      // Los dos modos aparecen en la lista y otra vez en la nota de las celdas vacías.
+      expect(screen.getAllByText(/Excel corto/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Excel completo/).length).toBeGreaterThan(0);
+      expect(screen.getByText("QUITAR")).toBeInTheDocument();
+      // Vacío no cambia nada SOLO en el corto; en el completo quita la decisión.
+      const nota = screen.getByText("QUITAR").closest("div,p") as HTMLElement;
+      expect(nota.textContent).toMatch(/Excel corto.*vacía no cambia nada/s);
+      expect(nota.textContent).toMatch(/Excel completo.*vacía quita/s);
+
+      // El recorte envuelve al boton real, con 8 px de aire por lado.
+      const recorte = screen.getByTestId("recorrido-recorte");
+      expect(recorte).toHaveAttribute("x", "292");
+      expect(recorte).toHaveAttribute("y", "112");
+    } finally {
+      boton.remove();
+    }
+  });
+
+  it("sin el boton de Excel dice que falta el permiso en vez de apuntar al vacio", () => {
+    vi.useFakeTimers();
+    abrirDesdeElBoton();
+
+    irAlPaso(PASO_EXCEL);
+    darPorPerdidoElElemento();
+    expect(screen.getByText(/puede ver la lista pero no editarla/)).toBeInTheDocument();
+    expect(screen.queryByTestId("recorrido-recorte")).toBeNull();
+  });
+
+  it("el paso de decidir un precio habla de la vigencia y de que el ERP conserva el precio", () => {
+    abrirDesdeElBoton({ acciones: { abrirFicha: () => true, cerrarFicha: () => {} } });
+
+    irAlPaso(9);
+    expect(screen.getByRole("heading", { name: "Decidir sobre un precio" })).toBeInTheDocument();
+    expect(screen.getByText(/Vigencia \(opcional\)/)).toBeInTheDocument();
+    expect(screen.getByText(/ERP conserva el precio de la promoción/)).toBeInTheDocument();
   });
 });

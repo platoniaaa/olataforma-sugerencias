@@ -156,6 +156,10 @@ describe("Política de precios · tipo nuevo para un rubro", () => {
       seguir_al_rubro: [],
     });
     expect(screen.getByText(/Factor nacional \(1\.534 productos\): 1,78 → 1,88/)).toBeInTheDocument();
+    // Solo los que RIGEN hoy: uno con el periodo vencido o programado sigue la regla y la política sí lo mueve.
+    expect(screen.getByText(
+      /No cambian 2 neumáticos \(por su glosa\) ni 5 con precio fijo, congelado o margen fijo vigente\./,
+    )).toBeInTheDocument();
 
     // Los filtros con tipo escrito a mano se suman solo si se marca.
     fireEvent.click(screen.getByRole("checkbox", { name: /Que también sigan al rubro los 93/ }));

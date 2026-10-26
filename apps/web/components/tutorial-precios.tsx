@@ -24,7 +24,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import { createPortal } from "react-dom";
 import {
   Bell, Calculator, CheckCircle2, ChevronLeft, ChevronRight, Columns3, Compass, Download,
-  FileText, Filter, Gauge, GraduationCap, Pencil, Plus, RefreshCw, Sigma, Table2, Tag, X,
+  FileSpreadsheet, FileText, Filter, Gauge, GraduationCap, Pencil, Plus, RefreshCw, Sigma, Table2, Tag, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -209,13 +209,30 @@ const PASOS: Paso[] = [
       <>
         <p>Se prueba en este orden y gana el primero que aplica:</p>
         <ol className="list-decimal space-y-1 pl-5">
-          <li><b>Precio fijo</b> puesto a mano: ese es el precio, pase lo que pase.</li>
-          <li><b>Precio congelado</b>: el que tenía cuando lo congelaste.</li>
-          <li><b>Sin stock y nada en tránsito</b>: precio 0, porque el ERP no lo ofrece.</li>
+          <li>
+            <b>Precio fijo</b> puesto a mano: ese es el precio, pase lo que pase. Mientras su
+            periodo rija, si tiene uno.
+          </li>
+          <li>
+            <b>Precio congelado</b>: el que tenía cuando lo congelaste. También con periodo.
+          </li>
+          <li>
+            <b>Sin stock y nada en tránsito</b>: precio 0, porque el ERP no lo ofrece.
+          </li>
           <li><b>No es un producto</b> (servicios, mano de obra, cargos): sin precio.</li>
+          <li>
+            <b>Margen fijo</b> puesto a mano: el costo más ese margen sobre la venta. Sigue al
+            costo.
+          </li>
           <li><b>Tipo Sugerido</b>: se usa la lista del proveedor.</li>
           <li><b>El resto</b>: <b>costo × factor</b>.</li>
         </ol>
+        <p>
+          El <b>stock</b> que se mira es el de todas las bodegas de Curifor menos las de{" "}
+          <b>dañados, devolución y scrap</b>, y menos el stock que el ERP no ubica en ninguna
+          bodega (la bodega sin nombre). En la ficha, el desglose por bodega muestra con
+          tachado lo que no cuenta.
+        </p>
         <p>
           Este bloque muestra cada pieza: rubro, tipo, factor, costo, stock y tránsito, y las
           últimas compras. El factor sale del par <b>Tipo</b> y <b>Procedencia</b>; el tipo lo
@@ -224,7 +241,8 @@ const PASOS: Paso[] = [
         </p>
         <Nota>
           El 3 va antes que el 4: un servicio sin stock sale en 0, no sin precio. Es tal cual
-          lo hacía el programa antiguo.
+          lo hacía el programa antiguo. Un precio fijo, un margen o un congelado fuera de su
+          periodo se ignora: el producto vuelve a la regla.
         </Nota>
       </>
     ),
@@ -268,6 +286,12 @@ const PASOS: Paso[] = [
         <ul className="list-disc space-y-1.5 pl-5">
           <li><b>Precio fijo</b>: ese es el precio. Gana a todo, incluso sin stock.</li>
           <li><b>Congelar</b>: deja el precio de hoy aunque después cambie el costo.</li>
+          <li>
+            <b>Vigencia (opcional)</b>: <b>Desde</b> y <b>Hasta</b> para el precio fijo, el
+            margen o el congelado. El día del Hasta todavía rige; al día siguiente el
+            producto vuelve a la regla. Hay atajos de 30, 60 y 90 días, fin de mes y sin
+            vencimiento.
+          </li>
           <li><b>Tipo o Procedencia a mano</b>: para cuando la regla se equivoca.</li>
           <li><b>No es un producto</b>: servicios, mano de obra y cargos, sin precio.</li>
           <li><b>Observación</b>: para dejar dicho por qué.</li>
@@ -276,6 +300,12 @@ const PASOS: Paso[] = [
         <Nota>
           Lo que decides acá <b>no lo pisa nunca el recálculo</b>: se guarda aparte, a
           propósito. Si no ves los controles, tu usuario puede mirar pero no editar.
+        </Nota>
+        <Nota>
+          Cuando un periodo vence, la plataforma recalcula ese producto, pero el{" "}
+          <b>ERP conserva el precio de la promoción</b> hasta que subas el archivo de
+          diferencias. En la tabla, la columna <b>Vigencia</b> y el recuadro{" "}
+          <b>Vencen en 7 días</b> te dicen qué se viene.
         </Nota>
       </>
     ),
@@ -360,6 +390,37 @@ const PASOS: Paso[] = [
         <Nota>
           Solo <b>Solo diferencias</b> queda registrado como envío: después de bajarlo, el
           contador parte de cero.
+        </Nota>
+      </>
+    ),
+  },
+  {
+    titulo: "Editar con Excel",
+    icono: <FileSpreadsheet size={16} />,
+    destino: "excel",
+    siFalta: `${SIN_PERMISO} Para cambiar precios en bloque se pide el mismo permiso que para editar uno.`,
+    cuerpo: (
+      <>
+        <p>Sirve para decidir precios de muchos productos de una vez. Tiene dos caminos:</p>
+        <ul className="list-disc space-y-1.5 pl-5">
+          <li>
+            <b>Excel corto</b>: bajas una plantilla vacía con cinco columnas (Código, Precio
+            fijo, Desde, Hasta, Obs) y pones solo los productos que quieres tocar.
+          </li>
+          <li>
+            <b>Excel completo</b>: bajas toda la lista, cambias lo que quieras en las 11
+            columnas editables y la vuelves a subir.
+          </li>
+        </ul>
+        <p>
+          Antes de guardar ves el <b>antes y el después</b> de cada producto, los códigos que
+          no existen y los precios fijos que quedan sin fecha de término.
+        </p>
+        <Nota>
+          En el <b>Excel corto</b>, una celda <b>vacía no cambia nada</b>: para quitar un precio
+          o una fecha escribe <b>QUITAR</b>. En el <b>Excel completo</b> es al revés: una celda{" "}
+          <b>vacía quita</b> la decisión de ese producto. Las fechas van como <span className="font-mono">dd-mm-aaaa</span>
+          : 10/11/2026 es el 10 de noviembre.
         </Nota>
       </>
     ),

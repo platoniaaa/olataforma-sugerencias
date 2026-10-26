@@ -64,6 +64,13 @@ def test_productos_filtra_y_ordena_por_ventas(client, con_datos):
     assert nuevo["items"] == []
 
 
+def test_el_listado_se_puede_ordenar_por_valor_a_pedir(client, con_datos):
+    r = client.get("/api/canal-digital/productos", params={"solo_pide": True, "orden": "sugerido"}).json()
+    valores = [i["sugerido_pesos"] for i in r["items"]]
+    assert valores == sorted(valores, reverse=True) and valores[0] > 0
+    assert client.get("/api/canal-digital/productos", params={"orden": "raro"}).status_code == 400
+
+
 def test_paso_a_paso_de_un_producto_y_404(client, con_datos):
     r = client.get("/api/canal-digital/producto/paso-a-paso", params={"producto": "20 alto"}).json()
     assert r["pasos"][0]["titulo"] == "Frecuencia de venta" and len(r["pasos"]) >= 8
