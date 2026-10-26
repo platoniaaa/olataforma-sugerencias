@@ -17,7 +17,11 @@ python-calamine>=0.3.0
 httpx>=0.28
 # Driver PostgreSQL para produccion (Supabase). pg8000 es Python puro: sin compilar,
 # funciona en cualquier version de Python (incluida 3.14) y en la nube.
-pg8000>=1.31
+pg8000==1.31.5
+# scramp 1.5.0 (25-10-2026) quito make_channel_binding, que pg8000 1.31.5 sigue llamando:
+# con la version libre, el deploy del 26-10 dejo el login en 500. pg8000 1.31.6 exige
+# scramp 1.5.0 y no se probo contra la base: se queda este par, el que corre hoy en local.
+scramp==1.4.17
 
 # Base de datos IANA de zonas horarias para zoneinfo (America/Santiago) en Windows,
 # donde el sistema no la trae. En Linux (Render) es redundante pero inocuo.
