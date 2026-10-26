@@ -9,6 +9,7 @@ from src.services import canal_digital_calculo as calc
 from src.services import canal_digital_service as svc
 
 HOY = dt.date(2026, 10, 26)
+ANCLA = dt.date(2026, 10, 1)
 
 
 @pytest.fixture(autouse=True)
@@ -21,7 +22,7 @@ def _fijar_hoy(monkeypatch):
 
 def _filas(producto, por_semana):
     out = []
-    for semana in calc.ventana(HOY)["semanas"]:
+    for semana in calc.ventana(ANCLA)["semanas"]:
         f = dt.date.fromisoformat(semana)
         out.append({"producto": producto, "semana": semana, "periodo": f"{f.year}{f.month:02d}",
                     "unid_brutas": por_semana, "unid_devueltas": 0, "valor_costo": 100.0 * por_semana,

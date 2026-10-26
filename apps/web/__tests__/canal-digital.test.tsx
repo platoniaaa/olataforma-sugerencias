@@ -60,6 +60,7 @@ function resumen(extra: Partial<ResumenCanalDigital> = {}): ResumenCanalDigital 
     aviso: {
       periodos: ["202510", "202609"], semanas: ["2025-10-27", "2026-10-19"], fecha_referencia: "2026-10-01",
       productos: 669, sin_proveedor: 196, ultimo_mes_con_ventas: "202609", codigos_en_dos_grupos: 0,
+      ultimo_periodo_cargado: "202609", meses_sin_cargar: 0,
     },
     estados: { CLASIFICADO: 619, NUEVO: 31, "SIN MOVIMIENTO": 19 },
     clusters: clusters(),
@@ -171,6 +172,19 @@ describe("CanalDigitalPage", () => {
     expect(screen.getByText("Cluster AAA ✕")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Cluster AAA ✕"));
     await waitFor(() => expect(mocks.productos.mock.calls.at(-1)?.[1]).toMatchObject({ cluster: undefined }));
+  });
+
+  it("avisa cuantos meses cerrados faltan por cargar, y no avisa cuando esta al dia", async () => {
+    mocks.resumen.mockResolvedValue(
+      resumen({ aviso: { ...resumen().aviso, meses_sin_cargar: 2 } })
+    );
+    const { unmount } = render(<CanalDigitalPage />);
+    expect(await screen.findByText(/faltan 2 meses cerrados/)).toBeInTheDocument();
+    unmount();
+    mocks.resumen.mockResolvedValue(resumen());
+    render(<CanalDigitalPage />);
+    await screen.findByText("Piden reposición hoy");
+    expect(screen.queryByText(/meses? cerrados?\. La demanda/)).not.toBeInTheDocument();
   });
 
   it("sin venta cargada avisa en vez de mostrar una grilla vacia", async () => {

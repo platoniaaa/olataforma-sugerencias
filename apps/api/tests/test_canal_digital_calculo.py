@@ -10,11 +10,12 @@ from src.services import canal_digital_calculo as calc
 from src.services import canal_digital_service as svc
 
 HOY = dt.date(2026, 10, 26)  # lunes: la ultima semana completa empieza el 19-10
+ANCLA = dt.date(2026, 10, 1)  # la venta llega hasta sep-2026: la ventana termina ahi, no en hoy
 
 
 def _ventas(db, producto, unidades_por_semana=4, cada=1):
     """Una fila por semana de la ventana, con el periodo del documento que corresponde a su fecha."""
-    v = calc.ventana(HOY)
+    v = calc.ventana(ANCLA)
     filas = []
     for i, semana in enumerate(v["semanas"]):
         if i % cada:
@@ -86,12 +87,14 @@ def test_calcula_con_las_tablas_de_la_plataforma(db_session):
     assert d.plazo_motor_dias == 6 and d.plazo_dias == 7  # +1 dia de gestion
     assert d.costo_actual == 1000 and d.descripcion == "ACEITE" and d.proveedor == "PROV A"
     assert d.primera_venta == dt.date(2019, 1, 1)
-    assert sum(d.unidades_semana) == 8 * 52 and sum(d.unidades_mes) == 8 * 52 - 8 * (
-        sum(1 for s in calc.ventana(HOY)["semanas"] if s >= "2026-10-01"))
+    # la primera semana de la ventana (29-09-2025) tiene su documento en sep-2025: cuenta en la serie semanal
+    # pero no en los 12 meses
+    assert sum(d.unidades_semana) == 8 * 52 and sum(d.unidades_mes) == 8 * 51
     solo = por["20 SOLO"].datos
     assert solo.plazo_dias == 4 and solo.plazo_confianza == "sin proveedor (respaldo)"
     assert aviso["sin_proveedor"] == 1 and aviso["productos"] == 2
-    assert aviso["ultimo_mes_con_ventas"] == "202609"
+    assert aviso["ultimo_mes_con_ventas"] == "202609" and aviso["ultimo_periodo_cargado"] == "202609"
+    assert aviso["meses_sin_cargar"] == 0 and aviso["semanas"][1] == "2026-09-21"
     assert m1.reposicion.posicion == 35 + 7
 
 
@@ -109,3 +112,26 @@ def test_normalizar_en_la_union_con_el_stock(db_session):
     corrida, _ = calc.calcular(db, "430", HOY)
     assert normalizar_codigo("15 MXD1454M ") in corrida.por_codigo()
     assert corrida.por_codigo()["15 MXD1454M"].datos.stock_disponible == 12
+
+
+def test_la_ventana_termina_en_el_ultimo_mes_cargado_y_avisa_cuantos_meses_faltan(db_session):
+    """La venta se carga una vez al mes: las semanas posteriores a la carga no cuentan como semanas sin venta."""
+    db = db_session
+    svc.reemplazar_ventas(db, "430", _ventas(db, "20 M", 4))
+    antes, _ = calc.calcular(db, "430", HOY)
+    despues, aviso = calc.calcular(db, "430", dt.date(2026, 12, 15))
+    assert aviso["meses_sin_cargar"] == 2 and aviso["semanas"][1] == "2026-09-21"
+    a, b = antes.por_codigo()["20 M"].datos, despues.por_codigo()["20 M"].datos
+    assert a.unidades_semana == b.unidades_semana and a.unidades_mes == b.unidades_mes
+
+
+def test_el_mes_en_curso_a_medio_cargar_no_mueve_la_ventana(db_session):
+    db = db_session
+    filas = _ventas(db, "20 M", 4) + [{"producto": "20 M", "semana": "2026-10-05", "periodo": "202610",
+                                        "unid_brutas": 50, "unid_devueltas": 0, "valor_costo": 1, "unid_liquidacion": 0,
+                                        "n_lineas": 1}]
+    svc.reemplazar_ventas(db, "430", filas)
+    corrida, aviso = calc.calcular(db, "430", HOY)
+    assert aviso["ultimo_periodo_cargado"] == "202609" and aviso["periodos"][1] == "202609"
+    assert sum(corrida.por_codigo()["20 M"].datos.unidades_semana) == 4 * 52
+

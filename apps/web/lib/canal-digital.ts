@@ -36,6 +36,9 @@ export interface AvisoCorrida {
   productos: number;
   sin_proveedor: number;
   ultimo_mes_con_ventas: string | null;
+  ultimo_periodo_cargado: string | null;
+  /** Meses cerrados que faltan cargar; 0 = al dia. */
+  meses_sin_cargar: number | null;
   codigos_en_dos_grupos: number;
 }
 

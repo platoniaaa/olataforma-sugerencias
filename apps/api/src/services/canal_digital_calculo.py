@@ -107,13 +107,33 @@ def ventana(hoy: dt.date, n_meses: int = 12) -> dict:
 def reunir_datos(db: Session, bodega: str, hoy: dt.date) -> tuple[list[DatosProducto], dict]:
     tenant = _tenant()
     cfg = asegurar_bodega(db, bodega)
-    v = ventana(hoy, cfg.ventana_meses)
+    # La venta se carga una vez al mes: la ventana termina en el ULTIMO MES CARGADO que ya cerro, no en hoy.
+    # Si no, las semanas posteriores a la carga contarian como semanas sin venta y bajarian la demanda.
+    mes_actual = f"{hoy.year}{hoy.month:02d}"
+    ultimo = db.scalar(
+        select(func.max(CanalDigitalVenta.periodo)).where(
+            CanalDigitalVenta.tenant_id == tenant, CanalDigitalVenta.bodega == bodega,
+            CanalDigitalVenta.periodo < mes_actual,
+        )
+    )
+    if ultimo:
+        y, m = int(ultimo[:4]), int(ultimo[4:])
+        ancla = dt.date(y + (m == 12), m % 12 + 1, 1)  # primer dia despues del ultimo mes cargado
+    else:
+        ancla = hoy.replace(day=1)
+    v = ventana(ancla, cfg.ventana_meses)
     periodos, semanas = v["periodos"], v["semanas"]
     idx_p = {p: i for i, p in enumerate(periodos)}
     idx_s = {s: i for i, s in enumerate(semanas)}
     aviso: dict = {
         "periodos": [periodos[0], periodos[-1]], "semanas": [semanas[0], semanas[-1]],
-        "fecha_referencia": v["fecha_referencia"].isoformat(),
+        "fecha_referencia": v["fecha_referencia"].isoformat(), "periodos_ventana": periodos,
+        "ultimo_periodo_cargado": ultimo,
+        # Meses cerrados que faltan cargar (0 = al dia: el ultimo mes cerrado ya esta).
+        "meses_sin_cargar": (
+            (int(mes_actual[:4]) * 12 + int(mes_actual[4:]) - 1) - (int(ultimo[:4]) * 12 + int(ultimo[4:]))
+            if ultimo else None
+        ),
     }
 
     # Filas con periodo del documento desde el inicio de la ventana mensual o de la semanal

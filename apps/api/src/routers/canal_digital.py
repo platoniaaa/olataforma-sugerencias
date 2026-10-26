@@ -119,7 +119,7 @@ def export_csv(
 def paso_a_paso(producto: str, bodega: str = "430", db: Session = Depends(get_db)) -> dict:
     """El recorrido de un producto con sus numeros. El codigo va en la query porque lleva espacios."""
     corrida, aviso = _corrida(db, bodega)
-    pasos = vista.paso_a_paso(corrida, normalizar_codigo(producto) or "", calculo.ventana(_hoy())["periodos"])
+    pasos = vista.paso_a_paso(corrida, normalizar_codigo(producto) or "", aviso["periodos_ventana"])
     if pasos is None:
         raise HTTPException(status_code=404, detail="Ese producto no esta en la corrida de la bodega")
     return {"producto": producto, "pasos": pasos}

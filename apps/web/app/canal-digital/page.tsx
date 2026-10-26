@@ -66,6 +66,14 @@ export default function CanalDigitalPage() {
         </p>
       )}
 
+      {resumen && !sinVentas && (resumen.aviso.meses_sin_cargar ?? 0) > 0 && (
+        <p className="rounded-md bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
+          La venta está cargada hasta {periodoLegible(resumen.aviso.ultimo_periodo_cargado)} y faltan{" "}
+          {resumen.aviso.meses_sin_cargar} {resumen.aviso.meses_sin_cargar === 1 ? "mes cerrado" : "meses cerrados"}. La demanda
+          y las clases se calculan hasta ese mes; el stock es el de hoy.
+        </p>
+      )}
+
       {resumen && resumen.provisorio.length > 0 && (
         <details className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900" open>
           <summary className="flex cursor-pointer items-center gap-1.5 font-medium">
