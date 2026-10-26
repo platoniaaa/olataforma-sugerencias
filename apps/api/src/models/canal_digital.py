@@ -37,6 +37,9 @@ class CanalDigitalBodega(Base):
     gestion_dias: Mapped[float] = mapped_column(Float, nullable=False, default=1)
     # Nombres de bodega del stock (ERP) que forman el disponible de este canal, separados por coma.
     bodegas_stock: Mapped[str] = mapped_column(String, nullable=False, default="BODEGA ML")
+    # Bodegas cuyo stock se muestra aparte y NO suma al disponible (ML-FULL), y las informativas (CD).
+    bodegas_aparte: Mapped[str] = mapped_column(String, nullable=False, default="BODEGA ML-FULL")
+    bodegas_informativas: Mapped[str] = mapped_column(String, nullable=False, default="CD REPUESTOS")
     actualizado_en: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     __table_args__ = (UniqueConstraint("tenant_id", "bodega", name="uq_cd_bodega"),)

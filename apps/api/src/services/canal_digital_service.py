@@ -138,3 +138,25 @@ def meta_ventas(db: Session, bodega: str = BODEGA_CANAL_DIGITAL) -> dict:
         "periodo_desde": p0, "periodo_hasta": p1, "semana_desde": s0, "semana_hasta": s1,
         "clusters_en_politica": len(CLUSTERS),
     }
+
+
+def guardar_politica(db: Session, bodega: str, politica: Politica, email: str | None) -> None:
+    """Reemplaza las 27 filas de la bodega por las de `politica` (ya validada por quien llama)."""
+    tenant = _tenant()
+    existentes = {
+        f.cluster: f
+        for f in db.execute(
+            select(CanalDigitalPolitica).where(
+                CanalDigitalPolitica.tenant_id == tenant, CanalDigitalPolitica.bodega == bodega
+            )
+        ).scalars()
+    }
+    ahora = datetime.now(timezone.utc).replace(tzinfo=None)
+    for f in politica.filas:
+        fila = existentes.get(f.cluster)
+        if fila is None:
+            fila = CanalDigitalPolitica(tenant_id=tenant, bodega=bodega, cluster=f.cluster, modo=f.modo)
+            db.add(fila)
+        fila.modo, fila.nivel_servicio, fila.z, fila.minimo_fijo = f.modo, f.nivel_servicio, f.z, f.minimo_fijo
+        fila.actualizado_por, fila.actualizado_en = email, ahora
+    db.flush()
