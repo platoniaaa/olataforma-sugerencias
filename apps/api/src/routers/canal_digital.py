@@ -188,3 +188,22 @@ def publicar_ventas(payload: dict, db: Session = Depends(get_db)) -> dict:
     resumen_carga = svc.reemplazar_ventas(db, bodega, filas)
     _invalidar()
     return resumen_carga
+
+
+@router.post("/lineas", dependencies=[Depends(requiere_admin)])
+def publicar_lineas(payload: dict, db: Session = Depends(get_db)) -> dict:
+    """El motor publica las lineas de documento del canal (un mes por envio) y la plataforma arma la venta semanal.
+
+    Reemplaza SOLO los periodos que vienen y recalcula la venta de la bodega con todas las lineas guardadas,
+    para que una devolucion de un mes encuentre su venta de otro mes. Todo o nada.
+
+    payload: {"bodega": "430", "lineas": [{periodo, tipo_docto, numero, fecha, tipo_venta, producto, cantidad,
+    costo_neto, doc_ref, nro_doc_ref}]}
+    """
+    lineas = payload.get("lineas")
+    if not isinstance(lineas, list):
+        raise HTTPException(status_code=400, detail="Falta la lista 'lineas'")
+    bodega = str(payload.get("bodega") or "430").strip()
+    resumen_carga = svc.reemplazar_lineas(db, bodega, lineas)
+    _invalidar()
+    return resumen_carga

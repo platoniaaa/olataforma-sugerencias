@@ -5,8 +5,13 @@ Es lo que `venta_historica` no trae: tipo de venta y fecha del dia. La regla viv
 los Excel y se entrega el resultado.
 
 Por defecto NO publica nada: escribe un CSV con las filas y muestra el resumen. Para
-publicar, el motor llama a POST /api/canal-digital/ventas como admin (variables
-CANAL_DIGITAL_API y CANAL_DIGITAL_TOKEN, nunca por argumento) con --publicar.
+publicar, el motor llama como admin (variables CANAL_DIGITAL_API y CANAL_DIGITAL_TOKEN, nunca
+por argumento) a uno de dos endpoints:
+
+  --publicar         POST /api/canal-digital/ventas: las filas ya agregadas.
+  --publicar-lineas  POST /api/canal-digital/lineas: las lineas del ERP, UN envio por mes (el
+                     endpoint reemplaza el periodo que viene) y la plataforma recalcula la venta
+                     completa, de modo que una devolucion de un mes encuentre su venta de otro mes.
 
     python scripts/canal_digital_cargar_ventas.py --carpeta "<...>/Bases de datos/Ventas" \
         --anios 2025 2026 --salida ventas_canal.csv
@@ -20,6 +25,7 @@ import json
 import os
 import pathlib
 import sys
+import urllib.error
 import urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
@@ -106,18 +112,61 @@ def leer_archivo(ruta: pathlib.Path, tipos_venta) -> tuple[list[LineaVenta], dic
     return out, resumen
 
 
-def publicar(filas: list[dict], bodega: str) -> dict:
+def _enviar(ruta: str, cuerpo: dict) -> dict:
     base = os.environ.get("CANAL_DIGITAL_API", "").rstrip("/")
     token = os.environ.get("CANAL_DIGITAL_TOKEN", "")
     if not base or not token:
         raise SystemExit("Faltan las variables CANAL_DIGITAL_API y CANAL_DIGITAL_TOKEN (no se pasan por argumento).")
     req = urllib.request.Request(
-        f"{base}/api/canal-digital/ventas",
-        data=json.dumps({"bodega": bodega, "filas": filas}).encode("utf-8"),
+        f"{base}{ruta}",
+        data=json.dumps(cuerpo).encode("utf-8"),
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"}, method="POST",
     )
-    with urllib.request.urlopen(req, timeout=300) as r:
-        return json.loads(r.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=300) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raise SystemExit(f"{ruta} respondio {e.code}: {e.read().decode('utf-8', 'replace')[:500]}")
+
+
+def publicar(filas: list[dict], bodega: str) -> dict:
+    return _enviar("/api/canal-digital/ventas", {"bodega": bodega, "filas": filas})
+
+
+def linea_a_dict(l: LineaVenta) -> dict:
+    """La linea con los nombres del contrato de POST /api/canal-digital/lineas."""
+    return {
+        "periodo": l.periodo, "tipo_docto": l.tipo_docto, "numero": l.numero, "fecha": l.fecha.isoformat(),
+        "tipo_venta": l.tipo_venta, "producto": l.producto, "cantidad": l.cantidad, "costo_neto": l.costo_neto,
+        "doc_ref": l.doc_ref, "nro_doc_ref": l.nro_doc_ref,
+    }
+
+
+def lineas_por_mes(lineas: list[LineaVenta], desde_periodo: str | None = None) -> dict[str, list[dict]]:
+    """periodo -> sus lineas en formato del contrato. El endpoint reemplaza el periodo entero: un mes no se parte.
+
+    Con `desde_periodo` los meses anteriores no se envian: tienen que estar ya cargados en la plataforma para que
+    una devolucion de un mes nuevo encuentre su venta. Las lineas sin periodo YYYYMM se dejan fuera.
+    """
+    por_mes: dict[str, list[dict]] = {}
+    for l in lineas:
+        if len(l.periodo) != 6 or not l.periodo.isdigit():
+            continue
+        if desde_periodo and l.periodo < desde_periodo:
+            continue
+        por_mes.setdefault(l.periodo, []).append(linea_a_dict(l))
+    return dict(sorted(por_mes.items()))
+
+
+def publicar_lineas(por_mes: dict[str, list[dict]], bodega: str) -> list[dict]:
+    """Un envio por mes, del mas antiguo al mas nuevo. Devuelve la respuesta de cada uno."""
+    respuestas = []
+    for periodo, lineas in por_mes.items():
+        r = _enviar("/api/canal-digital/lineas", {"bodega": bodega, "lineas": lineas})
+        print(f"  {periodo}: {r['lineas_cargadas']:,} lineas ({r['lineas_ignoradas']:,} ignoradas), "
+              f"{r['filas_venta']:,} filas de venta", flush=True)
+        respuestas.append(r)
+    return respuestas
 
 
 def main():
@@ -127,8 +176,12 @@ def main():
     ap.add_argument("--desde-periodo", help="solo cargar periodos >= YYYYMM (los anteriores sirven solo para ubicar originales)")
     ap.add_argument("--bodega", default="430")
     ap.add_argument("--salida", help="CSV con las filas resultantes")
-    ap.add_argument("--publicar", action="store_true", help="enviar a la plataforma (admin)")
+    ap.add_argument("--publicar", action="store_true", help="enviar las filas agregadas a /ventas (admin)")
+    ap.add_argument("--publicar-lineas", action="store_true",
+                    help="enviar las lineas del ERP a /lineas, un envio por mes (admin); la plataforma arma la venta")
     a = ap.parse_args()
+    if a.publicar and a.publicar_lineas:
+        ap.error("--publicar y --publicar-lineas no se combinan: elige uno")
 
     carpeta = pathlib.Path(a.carpeta)
     lineas: list[LineaVenta] = []
@@ -159,8 +212,13 @@ def main():
         print("CSV:", a.salida)
     if a.publicar:
         print("Publicado:", publicar(filas, a.bodega))
+    elif a.publicar_lineas:
+        por_mes = lineas_por_mes(lineas, a.desde_periodo)
+        print(f"Publicando lineas de {len(por_mes)} meses ...")
+        publicar_lineas(por_mes, a.bodega)
+        print("Publicado.")
     else:
-        print("No se publico nada (falta --publicar).")
+        print("No se publico nada (falta --publicar o --publicar-lineas).")
 
 
 if __name__ == "__main__":

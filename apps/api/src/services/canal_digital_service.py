@@ -5,6 +5,9 @@ y se escribe lo que ese nucleo necesita.
 """
 from __future__ import annotations
 
+import datetime as dt
+import math
+import re
 from datetime import datetime, timezone
 
 from sqlalchemy import delete, func, insert, select
@@ -13,8 +16,11 @@ from sqlalchemy.orm import Session
 from ..canal_digital.politica import (
     BODEGA_CANAL_DIGITAL, CLUSTERS, FilaPolitica, Politica, filas_provisorias,
 )
+from ..canal_digital.ventas_semanales import (
+    TIPOS_VENTA_DEFECTO, LineaVenta, agregar, indice_originales, normalizar_codigo, normalizar_numero,
+)
 from ..config import get_settings
-from ..models import CanalDigitalBodega, CanalDigitalPolitica, CanalDigitalVenta
+from ..models import CanalDigitalBodega, CanalDigitalLinea, CanalDigitalPolitica, CanalDigitalVenta
 
 settings = get_settings()
 _LOTE = 1000
@@ -123,6 +129,189 @@ def reemplazar_ventas(db: Session, bodega: str, filas: list[dict]) -> dict:
         db.execute(insert(CanalDigitalVenta), lista[i : i + _LOTE])
     db.commit()
     return {"filas_cargadas": len(lista), "ignoradas": len(filas) - len(lista), "periodos": periodos}
+
+
+def _tipos_venta(fila: CanalDigitalBodega | None) -> tuple[str, ...]:
+    """Los tipos de venta que cuentan para la bodega (separados por coma). Sin fila de bodega, los de siembra."""
+    if fila is None:
+        return TIPOS_VENTA_DEFECTO
+    return tuple(t.strip() for t in (fila.tipos_venta or "").split(",") if t.strip())
+
+
+def _texto(valor) -> str:
+    """Texto de un campo que pudo venir como numero (202610 o 202610.0)."""
+    if valor is None or isinstance(valor, bool):
+        return ""
+    if isinstance(valor, float) and math.isfinite(valor) and valor == int(valor):
+        valor = int(valor)
+    return str(valor).strip()
+
+
+def _numero_documento(valor) -> str:
+    """Numero de documento sin ceros a la izquierda ni '.0': '007720' -> '7720', '835066.0' -> '835066'."""
+    return re.sub(r"\.0+$", "", normalizar_numero(_texto(valor) or None))
+
+
+def _finito(valor, *, obligatorio: bool) -> float | None:
+    """float finito, o None si no sirve. Un valor ausente es 0 cuando no es obligatorio."""
+    if valor is None:
+        return None if obligatorio else 0.0
+    if isinstance(valor, bool):
+        return None
+    try:
+        x = float(valor)
+    except (TypeError, ValueError):
+        return None
+    return x if math.isfinite(x) else None
+
+
+def _validar_linea(l, tipos: tuple[str, ...], bodega: str) -> tuple[dict | None, str]:
+    """(fila lista para insertar, "") o (None, motivo). Motivos: "tipo_venta" (no es del canal) o "invalida"."""
+    if not isinstance(l, dict):
+        return None, "invalida"
+    tipo_venta = _texto(l.get("tipo_venta"))
+    if tipo_venta not in tipos:
+        return None, "tipo_venta"
+    periodo = _texto(l.get("periodo"))
+    tipo_docto = _texto(l.get("tipo_docto"))
+    producto = normalizar_codigo(_texto(l.get("producto")))
+    fecha = _texto(l.get("fecha"))
+    cantidad = _finito(l.get("cantidad"), obligatorio=True)
+    costo = _finito(l.get("costo_neto"), obligatorio=False)
+    if (
+        len(periodo) != 6 or not periodo.isdigit() or not 1 <= int(periodo[4:]) <= 12
+        or not tipo_docto or not producto or len(fecha) != 10 or cantidad is None or costo is None
+    ):
+        return None, "invalida"
+    try:
+        dt.datetime.strptime(fecha, "%Y-%m-%d")
+    except ValueError:
+        return None, "invalida"
+    return {
+        "tenant_id": _tenant(), "bodega": bodega, "periodo": periodo, "tipo_docto": tipo_docto,
+        "numero": _numero_documento(l.get("numero")), "fecha": fecha, "tipo_venta": tipo_venta,
+        "producto": producto, "cantidad": cantidad, "costo_neto": costo,
+        "doc_ref": _texto(l.get("doc_ref")), "nro_doc_ref": _numero_documento(l.get("nro_doc_ref")),
+    }, ""
+
+
+def _contar_ventas(db: Session, bodega: str) -> int:
+    return db.execute(
+        select(func.count()).select_from(CanalDigitalVenta).where(
+            CanalDigitalVenta.tenant_id == _tenant(), CanalDigitalVenta.bodega == bodega
+        )
+    ).scalar_one()
+
+
+def _recalcular(db: Session, bodega: str, tipos: tuple[str, ...], conservar_sin_lineas: bool) -> dict:
+    """Arma la venta semanal con TODAS las lineas guardadas de la bodega. No hace commit."""
+    tenant = _tenant()
+    L = CanalDigitalLinea
+    lineas = [
+        LineaVenta(
+            periodo=r.periodo, tipo_docto=r.tipo_docto, numero=r.numero, fecha=dt.date.fromisoformat(r.fecha),
+            tipo_venta=r.tipo_venta, producto=r.producto, cantidad=r.cantidad, costo_neto=r.costo_neto,
+            doc_ref=r.doc_ref, nro_doc_ref=r.nro_doc_ref,
+        )
+        for r in db.execute(
+            select(
+                L.periodo, L.tipo_docto, L.numero, L.fecha, L.tipo_venta, L.producto, L.cantidad,
+                L.costo_neto, L.doc_ref, L.nro_doc_ref,
+            ).where(L.tenant_id == tenant, L.bodega == bodega)
+        )
+    ]
+    # El indice de originales mira todos los periodos: una devolucion de noviembre encuentra su venta de octubre.
+    resultado = agregar(lineas, tipos, indice_originales(lineas, tipos))
+    borrar = delete(CanalDigitalVenta).where(
+        CanalDigitalVenta.tenant_id == tenant, CanalDigitalVenta.bodega == bodega
+    )
+    if conservar_sin_lineas:
+        # La venta de un periodo sin lineas (cargada antes con reemplazar_ventas) no se puede rearmar: se deja.
+        borrar = borrar.where(CanalDigitalVenta.periodo.in_(sorted({l.periodo for l in lineas})))
+    db.execute(borrar)
+    nuevas = [
+        {
+            "tenant_id": tenant, "bodega": bodega, "producto": f.producto, "semana": f.semana,
+            "periodo": f.periodo, "unid_brutas": f.unid_brutas, "unid_devueltas": f.unid_devueltas,
+            "valor_costo": f.valor_costo, "unid_liquidacion": f.unid_liquidacion, "n_lineas": f.n_lineas,
+        }
+        for f in resultado.filas
+    ]
+    for i in range(0, len(nuevas), _LOTE):
+        db.execute(insert(CanalDigitalVenta), nuevas[i : i + _LOTE])
+    total = _contar_ventas(db, bodega)
+    estadisticas = dict(sorted(resultado.estadisticas.items()))
+    estadisticas["filas_recalculadas"] = len(nuevas)
+    estadisticas["filas_conservadas_sin_lineas"] = total - len(nuevas)
+    return {"filas_venta": total, "estadisticas": estadisticas}
+
+
+def recalcular_ventas(
+    db: Session, bodega: str = BODEGA_CANAL_DIGITAL, *, conservar_sin_lineas: bool = True
+) -> dict:
+    """Reemplaza la venta semanal de la bodega por la que sale de TODAS sus lineas guardadas, en una transaccion.
+
+    Por defecto deja intacta la venta de los periodos que no tienen lineas (cargada antes con `reemplazar_ventas`):
+    sin sus lineas no se puede rearmar y borrarla vaciaria las pantallas. Con `conservar_sin_lineas=False` se
+    reemplaza la tabla entera de la bodega.
+    """
+    fila = db.execute(
+        select(CanalDigitalBodega).where(
+            CanalDigitalBodega.tenant_id == _tenant(), CanalDigitalBodega.bodega == bodega
+        )
+    ).scalar_one_or_none()
+    try:
+        resultado = _recalcular(db, bodega, _tipos_venta(fila), conservar_sin_lineas)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return resultado
+
+
+def reemplazar_lineas(db: Session, bodega: str, lineas: list) -> dict:
+    """Carga las lineas de documento del ERP reemplazando SOLO los periodos (del documento) que vienen, y
+    recalcula la venta semanal de la bodega con todas las lineas guardadas.
+
+    Cada linea: {periodo (YYYYMM), tipo_docto, numero, fecha (YYYY-MM-DD), tipo_venta, producto, cantidad,
+    costo_neto, doc_ref, nro_doc_ref}. Solo entran las de los tipos de venta de la bodega; las mal formadas se
+    cuentan como ignoradas, no se cargan a medias. Un periodo sin ninguna linea valida no se toca y un envio sin
+    lineas validas no cambia nada. Todo o nada: si el recalculo falla, las lineas vuelven a como estaban.
+    """
+    tipos = _tipos_venta(asegurar_bodega(db, bodega))  # hace commit: va antes de tocar las lineas
+    validas: list[dict] = []
+    ignoradas = {"invalida": 0, "tipo_venta": 0}
+    for l in lineas:
+        fila, motivo = _validar_linea(l, tipos, bodega)
+        if fila is None:
+            ignoradas[motivo] += 1
+        else:
+            validas.append(fila)
+    estadisticas = {"ignoradas_invalidas": ignoradas["invalida"], "ignoradas_tipo_venta": ignoradas["tipo_venta"]}
+    if not validas:
+        return {
+            "lineas_cargadas": 0, "lineas_ignoradas": len(lineas), "periodos": [],
+            "filas_venta": _contar_ventas(db, bodega), "estadisticas": estadisticas,
+        }
+    periodos = sorted({f["periodo"] for f in validas})
+    try:
+        db.execute(
+            delete(CanalDigitalLinea).where(
+                CanalDigitalLinea.tenant_id == _tenant(), CanalDigitalLinea.bodega == bodega,
+                CanalDigitalLinea.periodo.in_(periodos),
+            )
+        )
+        for i in range(0, len(validas), _LOTE):
+            db.execute(insert(CanalDigitalLinea), validas[i : i + _LOTE])
+        venta = _recalcular(db, bodega, tipos, conservar_sin_lineas=True)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return {
+        "lineas_cargadas": len(validas), "lineas_ignoradas": len(lineas) - len(validas), "periodos": periodos,
+        "filas_venta": venta["filas_venta"], "estadisticas": {**estadisticas, **venta["estadisticas"]},
+    }
 
 
 def meta_ventas(db: Session, bodega: str = BODEGA_CANAL_DIGITAL) -> dict:

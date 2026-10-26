@@ -32,7 +32,9 @@ from .precio_override import PrecioOverride
 from .precio_cambio import PrecioCambio, PrecioEnvio
 from .inventario_ciclico import IcEvidencia, IcItem, IcRol
 from .fuente_dato import FuenteConfig, MotorCorrida
-from .canal_digital import CanalDigitalBodega, CanalDigitalPolitica, CanalDigitalVenta
+from .canal_digital import (
+    CanalDigitalBodega, CanalDigitalLinea, CanalDigitalPolitica, CanalDigitalVenta,
+)
 
 __all__ = [
     "Sugerido",
@@ -75,6 +77,7 @@ __all__ = [
     "FuenteConfig",
     "MotorCorrida",
     "CanalDigitalBodega",
+    "CanalDigitalLinea",
     "CanalDigitalPolitica",
     "CanalDigitalVenta",
 ]
