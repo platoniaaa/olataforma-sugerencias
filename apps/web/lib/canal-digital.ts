@@ -1,4 +1,4 @@
-// Cliente del modulo Canal Digital (/api/canal-digital): reposicion semanal de la bodega 430.
+// Cliente del modulo Canal Digital (/api/canal-digital): reposicion semanal de las bodegas del canal (la 430 y otras).
 import { mensajeError, req } from "./api-client";
 
 export type EstadoProducto = "CLASIFICADO" | "NUEVO" | "SIN MOVIMIENTO";
@@ -180,6 +180,38 @@ export interface DatosCanalDigital {
   como_cargar: string[];
 }
 
+/** Los parametros de una bodega tal como los guarda el servidor (las listas ya vienen limpias). */
+export interface BodegaCD {
+  bodega: string;
+  nombre: string;
+  activa: boolean;
+  tipos_venta: string[];
+  r_semanas: number;
+  /** Fija en 12: los umbrales de frecuencia A / B / C estan atados a 12 meses. No se edita. */
+  ventana_meses: number;
+  nuevo_meses: number;
+  corte_a_pct: number;
+  corte_b_pct: number;
+  gestion_dias: number;
+  bodegas_stock: string[];
+  bodegas_aparte: string[];
+  bodegas_informativas: string[];
+}
+
+export interface BodegasCanalDigital {
+  bodegas: BodegaCD[];
+  tipos_venta_sugeridos: string[];
+}
+
+/** Lo que se puede cambiar de una bodega; en un guardado solo viajan los campos que cambiaron. */
+export type CambiosBodegaCD = Partial<Omit<BodegaCD, "bodega" | "ventana_meses">>;
+
+export interface BodegaGuardadaCD extends BodegaCD {
+  /** Los campos que cambiaron de verdad (vacio si se guardo lo mismo que habia). */
+  cambios: string[];
+  avisos: string[];
+}
+
 export interface FiltrosProductosCD {
   cluster?: string;
   estado?: string;
@@ -192,6 +224,14 @@ async function getJSON<T>(path: string, fallback: string): Promise<T> {
   const res = await req(path);
   if (!res.ok) throw new Error(await mensajeError(res, fallback));
   return res.json();
+}
+
+/** Un 400 de validacion trae todos los problemas juntos ({detail: {mensaje, problemas}}): se muestran uno por renglon. */
+async function falloDeGuardado(res: Response, fallback: string): Promise<Error> {
+  const cuerpo = await res.clone().json().catch(() => ({}));
+  const problemas = (cuerpo as { detail?: { problemas?: string[] } })?.detail?.problemas;
+  if (Array.isArray(problemas) && problemas.length) return new Error(problemas.join("\n"));
+  return new Error(await mensajeError(res, fallback));
 }
 
 function consulta(bodega: string, f: FiltrosProductosCD = {}): URLSearchParams {
@@ -249,12 +289,31 @@ export const canalDigitalApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ filas }),
     });
-    if (!res.ok) {
-      const cuerpo = await res.clone().json().catch(() => ({}));
-      const problemas = (cuerpo as { detail?: { problemas?: string[] } })?.detail?.problemas;
-      if (Array.isArray(problemas) && problemas.length) throw new Error(problemas.join("\n"));
-      throw new Error(await mensajeError(res, "No se pudo guardar la política"));
-    }
+    if (!res.ok) throw await falloDeGuardado(res, "No se pudo guardar la política");
+    return res.json();
+  },
+
+  bodegas(): Promise<BodegasCanalDigital> {
+    return getJSON("/api/canal-digital/bodegas", "No se pudieron cargar las bodegas");
+  },
+
+  async guardarBodega(bodega: string, cambios: CambiosBodegaCD): Promise<BodegaGuardadaCD> {
+    const res = await req(`/api/canal-digital/bodegas/${encodeURIComponent(bodega)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cambios),
+    });
+    if (!res.ok) throw await falloDeGuardado(res, "No se pudieron guardar los parámetros");
+    return res.json();
+  },
+
+  async crearBodega(bodega: string, nombre: string): Promise<BodegaCD> {
+    const res = await req("/api/canal-digital/bodegas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(nombre.trim() ? { bodega, nombre } : { bodega }),
+    });
+    if (!res.ok) throw await falloDeGuardado(res, "No se pudo crear la bodega");
     return res.json();
   },
 

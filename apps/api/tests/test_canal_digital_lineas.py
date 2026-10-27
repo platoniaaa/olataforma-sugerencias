@@ -302,9 +302,11 @@ def test_meta_dice_hasta_que_mes_hay_lineas_aunque_la_venta_venga_de_la_ruta_vie
     m = client.get("/api/canal-digital/meta").json()
     assert m["periodo_hasta"] == "202610"
     assert (m["n_lineas"], m["lineas_periodo_desde"], m["lineas_periodo_hasta"]) == (3, "202608", "202609")
-    # otra bodega no mezcla
+    # otra bodega (ya creada) no mezcla; una que no existe responde 404 y no se crea
+    svc.asegurar_bodega(db_session, "999")
     otra = client.get("/api/canal-digital/meta?bodega=999").json()
     assert (otra["n_lineas"], otra["lineas_periodo_hasta"]) == (0, None)
+    assert client.get("/api/canal-digital/meta?bodega=888").status_code == 404
 
 
 # ---------------------------------------------------------------- un envio no pisa en silencio lo cargado

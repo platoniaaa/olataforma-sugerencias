@@ -53,8 +53,12 @@ def _tenant() -> str:
     return settings.default_tenant_id
 
 
-def asegurar_bodega(db: Session, bodega: str = BODEGA_CANAL_DIGITAL) -> CanalDigitalBodega:
-    """Crea la bodega con sus parametros de siembra y su politica provisoria si aun no existen."""
+def asegurar_bodega(
+    db: Session, bodega: str = BODEGA_CANAL_DIGITAL, nombre: str | None = None,
+) -> CanalDigitalBodega:
+    """Crea la bodega con sus parametros de siembra y su politica provisoria si aun no existen.
+
+    `nombre` solo cuenta al crearla; una bodega que ya existe conserva el suyo."""
     fila = db.execute(
         select(CanalDigitalBodega).where(
             CanalDigitalBodega.tenant_id == _tenant(), CanalDigitalBodega.bodega == bodega
@@ -62,7 +66,7 @@ def asegurar_bodega(db: Session, bodega: str = BODEGA_CANAL_DIGITAL) -> CanalDig
     ).scalar_one_or_none()
     if fila is None:
         fila = CanalDigitalBodega(
-            tenant_id=_tenant(), bodega=bodega, nombre=f"Canal digital {bodega}",
+            tenant_id=_tenant(), bodega=bodega, nombre=nombre or f"Canal digital {bodega}",
             actualizado_en=datetime.now(timezone.utc).replace(tzinfo=None),
         )
         db.add(fila)

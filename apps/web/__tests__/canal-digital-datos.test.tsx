@@ -15,14 +15,16 @@ const mocks = vi.hoisted(() => ({
   datos: vi.fn(),
   resumen: vi.fn(),
   productos: vi.fn(),
+  bodegas: vi.fn(),
   getSoloLectura: vi.fn().mockReturnValue(false),
+  getEsAdmin: vi.fn().mockReturnValue(false),
 }));
 
 vi.mock("@/lib/canal-digital", async (orig) => ({
   ...(await orig<typeof import("@/lib/canal-digital")>()),
-  canalDigitalApi: { datos: mocks.datos, resumen: mocks.resumen, productos: mocks.productos },
+  canalDigitalApi: { datos: mocks.datos, resumen: mocks.resumen, productos: mocks.productos, bodegas: mocks.bodegas },
 }));
-vi.mock("@/lib/auth", () => ({ getSoloLectura: mocks.getSoloLectura }));
+vi.mock("@/lib/auth", () => ({ getSoloLectura: mocks.getSoloLectura, getEsAdmin: mocks.getEsAdmin }));
 
 /** `n` periodos cargados, del mas reciente (sep-2026) al mas antiguo, como los manda el servidor. */
 function porMes(n: number) {
@@ -75,7 +77,9 @@ beforeEach(() => {
     m.mockReset();
   });
   mocks.getSoloLectura.mockReturnValue(false);
+  mocks.getEsAdmin.mockReturnValue(false);
   mocks.datos.mockResolvedValue(datos());
+  mocks.bodegas.mockResolvedValue({ bodegas: [], tipos_venta_sugeridos: [] });
 });
 afterEach(cleanup);
 
@@ -231,11 +235,11 @@ describe("CanalDigitalPage: pestana Datos", () => {
     mocks.productos.mockResolvedValue({ total: 0, items: [], aviso: resumen().aviso });
   });
 
-  it("Datos va despues de Productos y antes de Politica, y no pide nada hasta que se abre", async () => {
+  it("Datos va despues de Productos y antes de Bodegas y Politica, y no pide nada hasta que se abre", async () => {
     render(<CanalDigitalPage />);
     await screen.findByText("Piden reposición hoy");
     expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual([
-      "Sugerido", "Clusters", "Productos", "Datos", "Política",
+      "Sugerido", "Clusters", "Productos", "Datos", "Bodegas", "Política",
     ]);
     expect(mocks.datos).not.toHaveBeenCalled();
   });

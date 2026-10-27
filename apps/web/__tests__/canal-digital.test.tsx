@@ -1,5 +1,5 @@
 /**
- * Pantalla de Canal Digital (bodega 430): resumen por cluster, productos y politica.
+ * Pantalla de Canal Digital (bodega 430 por defecto): resumen por cluster, productos y politica.
  * Lo que se cuida: los 27 clusters siempre se ven, lo provisorio nunca se esconde, la politica
  * se guarda completa y solo la ve el menu de los admin.
  */
@@ -19,7 +19,9 @@ const mocks = vi.hoisted(() => ({
   politica: vi.fn(),
   guardarPolitica: vi.fn(),
   exportarCSV: vi.fn(),
+  bodegas: vi.fn(),
   getSoloLectura: vi.fn().mockReturnValue(false),
+  getEsAdmin: vi.fn().mockReturnValue(false),
 }));
 
 vi.mock("@/lib/canal-digital", async (orig) => ({
@@ -31,9 +33,10 @@ vi.mock("@/lib/canal-digital", async (orig) => ({
     politica: mocks.politica,
     guardarPolitica: mocks.guardarPolitica,
     exportarCSV: mocks.exportarCSV,
+    bodegas: mocks.bodegas,
   },
 }));
-vi.mock("@/lib/auth", () => ({ getSoloLectura: mocks.getSoloLectura }));
+vi.mock("@/lib/auth", () => ({ getSoloLectura: mocks.getSoloLectura, getEsAdmin: mocks.getEsAdmin }));
 
 const LETRAS = ["A", "B", "C"];
 
@@ -83,6 +86,8 @@ function politicaFilas(): FilaPoliticaCD[] {
 beforeEach(() => {
   Object.values(mocks).forEach((m) => m.mockReset());
   mocks.getSoloLectura.mockReturnValue(false);
+  mocks.getEsAdmin.mockReturnValue(false);
+  mocks.bodegas.mockResolvedValue({ bodegas: [], tipos_venta_sugeridos: [] });
   mocks.resumen.mockResolvedValue(resumen());
   mocks.productos.mockResolvedValue({ total: 0, items: [], aviso: resumen().aviso });
   mocks.politica.mockResolvedValue({
@@ -162,8 +167,11 @@ describe("CanalDigitalPage", () => {
     expect(screen.queryByLabelText("Estado")).not.toBeInTheDocument();
     // el orden de las pestanas es el acordado
     expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual([
-      "Sugerido", "Clusters", "Productos", "Datos", "Política",
+      "Sugerido", "Clusters", "Productos", "Datos", "Bodegas", "Política",
     ]);
+    // con una sola bodega no hay selector: el titulo ya dice cual es
+    expect(screen.queryByLabelText("Bodega")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("bodega 430");
   });
 
   it("muestra los totales arriba, lo provisorio y, en Clusters, las validaciones (con la que falla a la vista)", async () => {

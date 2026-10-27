@@ -1,7 +1,8 @@
 """Canal Digital: reposicion semanal de la bodega 430 (y otras bodegas del canal).
 
-Lectura para Abastecimiento (resumen por cluster, productos, paso a paso, politica); edicion de la
-politica con validacion; y la publicacion de la venta semanal, que hace el motor como admin.
+Lectura para Abastecimiento (resumen por cluster, productos, paso a paso, politica, datos); edicion de la
+politica y de los parametros de cada bodega con validacion; alta de bodegas (admin); y la publicacion de la venta
+semanal, que hace el motor como admin.
 """
 import csv
 import datetime as dt
@@ -13,9 +14,10 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from ..canal_digital.politica import BODEGA_CANAL_DIGITAL, CLUSTERS, MODOS, FilaPolitica, Politica, PoliticaInvalida
-from ..canal_digital.ventas_semanales import normalizar_codigo
+from ..canal_digital.ventas_semanales import TIPOS_VENTA_DEFECTO, normalizar_codigo
 from ..db import get_db
 from ..services import auditoria_service
+from ..services import canal_digital_bodegas as bodegas_cd
 from ..services import canal_digital_calculo as calculo
 from ..services import canal_digital_datos as datos_cd
 from ..services import canal_digital_service as svc
@@ -65,6 +67,7 @@ def meta(bodega: str = "430", db: Session = Depends(get_db)) -> dict:
     `periodo_hasta` es el ultimo mes con venta; `lineas_periodo_hasta` el ultimo con lineas. Quien sube lineas
     (el motor) decide con las segundas: un mes con venta cargada por /ventas puede no tener lineas.
     """
+    _exigir_bodega(db, bodega)
     return svc.meta_ventas(db, bodega)
 
 
@@ -83,6 +86,7 @@ def datos(bodega: str = "430", db: Session = Depends(get_db)) -> dict:
 @router.get("/resumen")
 def resumen(bodega: str = "430", db: Session = Depends(get_db)) -> dict:
     """Los 27 clusters, los totales, las validaciones y lo que sigue siendo provisorio."""
+    _exigir_bodega(db, bodega)
     corrida, aviso = _corrida(db, bodega)
     return vista.resumen(corrida, aviso)
 
@@ -100,6 +104,7 @@ def productos(
 ) -> dict:
     if orden not in ("ventas", "sugerido"):
         raise HTTPException(status_code=400, detail="orden debe ser 'ventas' o 'sugerido'")
+    _exigir_bodega(db, bodega)
     corrida, aviso = _corrida(db, bodega)
     return {"total": 0, **_filtrar(corrida, cluster, estado, q, solo_pide, limit, orden), "aviso": aviso}
 
@@ -130,6 +135,7 @@ def export_csv(
     bodega: str = "430", cluster: str | None = None, estado: str | None = None, q: str | None = None,
     solo_pide: bool = False, orden: str = "ventas", db: Session = Depends(get_db),
 ):
+    _exigir_bodega(db, bodega)
     corrida, _ = _corrida(db, bodega)
     datos = _filtrar(corrida, cluster, estado, q, solo_pide, 100_000, "sugerido" if orden == "sugerido" else "ventas")["items"]
     buf = io.StringIO()
@@ -147,6 +153,7 @@ def export_csv(
 @router.get("/producto/paso-a-paso")
 def paso_a_paso(producto: str, bodega: str = "430", db: Session = Depends(get_db)) -> dict:
     """El recorrido de un producto con sus numeros. El codigo va en la query porque lleva espacios."""
+    _exigir_bodega(db, bodega)
     corrida, aviso = _corrida(db, bodega)
     pasos = vista.paso_a_paso(corrida, normalizar_codigo(producto) or "", aviso["periodos_ventana"])
     if pasos is None:
@@ -167,8 +174,13 @@ def _politica_json(p: Politica) -> dict:
 
 @router.get("/politica")
 def get_politica(bodega: str = "430", db: Session = Depends(get_db)) -> dict:
-    svc.asegurar_bodega(db, bodega)
-    return _politica_json(svc.leer_politica(db, bodega))
+    _exigir_bodega(db, bodega)
+    if bodega == BODEGA_CANAL_DIGITAL:  # solo la por defecto se siembra al primer uso
+        svc.asegurar_bodega(db, bodega)
+    try:
+        return _politica_json(svc.leer_politica(db, bodega))
+    except PoliticaInvalida as e:
+        raise HTTPException(status_code=409, detail=f"La politica de la bodega {bodega} no es valida: {e}")
 
 
 @router.put("/politica")
@@ -176,6 +188,7 @@ def put_politica(
     payload: dict, bodega: str = "430", db: Session = Depends(get_db), email: str = Depends(requiere_escritura),
 ) -> dict:
     """Reemplaza las 27 filas de la politica. Se valida completa antes de guardar: si algo esta mal no se guarda nada."""
+    _exigir_bodega(db, bodega)
     filas = payload.get("filas")
     if not isinstance(filas, list):
         raise HTTPException(status_code=400, detail="Falta la lista 'filas'")
@@ -200,6 +213,80 @@ def put_politica(
     db.commit()
     _invalidar()
     return _politica_json(svc.leer_politica(db, bodega))
+
+
+@router.get("/bodegas")
+def get_bodegas(db: Session = Depends(get_db)) -> dict:
+    """Las bodegas del canal con sus parametros (la por defecto primero) y los tipos de venta que se sugieren.
+
+    Es una lectura: solo con la tabla vacia siembra la bodega por defecto, una vez. Chica: una fila por bodega.
+    """
+    return {"bodegas": bodegas_cd.listar(db), "tipos_venta_sugeridos": list(TIPOS_VENTA_DEFECTO)}
+
+
+def _problemas_400(e: bodegas_cd.ParametrosInvalidos) -> HTTPException:
+    return HTTPException(
+        status_code=400, detail={"mensaje": "Hay parámetros que no se pueden guardar", "problemas": e.problemas}
+    )
+
+
+def _detalle_cambios(cambios: dict) -> str:
+    def _v(x):
+        if isinstance(x, list):
+            return "[" + ", ".join(x) + "]"
+        return f"{x:g}" if isinstance(x, float) else str(x)
+
+    texto = "; ".join(f"{k} {_v(a)} -> {_v(d)}" for k, (a, d) in cambios.items())
+    return texto if len(texto) <= 900 else texto[:899] + "…"
+
+
+@router.put("/bodegas/{bodega}")
+def put_bodega(
+    bodega: str, payload: dict, db: Session = Depends(get_db), email: str = Depends(requiere_escritura),
+) -> dict:
+    """Cambia los parametros de una bodega. Se valida todo antes de guardar: si algo esta mal no se guarda nada.
+
+    Editables: nombre, activa, tipos_venta, r_semanas, nuevo_meses, corte_a_pct, corte_b_pct, gestion_dias,
+    bodegas_stock, bodegas_aparte, bodegas_informativas (solo los que vienen; el resto queda igual). La ventana
+    es de 12 meses y no se cambia. Cambiar los tipos de venta aplica a las cargas futuras (ver `avisos`).
+    Responde la bodega ya guardada mas `cambios` (los campos que cambiaron) y `avisos`.
+    """
+    try:
+        guardada, cambios, avisos = bodegas_cd.actualizar(db, bodega, payload, email)
+    except bodegas_cd.BodegaNoExiste:
+        raise HTTPException(status_code=404, detail=f"La bodega {bodega} no existe")
+    except bodegas_cd.ParametrosInvalidos as e:
+        raise _problemas_400(e)
+    if cambios:
+        auditoria_service.registrar(
+            db, accion="canal_digital_bodega", entidad="canal_digital", entidad_id=bodega, usuario_email=email,
+            detalle=f"Parametros de la bodega {bodega}: {_detalle_cambios(cambios)}",
+        )
+    db.commit()
+    if cambios:
+        _invalidar()
+    return {**guardada, "cambios": list(cambios), "avisos": avisos}
+
+
+@router.post("/bodegas", status_code=201)
+def post_bodega(payload: dict, db: Session = Depends(get_db), email: str = Depends(requiere_admin)) -> dict:
+    """Crea una bodega nueva: {"bodega": "<codigo>", "nombre": "..."}. Solo admin.
+
+    Codigo de 1 a 12 letras o numeros, unico (409 si ya existe). Nace con los parametros de siembra y las 27 filas
+    de la politica provisoria. No se borra: se desactiva con `activa: false`.
+    """
+    try:
+        nueva = bodegas_cd.crear(db, payload)
+    except bodegas_cd.ParametrosInvalidos as e:
+        raise _problemas_400(e)
+    except bodegas_cd.BodegaYaExiste as e:
+        raise HTTPException(status_code=409, detail=f"La bodega {e} ya existe")
+    auditoria_service.registrar(
+        db, accion="canal_digital_bodega_nueva", entidad="canal_digital", entidad_id=nueva["bodega"],
+        usuario_email=email, detalle=f"Bodega {nueva['bodega']} creada: {nueva['nombre']}",
+    )
+    db.commit()
+    return nueva
 
 
 @router.post("/ventas", dependencies=[Depends(requiere_admin)])

@@ -1,65 +1,153 @@
 "use client";
 
-// Sugerido Canal Digital: reposicion semanal de la bodega 430 (clusters Frecuencia-Piezas-Valor).
-import { useCallback, useEffect, useState } from "react";
+// Sugerido Canal Digital: reposicion semanal de las bodegas del canal (clusters Frecuencia-Piezas-Valor).
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle2, CircleAlert, Layers, TriangleAlert } from "lucide-react";
 import { EditorPolitica } from "@/components/canal-digital/editor-politica";
+import { PestanaBodegas } from "@/components/canal-digital/pestana-bodegas";
 import { PestanaDatos } from "@/components/canal-digital/pestana-datos";
 import { ResumenClusters } from "@/components/canal-digital/resumen-clusters";
 import { TablaProductos } from "@/components/canal-digital/tabla-productos";
-import { getSoloLectura } from "@/lib/auth";
-import { canalDigitalApi, periodoLegible, type ResumenCanalDigital } from "@/lib/canal-digital";
+import { getEsAdmin, getSoloLectura } from "@/lib/auth";
+import {
+  canalDigitalApi,
+  periodoLegible,
+  type BodegaCD,
+  type BodegasCanalDigital,
+  type ResumenCanalDigital,
+} from "@/lib/canal-digital";
 import { formatoCLPCorto, formatoNumero } from "@/lib/formato";
 
-const BODEGA = "430";
-type Pestana = "sugerido" | "clusters" | "productos" | "datos" | "politica";
+const BODEGA_DEFECTO = "430";
+type Pestana = "sugerido" | "clusters" | "productos" | "datos" | "bodegas" | "politica";
 const PESTANAS: { id: Pestana; texto: string }[] = [
   { id: "sugerido", texto: "Sugerido" },
   { id: "clusters", texto: "Clusters" },
   { id: "productos", texto: "Productos" },
   { id: "datos", texto: "Datos" },
+  { id: "bodegas", texto: "Bodegas" },
   { id: "politica", texto: "Política" },
 ];
 
 /** "2026-10-19" -> "19-10-2026". */
 const fechaLegible = (f: string) => f.split("-").reverse().join("-");
 
+/** La 430 primero y el resto por codigo, igual que las manda el servidor. */
+const ordenarBodegas = (l: BodegaCD[]) =>
+  [...l].sort(
+    (a, b) => Number(b.bodega === BODEGA_DEFECTO) - Number(a.bodega === BODEGA_DEFECTO) || a.bodega.localeCompare(b.bodega)
+  );
+
 export default function CanalDigitalPage() {
+  const [bodega, setBodega] = useState(BODEGA_DEFECTO);
+  const [bodegas, setBodegas] = useState<BodegasCanalDigital | null>(null);
+  const [errorBodegas, setErrorBodegas] = useState<string | null>(null);
   const [pestana, setPestana] = useState<Pestana>("sugerido");
   const [resumen, setResumen] = useState<ResumenCanalDigital | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cluster, setCluster] = useState<string | null>(null);
   const [puedeEditar, setPuedeEditar] = useState(false);
+  const [esAdmin, setEsAdmin] = useState(false);
+  const pedido = useRef(0);
 
   const cargar = useCallback(() => {
+    const mio = ++pedido.current;
     setError(null);
     canalDigitalApi
-      .resumen(BODEGA)
-      .then(setResumen)
-      .catch((e) => setError(e instanceof Error ? e.message : "No se pudo calcular"));
+      .resumen(bodega)
+      .then((r) => {
+        if (mio === pedido.current) setResumen(r);
+      })
+      .catch((e) => {
+        if (mio === pedido.current) setError(e instanceof Error ? e.message : "No se pudo calcular");
+      });
+  }, [bodega]);
+
+  const cargarBodegas = useCallback(() => {
+    setErrorBodegas(null);
+    canalDigitalApi
+      .bodegas()
+      .then(setBodegas)
+      .catch((e) => setErrorBodegas(e instanceof Error ? e.message : "No se pudieron cargar las bodegas"));
   }, []);
 
   useEffect(() => {
     setPuedeEditar(!getSoloLectura());
+    setEsAdmin(getEsAdmin());
+    cargarBodegas();
+  }, [cargarBodegas]);
+
+  // Al cambiar de bodega se recarga todo: lo de la anterior sale de la vista y una respuesta tardia se descarta.
+  useEffect(() => {
+    setResumen(null);
     cargar();
+    return () => {
+      pedido.current++;
+    };
   }, [cargar]);
+
+  function elegirBodega(b: string) {
+    setBodega(b);
+    setCluster(null);
+  }
+
+  const lista = bodegas?.bodegas ?? [];
+  const actual = lista.find((b) => b.bodega === bodega) ?? null;
+
+  function guardada(b: BodegaCD) {
+    setBodegas((d) => (d ? { ...d, bodegas: d.bodegas.map((x) => (x.bodega === b.bodega ? b : x)) } : d));
+    cargar(); // los parametros cambian lo que se calcula: se actualizan los totales de arriba
+  }
+
+  function creada(b: BodegaCD) {
+    setBodegas((d) =>
+      d ? { ...d, bodegas: ordenarBodegas([...d.bodegas.filter((x) => x.bodega !== b.bodega), b]) } : d
+    );
+    elegirBodega(b.bodega);
+  }
 
   const sinVentas = resumen !== null && resumen.totales.productos === 0;
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight text-slate-900">
-          <Layers size={20} /> Sugerido Canal Digital · bodega {BODEGA}
-        </h1>
-        <p className="text-[13px] text-slate-500">
-          {resumen && !sinVentas
-            ? `Venta de ${periodoLegible(resumen.aviso.periodos[0])} a ${periodoLegible(resumen.aviso.periodos[1])} · última semana completa desde el ${fechaLegible(resumen.aviso.semanas[1])} · reposición semanal`
-            : "Clusters y reposición semanal del canal digital."}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight text-slate-900">
+            <Layers size={20} /> Sugerido Canal Digital · bodega {bodega}
+          </h1>
+          <p className="text-[13px] text-slate-500">
+            {resumen && !sinVentas
+              ? `Venta de ${periodoLegible(resumen.aviso.periodos[0])} a ${periodoLegible(resumen.aviso.periodos[1])} · última semana completa desde el ${fechaLegible(resumen.aviso.semanas[1])} · reposición semanal`
+              : "Clusters y reposición semanal del canal digital."}
+          </p>
+        </div>
+        {lista.length > 1 && (
+          <label className="flex items-center gap-2 text-[13px] text-slate-600">
+            Bodega
+            <select
+              aria-label="Bodega"
+              value={bodega}
+              onChange={(e) => elegirBodega(e.target.value)}
+              className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-[13px] text-slate-900"
+            >
+              {lista.map((b) => (
+                <option key={b.bodega} value={b.bodega}>
+                  {b.bodega} · {b.nombre}
+                  {b.activa ? "" : " (desactivada)"}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
 
       {error && <p className="rounded-md bg-red-50 px-3 py-2 text-[13px] text-red-700">{error}</p>}
+
+      {actual && !actual.activa && (
+        <p className="rounded-md bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
+          Esta bodega está desactivada. Se puede seguir consultando; si vuelve a usarse, se activa en la pestaña Bodegas.
+        </p>
+      )}
 
       {sinVentas && (
         <p className="rounded-md bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
@@ -97,7 +185,7 @@ export default function CanalDigitalPage() {
         </div>
       )}
 
-      <div role="tablist" aria-label="Secciones" className="flex gap-1 border-b border-slate-200">
+      <div role="tablist" aria-label="Secciones" className="flex flex-wrap gap-1 border-b border-slate-200">
         {PESTANAS.map((p) => (
           <button
             key={p.id}
@@ -113,10 +201,11 @@ export default function CanalDigitalPage() {
         ))}
       </div>
 
-      {pestana === "sugerido" && <TablaProductos bodega={BODEGA} modo="sugerido" />}
+      {/* Cada pestana lleva la bodega en su key: al cambiar de bodega se vuelve a montar y recarga sus datos. */}
+      {pestana === "sugerido" && <TablaProductos key={bodega} bodega={bodega} modo="sugerido" />}
 
       {pestana === "clusters" && resumen && !sinVentas && (
-        <div className="space-y-5">
+        <div key={bodega} className="space-y-5">
           <ResumenClusters
             clusters={resumen.clusters}
             seleccionado={cluster}
@@ -153,12 +242,33 @@ export default function CanalDigitalPage() {
       )}
 
       {pestana === "productos" && (
-        <TablaProductos bodega={BODEGA} modo="todos" clusterInicial={cluster} onLimpiarCluster={() => setCluster(null)} />
+        <TablaProductos
+          key={bodega}
+          bodega={bodega}
+          modo="todos"
+          clusterInicial={cluster}
+          onLimpiarCluster={() => setCluster(null)}
+        />
       )}
 
-      {pestana === "datos" && <PestanaDatos bodega={BODEGA} />}
+      {pestana === "datos" && <PestanaDatos key={bodega} bodega={bodega} />}
 
-      {pestana === "politica" && <EditorPolitica bodega={BODEGA} puedeEditar={puedeEditar} onGuardada={cargar} />}
+      {pestana === "bodegas" && (
+        <PestanaBodegas
+          bodega={bodega}
+          datos={bodegas}
+          error={errorBodegas}
+          puedeEditar={puedeEditar}
+          esAdmin={esAdmin}
+          onReintentar={cargarBodegas}
+          onGuardada={guardada}
+          onCreada={creada}
+        />
+      )}
+
+      {pestana === "politica" && (
+        <EditorPolitica key={bodega} bodega={bodega} puedeEditar={puedeEditar} onGuardada={cargar} />
+      )}
     </div>
   );
 }
