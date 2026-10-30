@@ -80,8 +80,9 @@ export function GrupoReemplazos({
       <CardHeader className="space-y-1">
         <CardTitle>Historial de reemplazos</CardTitle>
         <p className="text-[12px] text-slate-500">
-          El sugerido trata estos {data.miembros.length} códigos como una sola pieza:
-          suma su stock y su venta, y compra con el vigente.
+          {consulta
+            ? `Estos ${data.miembros.length} códigos sirven para lo mismo: aquí se suman su stock y su venta.`
+            : `El sugerido trata estos ${data.miembros.length} códigos como una sola pieza: suma su stock y su venta, y compra con el vigente.`}
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -163,8 +164,9 @@ export function GrupoReemplazos({
         {fuera.length > 0 && (
           <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
             {fuera.map((m) => m.producto).join(", ")}{" "}
-            {fuera.length === 1 ? "no está sumado" : "no están sumados"} en el total.{" "}
-            {fuera[0].motivo_fuera}
+            {fuera.length === 1 ? "no está sumado" : "no están sumados"} en el total.
+            {/* El motivo habla del sugerido de compras: al vendedor no le sirve. */}
+            {!consulta && <> {fuera[0].motivo_fuera}</>}
           </p>
         )}
 
