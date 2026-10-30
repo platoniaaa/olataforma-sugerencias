@@ -59,17 +59,38 @@ def filtros_disponibles(db: Session = Depends(get_db)) -> dict:
     return catalogo_service.opciones_filtros(db)
 
 
+@router.get("/{producto:path}/sucursales")
+def sucursales(producto: str, db: Session = Depends(get_db)) -> dict:
+    """Las sucursales que vendieron el producto (o su grupo de reemplazos) en 12 meses:
+    las opciones del filtro de ventas. Una por sucursal, sin el código numérico del ERP."""
+    return {"producto": producto, "sucursales": sugerido_service.sucursales_con_venta(db, producto)}
+
+
 @router.get("/{producto:path}/ventas", response_model=VentasResponse)
-def ventas(producto: str, db: Session = Depends(get_db)) -> VentasResponse:
-    """Venta del producto, mes a mes, en TODAS las sucursales (12 meses). Solo
-    unidades: no lleva costo ni margen."""
-    return VentasResponse(**sugerido_service.ventas_12m(db, producto))
+def ventas(
+    producto: str,
+    sucursal_id: str | None = Query(None, description="Una de las de /sucursales"),
+    db: Session = Depends(get_db),
+) -> VentasResponse:
+    """Venta del producto, mes a mes (12 meses): el total de todas las sucursales y, si se
+    pide `sucursal_id`, la de esa sucursal aparte. Solo unidades: no lleva costo ni margen."""
+    if not sucursal_id:
+        return VentasResponse(**sugerido_service.ventas_12m(db, producto))
+    clave = sugerido_service.clave_sucursal(sucursal_id)
+    crudas = sugerido_service.variantes_de_sucursal(db, [producto], clave)
+    datos = sugerido_service.ventas_12m(db, producto, clave, sucursales_crudas=crudas)
+    return VentasResponse(**datos)
 
 
 @router.get("/{producto:path}/grupo-ventas")
-def grupo_ventas(producto: str, db: Session = Depends(get_db)) -> dict:
-    """Venta mes a mes de cada código del grupo de reemplazos (vacío si no tiene)."""
-    return sugerido_service.grupo_ventas(db, producto)
+def grupo_ventas(
+    producto: str,
+    sucursal_id: str | None = Query(None, description="Una de las de /sucursales"),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Venta mes a mes de cada código del grupo de reemplazos (vacío si no tiene). Con
+    `sucursal_id`, la venta y el stock de esa sucursal solamente."""
+    return sugerido_service.grupo_ventas(db, producto, sucursal_id or None)
 
 
 @router.get("/{producto:path}", response_model=ProductoConsultaDetalle)

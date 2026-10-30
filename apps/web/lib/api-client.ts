@@ -528,12 +528,21 @@ export const api = {
     return getJSON(`/api/consulta/productos/${encodeURIComponent(producto)}`);
   },
 
-  async consultaVentas(producto: string): Promise<VentasResponse> {
-    return getJSON(`/api/consulta/productos/${encodeURIComponent(producto)}/ventas`);
+  /** Con `sucursalId` agrega la serie de esa sucursal al total de todas. */
+  async consultaVentas(producto: string, sucursalId?: string): Promise<VentasResponse> {
+    const q = sucursalId ? `?sucursal_id=${encodeURIComponent(sucursalId)}` : "";
+    return getJSON(`/api/consulta/productos/${encodeURIComponent(producto)}/ventas${q}`);
   },
 
-  async consultaGrupoVentas(producto: string): Promise<GrupoVentas> {
-    return getJSON(`/api/consulta/productos/${encodeURIComponent(producto)}/grupo-ventas`);
+  /** Con `sucursalId`, la venta y el stock del grupo de reemplazos solo de esa sucursal. */
+  async consultaGrupoVentas(producto: string, sucursalId?: string): Promise<GrupoVentas> {
+    const q = sucursalId ? `?sucursal_id=${encodeURIComponent(sucursalId)}` : "";
+    return getJSON(`/api/consulta/productos/${encodeURIComponent(producto)}/grupo-ventas${q}`);
+  },
+
+  /** Las sucursales que vendieron el producto (o su grupo) en 12 meses: opciones del filtro. */
+  async consultaSucursales(producto: string): Promise<{ producto: string; sucursales: string[] }> {
+    return getJSON(`/api/consulta/productos/${encodeURIComponent(producto)}/sucursales`);
   },
 
   async sugerenciasManuales(

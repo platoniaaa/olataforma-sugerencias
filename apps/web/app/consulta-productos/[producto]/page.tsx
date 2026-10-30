@@ -15,11 +15,16 @@ import type { ConsultaDetalle } from "@/lib/types";
  * reemplazos (los equivalentes del mix y lo que dice FORD) y la venta de los
  * últimos 12 meses. Es la ficha del catálogo sin el costo.
  */
+const LS_SUCURSAL = "consulta_productos_sucursal";
+
 export default function DetalleConsultaPage({ params }: { params: { producto: string } }) {
   const producto = decodeURIComponent(params.producto);
   const [d, setD] = useState<ConsultaDetalle | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(true);
+  // Filtro de ventas: "" = todas las sucursales. Se recuerda al pasar de un producto a otro.
+  const [sucursales, setSucursales] = useState<string[]>([]);
+  const [sucursal, setSucursal] = useState("");
 
   useEffect(() => {
     let activo = true;
@@ -34,6 +39,37 @@ export default function DetalleConsultaPage({ params }: { params: { producto: st
       activo = false;
     };
   }, [producto]);
+
+  // Las sucursales que vendieron este producto (o su grupo) son las opciones del filtro.
+  useEffect(() => {
+    let activo = true;
+    api
+      .consultaSucursales(producto)
+      .then((r) => {
+        if (!activo) return;
+        setSucursales(r.sucursales);
+        let guardada = "";
+        try {
+          guardada = sessionStorage.getItem(LS_SUCURSAL) ?? "";
+        } catch {
+          /* sin sessionStorage: se parte en "todas" */
+        }
+        setSucursal(r.sucursales.includes(guardada) ? guardada : "");
+      })
+      .catch(() => activo && setSucursales([]));
+    return () => {
+      activo = false;
+    };
+  }, [producto]);
+
+  const elegirSucursal = (valor: string) => {
+    setSucursal(valor);
+    try {
+      sessionStorage.setItem(LS_SUCURSAL, valor);
+    } catch {
+      /* noop */
+    }
+  };
 
   const volver = (
     <Link
@@ -146,11 +182,44 @@ export default function DetalleConsultaPage({ params }: { params: { producto: st
         </section>
       )}
 
-      <GrupoReemplazos producto={d.producto} consulta />
-
       <GraficoStockSucursal filas={d.stock_por_sucursal} />
 
-      <GraficoVentas producto={d.producto} consulta />
+      {/* Filtro de ventas por sucursal: afecta al historial de reemplazos y a la venta de
+          los últimos 12 meses. Sin elegir, se ven todas las sucursales juntas. */}
+      {sucursales.length > 0 && (
+        <section className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+          <label htmlFor="filtro-sucursal" className="text-[13px] font-medium text-slate-700">
+            Ver ventas de
+          </label>
+          <select
+            id="filtro-sucursal"
+            className="h-11 min-w-[200px] rounded-md border border-slate-300 bg-white px-3 text-[13px] text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"
+            value={sucursal}
+            onChange={(e) => elegirSucursal(e.target.value)}
+          >
+            <option value="">Todas las sucursales</option>
+            {sucursales.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+          {sucursal && (
+            <span className="text-[12px] text-slate-600">
+              Venta y stock de <b>{sucursal}</b>. El gráfico de ventas la compara con el total.
+            </span>
+          )}
+        </section>
+      )}
+
+      <GrupoReemplazos producto={d.producto} consulta sucursalId={sucursal || undefined} />
+
+      <GraficoVentas
+        producto={d.producto}
+        consulta
+        sucursalId={sucursal || undefined}
+        sucursalNombre={sucursal || undefined}
+      />
 
       <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-4 py-3">

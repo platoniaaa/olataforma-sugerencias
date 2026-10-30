@@ -148,3 +148,90 @@ def test_sin_sesion_no_se_ve_nada(client, datos):
     for ruta in ("/api/consulta/productos", f"/api/consulta/productos/{CODIGO}",
                  f"/api/consulta/productos/{CODIGO}/ventas"):
         assert client.get(ruta).status_code == 401, ruta
+
+
+# --- Filtro de ventas por sucursal ------------------------------------------------------------
+
+VIGENTE = "19 SZ6Z3B437C"
+
+
+@pytest.fixture()
+def con_sucursales(datos, como_vendedor):
+    """Más ventas: la misma sucursal escrita de dos formas, otra más y una fuera de los 12 meses.
+    Además el código tiene un reemplazo vigente que también vendió y tiene stock."""
+    datos.add_all([
+        # LINDEROS viene del Excel con y sin el código del ERP, a veces en el mismo archivo.
+        VentaHistorica(tenant_id="curifor", periodo="202510", producto=CODIGO,
+                       sucursal="02 LINDEROS", cantidad=3.0, neto=150000.0),
+        VentaHistorica(tenant_id="curifor", periodo="202508", producto=CODIGO,
+                       sucursal="TALCA", cantidad=4.0, neto=200000.0),
+        # Fuera de la ventana de 12 meses: no es una opción del filtro.
+        VentaHistorica(tenant_id="curifor", periodo="202201", producto=CODIGO,
+                       sucursal="PLACILLA", cantidad=9.0, neto=450000.0),
+        VentaHistorica(tenant_id="curifor", periodo="202510", producto=VIGENTE,
+                       sucursal="LINDEROS", cantidad=6.0, neto=300000.0),
+        VentaHistorica(tenant_id="curifor", periodo="202510", producto=VIGENTE,
+                       sucursal="CURICO", cantidad=1.0, neto=50000.0),
+        ProductoCatalogo(tenant_id="curifor", producto=VIGENTE, glosa="TERMINAL NUEVO", precio=52000.0),
+        StockUnificado(tenant_id="curifor", producto=VIGENTE, sucursal_id="LINDEROS", bodega="LINDEROS", stock=10),
+        StockUnificado(tenant_id="curifor", producto=VIGENTE, sucursal_id="CURICO", bodega="CURICO", stock=5),
+    ])
+    datos.commit()
+    reemplazo_service.reemplazar(datos, [{
+        "producto": CODIGO, "reemplazado_por": VIGENTE, "reemplazado_por_ford": "SZ6Z/3B437/C/",
+        "cadena": None, "reemplaza_a": [], "sucesor_confirmado": True, "agrupado": True, "aviso": None,
+    }])
+    return datos
+
+
+def test_el_filtro_ofrece_una_opcion_por_sucursal_y_solo_las_de_los_ultimos_12_meses(client, con_sucursales):
+    r = client.get(f"/api/consulta/productos/{CODIGO}/sucursales")
+    assert r.status_code == 200
+    # "02 LINDEROS" y "LINDEROS" son una sola; PLACILLA vendió hace años y no aparece; y entra
+    # CURICO, que solo vendió el reemplazo vigente? No: vendió el propio código (202510).
+    assert r.json()["sucursales"] == ["CURICO", "LINDEROS", "TALCA"]
+
+
+def test_las_ventas_de_una_sucursal_suman_todas_las_formas_de_escribirla(client, con_sucursales):
+    r = client.get(f"/api/consulta/productos/{CODIGO}/ventas", params={"sucursal_id": "LINDEROS"})
+    assert r.status_code == 200
+    d = r.json()
+    assert {m["mes"]: m["cantidad"] for m in d["meses_sucursal"]} == {"202509": 5.0, "202510": 3.0}
+    assert d["total_sucursal"] == 8.0
+    # La serie del total no se toca: sigue siendo la de todas las sucursales.
+    assert d["total_general"] > d["total_sucursal"]
+    assert "neto" not in r.text and "costo" not in r.text
+
+
+@pytest.mark.parametrize("escrito", ["linderos", "02 LINDEROS", " Linderos "])
+def test_el_nombre_de_la_sucursal_se_reconoce_con_o_sin_codigo_y_en_cualquier_caso(client, con_sucursales, escrito):
+    r = client.get(f"/api/consulta/productos/{CODIGO}/ventas", params={"sucursal_id": escrito})
+    assert r.json()["total_sucursal"] == 8.0
+
+
+def test_una_sucursal_que_no_vendio_responde_en_cero_sin_error(client, con_sucursales):
+    r = client.get(f"/api/consulta/productos/{CODIGO}/ventas", params={"sucursal_id": "NO EXISTE"})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["meses_sucursal"] == [] and d["total_sucursal"] == 0
+
+
+def test_el_grupo_de_reemplazos_filtra_venta_y_stock_por_sucursal(client, con_sucursales):
+    todas = client.get(f"/api/consulta/productos/{CODIGO}/grupo-ventas").json()
+    assert todas["sucursal"] is None
+    por = {m["producto"]: m for m in todas["miembros"]}
+    assert por[VIGENTE]["stock"] == 15 and por[CODIGO]["stock"] == 7
+
+    d = client.get(f"/api/consulta/productos/{CODIGO}/grupo-ventas", params={"sucursal_id": "LINDEROS"}).json()
+    assert d["sucursal"] == "LINDEROS"
+    por = {m["producto"]: m for m in d["miembros"]}
+    assert por[VIGENTE]["venta_12m"] == 6.0 and por[VIGENTE]["stock"] == 10
+    assert por[CODIGO]["venta_12m"] == 8.0 and por[CODIGO]["stock"] == 3
+    assert d["total_stock"] == 13
+    _sin_prohibidos(json.dumps(d))
+
+
+def test_sin_filtro_las_ventas_siguen_igual(client, con_sucursales):
+    """El parámetro es opcional: sin él, la respuesta es la de siempre."""
+    d = client.get(f"/api/consulta/productos/{CODIGO}/ventas").json()
+    assert d["sucursal_id"] == "" and d["meses_sucursal"] == [] and d["total_sucursal"] == 0

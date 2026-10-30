@@ -42,23 +42,26 @@ const COLORES = ["#1e40af", "#94a3b8", "#cbd5e1", "#e2e8f0", "#f1f5f9"];
 export function GrupoReemplazos({
   producto,
   consulta = false,
+  sucursalId,
 }: {
   producto: string;
   /** Vista del vendedor: usa la ruta de consulta y enlaza a su propia ficha. */
   consulta?: boolean;
+  /** Vista del vendedor: venta y stock de una sola sucursal (sin esto, de todas). */
+  sucursalId?: string;
 }) {
   const [data, setData] = useState<GrupoVentas | null>(null);
   const [error, setError] = useState(false);
 
   useEffect(() => {
     let activo = true;
-    (consulta ? api.consultaGrupoVentas(producto) : api.grupoVentas(producto))
+    (consulta ? api.consultaGrupoVentas(producto, sucursalId) : api.grupoVentas(producto))
       .then((r) => activo && setData(r))
       .catch(() => activo && setError(true));
     return () => {
       activo = false;
     };
-  }, [producto, consulta]);
+  }, [producto, consulta, sucursalId]);
 
   const filas = useMemo(() => {
     if (!data) return [];
@@ -81,7 +84,9 @@ export function GrupoReemplazos({
         <CardTitle>Historial de reemplazos</CardTitle>
         <p className="text-[12px] text-slate-500">
           {consulta
-            ? `Estos ${data.miembros.length} códigos sirven para lo mismo: aquí se suman su stock y su venta.`
+            ? `Estos ${data.miembros.length} códigos sirven para lo mismo: aquí se suman su stock y su venta${
+                data.sucursal ? ` (solo ${data.sucursal})` : ""
+              }.`
             : `El sugerido trata estos ${data.miembros.length} códigos como una sola pieza: suma su stock y su venta, y compra con el vigente.`}
         </p>
       </CardHeader>
