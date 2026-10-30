@@ -7,6 +7,7 @@ import { LogOut, Menu } from "lucide-react";
 import { estaAutenticado, getEmail, getNombre, logout } from "@/lib/auth";
 import { CampanitaNotificaciones } from "@/components/campanita-notificaciones";
 import { ChatBot } from "@/components/chat-bot";
+import { IndicadorSync } from "@/components/indicador-sync";
 import { Sidebar } from "@/components/sidebar";
 
 export function Shell({ children }: { children: React.ReactNode }) {
@@ -75,7 +76,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
             </span>
           </Link>
 
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-3">
+            <IndicadorSync />
             <CampanitaNotificaciones />
             <span className="hidden text-[13px] text-ink-600 md:inline">
               {nombre ?? email}
