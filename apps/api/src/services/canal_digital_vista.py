@@ -53,6 +53,18 @@ def validaciones(corrida: Corrida) -> list[dict]:
     ]
 
 
+def _aviso_aparte(aviso: dict) -> list[str]:
+    """El aviso de las bodegas que van aparte, con los nombres de ESTA bodega (cada una tiene las suyas). Sin ninguna
+    bodega aparte no hay nada que avisar."""
+    aparte = aviso.get("bodegas_aparte") or []
+    if not aparte:
+        return []
+    return [
+        f"Se muestran aparte y no suman al disponible: {', '.join(aparte)}. "
+        "Si la venta sale de ahi, el sugerido sale inflado."
+    ]
+
+
 def resumen(corrida: Corrida, aviso: dict) -> dict:
     res = corrida.clasificacion
     por_cluster: dict[str, dict] = {}
@@ -91,7 +103,7 @@ def resumen(corrida: Corrida, aviso: dict) -> dict:
             "La politica de los 27 clusters son los valores del brief, sin confirmar.",
             "El comprometido no existe en el ERP (se muestra 0 sin dato); minimo y multiplo van en 1 por defecto.",
             "Los traslados desde el CD no figuran en ningun reporte: la posicion es stock mas transito de OC a la bodega.",
-            "ML-FULL va aparte y no suma al disponible. Si la venta sale de ahi, el sugerido sale inflado.",
+            *_aviso_aparte(aviso),
         ],
     }
 

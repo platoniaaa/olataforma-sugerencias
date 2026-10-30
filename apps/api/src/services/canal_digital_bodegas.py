@@ -13,14 +13,14 @@ import math
 import re
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..canal_digital.clasificacion import ParametrosClasificacion
 from ..canal_digital.politica import BODEGA_CANAL_DIGITAL
 from ..canal_digital.reposicion import ParametrosReposicion
-from ..models import CanalDigitalBodega
+from ..models import CanalDigitalBodega, CanalDigitalLinea
 from .canal_digital_calculo import _clave
 from .canal_digital_service import _tenant, asegurar_bodega
 
@@ -49,10 +49,50 @@ ETIQUETA = {
     "bodegas_informativas": "«Bodegas solo informativas»",
 }
 
-AVISO_TIPOS_VENTA = (
-    "Los tipos de venta nuevos se aplican desde la próxima carga de líneas del ERP: la venta ya guardada se "
-    "filtró con los tipos anteriores y no se vuelve a filtrar."
-)
+
+def _lineas(n: int) -> str:
+    return f"{n} {'línea guardada' if n == 1 else 'líneas guardadas'}"
+
+
+def avisos_tipos_venta(db: Session, bodega: str, antes: list[str], despues: list[str]) -> list[str]:
+    """Lo que hay que saber al cambiar los tipos de venta, con las cifras de lo que hay guardado (sin tablas nuevas).
+
+    Guardar NO toca la venta que ya esta guardada. Pero la proxima carga de lineas del ERP vuelve a armar la venta de
+    TODOS los meses que tienen lineas guardadas, no solo del mes que se envia: un tipo que se quita deja de contar en
+    todos esos meses; uno que se agrega solo suma donde haya lineas de ese tipo guardadas, y las de un tipo que no
+    contaba no se guardaron. Solo cambiar el orden no avisa nada."""
+    quitados = [t for t in antes if t not in despues]
+    agregados = [t for t in despues if t not in antes]
+    if not quitados and not agregados:
+        return []
+    L = CanalDigitalLinea
+    guardadas = dict(
+        db.execute(
+            select(L.tipo_venta, func.count()).where(
+                L.tenant_id == _tenant(), L.bodega == bodega, L.tipo_venta.in_(quitados + agregados)
+            ).group_by(L.tipo_venta)
+        ).all()
+    )
+    avisos = [
+        "La venta que ya está guardada no cambia al guardar. En la próxima carga de líneas del ERP se vuelve a armar "
+        "la venta de TODOS los meses que tienen líneas guardadas (no solo la del mes que se envía), con los tipos nuevos."
+    ]
+    if quitados:
+        n = sum(guardadas.get(t, 0) for t in quitados)
+        avisos.append(
+            f"Los tipos que quitaste ({', '.join(quitados)}) dejan de contar en todos los meses: "
+            + (f"hoy hay {_lineas(n)} de esos tipos." if n else "no hay líneas guardadas de esos tipos, así que no cambia nada.")
+        )
+    if agregados:
+        n = sum(guardadas.get(t, 0) for t in agregados)
+        avisos.append(
+            f"Los tipos que agregaste ({', '.join(agregados)}) "
+            + (f"ya tienen {_lineas(n)}, que se suman en esa carga; el resto solo suma si se vuelve a enviar su mes."
+               if n else "solo suman en los meses cuyas líneas se vuelvan a enviar: las líneas de un tipo que no "
+                         "contaba no se guardaron.")
+        )
+    return avisos
+
 
 
 class ParametrosInvalidos(Exception):
@@ -69,6 +109,17 @@ class BodegaNoExiste(Exception):
 
 class BodegaYaExiste(Exception):
     pass
+
+
+def normalizar_codigo_bodega(valor) -> str | None:
+    """El codigo en mayusculas, o None si no sirve (1 a 12 letras o numeros, sin espacios ni signos).
+
+    Es la unica regla de codigos: la usan el alta de bodegas y los envios del motor, para que no existan dos bodegas
+    que difieren solo en el caso ni una a la que la direccion de la pantalla no pueda llegar."""
+    if not isinstance(valor, str):
+        return None
+    t = valor.strip()
+    return t.upper() if _CODIGO.fullmatch(t) else None
 
 
 def _fmt(x) -> str:
@@ -197,12 +248,19 @@ def _sembrar_defecto(db: Session) -> None:
         db.rollback()
 
 
+def _todas(db: Session) -> list[CanalDigitalBodega]:
+    return list(db.execute(select(CanalDigitalBodega).where(CanalDigitalBodega.tenant_id == _tenant())).scalars())
+
+
 def listar(db: Session) -> list[dict]:
-    """Las bodegas del canal, la por defecto primero. Es una lectura: solo con la tabla vacia siembra la por defecto."""
-    filas = db.execute(select(CanalDigitalBodega).where(CanalDigitalBodega.tenant_id == _tenant())).scalars().all()
-    if not filas:
+    """Las bodegas del canal, la por defecto primero. Es una lectura: solo la por defecto se siembra, y una sola vez.
+
+    Se siembra siempre que falte (como en el resumen y la politica): el selector de la pantalla tiene que poder
+    ofrecerla aunque la tabla tenga otras bodegas."""
+    filas = _todas(db)
+    if not any(f.bodega == BODEGA_CANAL_DIGITAL for f in filas):
         _sembrar_defecto(db)
-        filas = db.execute(select(CanalDigitalBodega).where(CanalDigitalBodega.tenant_id == _tenant())).scalars().all()
+        filas = _todas(db)
     filas = sorted(filas, key=lambda f: (f.bodega != BODEGA_CANAL_DIGITAL, f.bodega))
     return [a_json(f) for f in filas]
 
@@ -323,7 +381,7 @@ def actualizar(db: Session, bodega: str, cambios: dict, email: str | None) -> tu
         fila.actualizado_en = datetime.now(timezone.utc).replace(tzinfo=None)
         db.flush()
         if "tipos_venta" in cambiado:
-            avisos.append(AVISO_TIPOS_VENTA)
+            avisos += avisos_tipos_venta(db, bodega, *cambiado["tipos_venta"])
     return a_json(fila), cambiado, avisos
 
 
@@ -332,12 +390,9 @@ def actualizar(db: Session, bodega: str, cambios: dict, email: str | None) -> tu
 def crear(db: Session, payload: dict) -> dict:
     """Crea una bodega nueva con los parametros de siembra y su politica provisoria de 27 filas."""
     problemas: list[str] = []
-    codigo = payload.get("bodega")
-    if not isinstance(codigo, str) or not _CODIGO.fullmatch(codigo.strip()):
+    codigo = normalizar_codigo_bodega(payload.get("bodega"))
+    if codigo is None:
         problemas.append("El código de la bodega debe tener de 1 a 12 letras o números, sin espacios ni signos.")
-        codigo = None
-    else:
-        codigo = codigo.strip().upper()
     nombre = payload.get("nombre")
     if nombre is None:
         nombre = f"Canal digital {codigo}" if codigo else None
@@ -348,9 +403,14 @@ def crear(db: Session, payload: dict) -> dict:
         problemas.append(f"«{k}» no se pide al crear una bodega: los parámetros se ajustan después, en la pestaña Bodegas.")
     if problemas:
         raise ParametrosInvalidos(problemas)
-    if not db.execute(select(CanalDigitalBodega.id).where(CanalDigitalBodega.tenant_id == _tenant())).first():
+    if buscar(db, BODEGA_CANAL_DIGITAL) is None:
         _sembrar_defecto(db)  # la por defecto existe siempre que exista alguna otra
-    if buscar(db, codigo) is not None:
+    # El codigo se compara sin importar mayusculas: una bodega cargada antes en minusculas tambien cuenta como repetida.
+    if db.execute(
+        select(CanalDigitalBodega.id).where(
+            CanalDigitalBodega.tenant_id == _tenant(), func.upper(CanalDigitalBodega.bodega) == codigo
+        )
+    ).first() is not None:
         raise BodegaYaExiste(codigo)
     try:
         fila = asegurar_bodega(db, codigo, nombre)
@@ -361,5 +421,6 @@ def crear(db: Session, payload: dict) -> dict:
 
 
 __all__ = [
-    "AVISO_TIPOS_VENTA", "BodegaNoExiste", "BodegaYaExiste", "ParametrosInvalidos", "a_json", "actualizar", "buscar", "crear", "listar", "normalizar_lista", "validar",
+    "BodegaNoExiste", "BodegaYaExiste", "ParametrosInvalidos", "a_json", "actualizar", "avisos_tipos_venta", "buscar",
+    "crear", "listar", "normalizar_codigo_bodega", "normalizar_lista", "validar",
 ]

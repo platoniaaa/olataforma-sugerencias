@@ -60,6 +60,21 @@ def _exigir_bodega(db: Session, bodega: str) -> None:
         raise HTTPException(status_code=404, detail=f"La bodega {bodega} no existe")
 
 
+def _bodega_del_envio(db: Session, payload: dict) -> str:
+    """La bodega de un envio del motor, con el mismo codigo que usa el alta (mayusculas, 1 a 12 letras o numeros).
+
+    Un envio no crea bodegas: las crea un admin con POST /bodegas. Solo la por defecto se siembra sola."""
+    crudo = str(payload.get("bodega") or BODEGA_CANAL_DIGITAL)
+    codigo = bodegas_cd.normalizar_codigo_bodega(crudo)
+    if codigo is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"El codigo de bodega {crudo.strip()[:30]!r} no sirve: son de 1 a 12 letras o numeros, sin espacios ni signos",
+        )
+    _exigir_bodega(db, codigo)
+    return codigo
+
+
 @router.get("/meta")
 def meta(bodega: str = "430", db: Session = Depends(get_db)) -> dict:
     """Que venta semanal y que lineas del ERP hay cargadas para la bodega.
@@ -219,7 +234,7 @@ def put_politica(
 def get_bodegas(db: Session = Depends(get_db)) -> dict:
     """Las bodegas del canal con sus parametros (la por defecto primero) y los tipos de venta que se sugieren.
 
-    Es una lectura: solo con la tabla vacia siembra la bodega por defecto, una vez. Chica: una fila por bodega.
+    Es una lectura: solo siembra la bodega por defecto si falta, una vez. Chica: una fila por bodega.
     """
     return {"bodegas": bodegas_cd.listar(db), "tipos_venta_sugeridos": list(TIPOS_VENTA_DEFECTO)}
 
@@ -248,7 +263,8 @@ def put_bodega(
 
     Editables: nombre, activa, tipos_venta, r_semanas, nuevo_meses, corte_a_pct, corte_b_pct, gestion_dias,
     bodegas_stock, bodegas_aparte, bodegas_informativas (solo los que vienen; el resto queda igual). La ventana
-    es de 12 meses y no se cambia. Cambiar los tipos de venta aplica a las cargas futuras (ver `avisos`).
+    es de 12 meses y no se cambia. Cambiar los tipos de venta no toca la venta guardada: la proxima carga de lineas
+    la rearma con los tipos nuevos en todos los meses (ver `avisos`).
     Responde la bodega ya guardada mas `cambios` (los campos que cambiaron) y `avisos`.
     """
     try:
@@ -297,11 +313,13 @@ def publicar_ventas(payload: dict, db: Session = Depends(get_db)) -> dict:
 
     payload: {"bodega": "430", "filas": [{producto, semana, periodo, unid_brutas,
     unid_devueltas, valor_costo, unid_liquidacion, n_lineas}]}
+
+    La bodega debe existir (404 si no): se crea con POST /bodegas. Solo la 430 se siembra sola.
     """
     filas = payload.get("filas")
     if not isinstance(filas, list):
         raise HTTPException(status_code=400, detail="Falta la lista 'filas'")
-    bodega = str(payload.get("bodega") or "430").strip()
+    bodega = _bodega_del_envio(db, payload)
     svc.asegurar_bodega(db, bodega)
     try:
         resumen_carga = svc.reemplazar_ventas(db, bodega, filas)
@@ -324,6 +342,9 @@ def publicar_lineas(
     payload: {"bodega": "430", "lineas": [{periodo, tipo_docto, numero, fecha, tipo_venta, producto, cantidad,
     costo_neto, doc_ref, nro_doc_ref}], "forzar": false}
 
+    La bodega debe existir (404 si no; 400 si el codigo no sirve): se crea con POST /bodegas. Solo la 430 se siembra
+    sola. Solo entran las lineas de los tipos de venta de la bodega (ver GET /bodegas).
+
     Respuestas distintas de 200:
       409  el envio dejaria un periodo con menos de la mitad de sus lineas (parece un envio parcial); con
            "forzar": true se carga igual.
@@ -333,7 +354,7 @@ def publicar_lineas(
     lineas = payload.get("lineas")
     if not isinstance(lineas, list):
         raise HTTPException(status_code=400, detail="Falta la lista 'lineas'")
-    bodega = str(payload.get("bodega") or "430").strip()
+    bodega = _bodega_del_envio(db, payload)
     try:
         resumen_carga = svc.reemplazar_lineas(db, bodega, lineas, forzar=payload.get("forzar") is True)
     except svc.ConflictoCarga as e:

@@ -18,6 +18,11 @@ por argumento) a uno de dos endpoints:
 
     python scripts/canal_digital_cargar_ventas.py --carpeta "<...>/Bases de datos/Ventas" \
         --anios 2025 2026 --salida ventas_canal.csv
+
+Los tipos de venta que cuentan son los de la bodega (se editan en la pestana Bodegas): al publicar, el script los
+lee de la plataforma (GET /api/canal-digital/bodegas) y solo lee de los Excel las lineas de esos tipos. Con
+--tipos-venta se eligen a mano; sin publicar y sin esa opcion se usan los de siembra. La bodega debe existir: se
+crea en la pestana Bodegas (admin). Con --bodega se elige cual (por defecto la 430).
 """
 from __future__ import annotations
 
@@ -115,21 +120,54 @@ def leer_archivo(ruta: pathlib.Path, tipos_venta) -> tuple[list[LineaVenta], dic
     return out, resumen
 
 
-def _enviar(ruta: str, cuerpo: dict) -> dict:
+def _pedir(metodo: str, ruta: str, cuerpo: dict | None = None) -> dict:
     base = os.environ.get("CANAL_DIGITAL_API", "").rstrip("/")
     token = os.environ.get("CANAL_DIGITAL_TOKEN", "")
     if not base or not token:
         raise SystemExit("Faltan las variables CANAL_DIGITAL_API y CANAL_DIGITAL_TOKEN (no se pasan por argumento).")
     req = urllib.request.Request(
         f"{base}{ruta}",
-        data=json.dumps(cuerpo).encode("utf-8"),
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"}, method="POST",
+        data=None if cuerpo is None else json.dumps(cuerpo).encode("utf-8"),
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"}, method=metodo,
     )
     try:
         with urllib.request.urlopen(req, timeout=300) as r:
             return json.loads(r.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         raise SystemExit(f"{ruta} respondio {e.code}: {e.read().decode('utf-8', 'replace')[:500]}")
+
+
+def _enviar(ruta: str, cuerpo: dict) -> dict:
+    return _pedir("POST", ruta, cuerpo)
+
+
+def _leer(ruta: str) -> dict:
+    return _pedir("GET", ruta)
+
+
+def tipos_de_la_bodega(bodega: str) -> tuple[str, ...]:
+    """Los tipos de venta que la plataforma tiene guardados para la bodega (los que se editan en la pestana Bodegas).
+
+    Es lo que decide que lineas cuentan como venta del canal: si el script filtrara con una lista propia, agregar un
+    tipo en la pantalla no tendria efecto aqui y una bodega nueva con otros tipos no se podria cargar."""
+    codigo = bodega.strip().upper()
+    for b in _leer("/api/canal-digital/bodegas").get("bodegas", []):
+        if b.get("bodega") == codigo:
+            return tuple(b["tipos_venta"])
+    raise SystemExit(f"La bodega {codigo} no existe en la plataforma: un admin la crea en la pestaña Bodegas.")
+
+
+def elegir_tipos(tipos_venta: list[str] | None, bodega: str, publica: bool) -> tuple[str, ...]:
+    """Los tipos de venta con los que se leen los Excel: los pedidos a mano, los de la bodega en la plataforma (al
+    publicar) o, para una corrida de prueba sin red, los de siembra."""
+    if tipos_venta:
+        return tuple(tipos_venta)
+    if publica:
+        tipos = tipos_de_la_bodega(bodega)
+        print(f"Tipos de venta de la bodega {bodega.strip().upper()} (de la plataforma): {', '.join(tipos)}", flush=True)
+        return tipos
+    print("AVISO: sin publicar se usan los tipos de venta de siembra; con --tipos-venta se eligen otros.", flush=True)
+    return TIPOS_VENTA_DEFECTO
 
 
 def publicar(filas: list[dict], bodega: str) -> dict:
@@ -196,7 +234,9 @@ def main():
     ap.add_argument("--carpeta", required=True, help="carpeta con los respaldos anuales (Ventas)")
     ap.add_argument("--anios", nargs="+", required=True, help="anios a leer, ej. 2025 2026")
     ap.add_argument("--desde-periodo", help="solo cargar periodos >= YYYYMM (los anteriores sirven solo para ubicar originales)")
-    ap.add_argument("--bodega", default="430")
+    ap.add_argument("--bodega", default="430", help="la bodega debe existir en la plataforma (por defecto la 430)")
+    ap.add_argument("--tipos-venta", nargs="+",
+                    help="tipos de venta que cuentan (por defecto, los de la bodega en la plataforma al publicar)")
     ap.add_argument("--salida", help="CSV con las filas resultantes")
     ap.add_argument("--publicar", action="store_true", help="enviar las filas agregadas a /ventas (admin)")
     ap.add_argument("--publicar-lineas", action="store_true",
@@ -205,6 +245,7 @@ def main():
     if a.publicar and a.publicar_lineas:
         ap.error("--publicar y --publicar-lineas no se combinan: elige uno")
 
+    tipos = elegir_tipos(a.tipos_venta, a.bodega, bool(a.publicar or a.publicar_lineas))
     carpeta = pathlib.Path(a.carpeta)
     lineas: list[LineaVenta] = []
     for anio in a.anios:
@@ -214,14 +255,14 @@ def main():
             raise SystemExit(f"No hay respaldo de {anio} en {carpeta}")
         for p in archivos:
             print(f"Leyendo {p.name} ...", flush=True)
-            l, r = leer_archivo(p, TIPOS_VENTA_DEFECTO)
+            l, r = leer_archivo(p, tipos)
             print(f"  {r['filas_leidas']:,} filas, {len(l):,} del canal ({r})")
             lineas += l
-    originales = indice_originales(lineas, TIPOS_VENTA_DEFECTO)
+    originales = indice_originales(lineas, tipos)
     periodos = None
     if a.desde_periodo:
         periodos = sorted({l.periodo for l in lineas if l.periodo >= a.desde_periodo})
-    res = agregar(lineas, TIPOS_VENTA_DEFECTO, originales, periodos)
+    res = agregar(lineas, tipos, originales, periodos)
     print(f"Filas: {len(res.filas):,}; unidades netas {res.unidades_netas:,.0f}")
     for k, v in sorted(res.estadisticas.items()):
         print(f"  {k}: {v}")

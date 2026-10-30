@@ -138,6 +138,8 @@ def reunir_datos(db: Session, bodega: str, hoy: dt.date) -> tuple[list[DatosProd
         "periodos": [periodos[0], periodos[-1]], "semanas": [semanas[0], semanas[-1]],
         "fecha_referencia": v["fecha_referencia"].isoformat(), "periodos_ventana": periodos,
         "ultimo_periodo_cargado": ultimo,
+        # Las bodegas del ERP que esta bodega muestra aparte (sin sumarlas): la pantalla las nombra en sus avisos.
+        "bodegas_aparte": _lista(cfg.bodegas_aparte),
         # Meses cerrados que faltan cargar (0 = al dia: el ultimo mes cerrado ya esta).
         "meses_sin_cargar": (
             (int(mes_actual[:4]) * 12 + int(mes_actual[4:]) - 1) - (int(ultimo[:4]) * 12 + int(ultimo[4:]))
@@ -206,7 +208,8 @@ def reunir_datos(db: Session, bodega: str, hoy: dt.date) -> tuple[list[DatosProd
         if tipo:
             stock[c][tipo] += fila.stock or 0.0
 
-    # costo y descripcion del maestro de precios
+    # costo y descripcion del maestro de precios. Un costo menor o igual a 0 es un costo ausente (como en el resto
+    # de la plataforma): el producto sale "sin costo" y no figura como que tiene costo con valor a pedir $0.
     costo: dict[str, float] = {}
     glosa: dict[str, str] = {}
     for trozo in _trozos(todos):
@@ -215,7 +218,7 @@ def reunir_datos(db: Session, bodega: str, hoy: dt.date) -> tuple[list[DatosProd
             .where(PrecioProducto.tenant_id == tenant, PrecioProducto.producto.in_(trozo))
         ).all():
             c = normalizar_codigo(f.producto)
-            if f.costo is not None and c not in costo:
+            if f.costo is not None and f.costo > 0 and c not in costo:
                 costo[c] = float(f.costo)
             if f.glosa and c not in glosa:
                 glosa[c] = f.glosa

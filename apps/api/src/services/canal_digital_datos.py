@@ -9,10 +9,12 @@ Las funciones de aqui no conocen HTTP.
 from __future__ import annotations
 
 import datetime as dt
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..canal_digital.politica import BODEGA_CANAL_DIGITAL
 from ..models import CanalDigitalVenta, LeadTimeProveedorSucursal
 from . import canal_digital_calculo as calculo
 from . import canal_digital_service as svc
@@ -20,22 +22,28 @@ from . import canal_digital_vista as vista
 from .canal_digital_service import _tenant
 
 MESES_EN_TABLA = 14
+TZ_CHILE = ZoneInfo("America/Santiago")
 
 ESTADO_OK = "ok"
 ESTADO_AVISO = "aviso"
 ESTADO_FALTA = "falta"
 
 # Como se carga un mes nuevo de venta. El motor lo hara solo cuando esa parte este publicada; mientras tanto la
-# carga la hace un admin con el script de la carpeta api.
-COMO_CARGAR = [
-    "Cada mes cerrado se carga una sola vez. Cuando esa parte del motor esté publicada, el motor sube la venta "
-    "del canal solo y no hay que hacer nada.",
-    "Mientras tanto la sube quien administra el motor, desde la carpeta api, con: python "
-    "scripts/canal_digital_cargar_ventas.py --carpeta \"<carpeta de ventas>\" --anios 2025 2026 --publicar-lineas",
-    "Se envía un mes por vez y se reemplaza solo ese mes: repetir la carga no duplica nada.",
-    "Al terminar, vuelve a esta pestaña: «Ventas del canal» debe decir «Al día» y el mes nuevo debe aparecer en "
-    "la tabla de arriba.",
-]
+# carga la hace un admin con el script de la carpeta api. El comando lleva la bodega que se esta mirando: sin eso
+# el script carga la 430, y quien sigue estos pasos desde otra bodega cargaria la equivocada.
+def como_cargar(bodega: str, anio: int) -> list[str]:
+    """Los pasos para cargar un mes de venta de `bodega`. `anio` es el de la corrida: se leen ese y el anterior."""
+    destino = "" if bodega == BODEGA_CANAL_DIGITAL else f" --bodega {bodega}"
+    return [
+        "Cada mes cerrado se carga una sola vez. Cuando esa parte del motor esté publicada, el motor sube la venta "
+        "del canal solo y no hay que hacer nada.",
+        "Mientras tanto la sube quien administra el motor, desde la carpeta api, con: python "
+        f"scripts/canal_digital_cargar_ventas.py --carpeta \"<carpeta de ventas>\" --anios {anio - 1} {anio}"
+        f"{destino} --publicar-lineas",
+        "Se envía un mes por vez y se reemplaza solo ese mes: repetir la carga no duplica nada.",
+        "Al terminar, vuelve a esta pestaña: «Ventas del canal» debe decir «Al día» y el mes nuevo debe aparecer en "
+        "la tabla de arriba.",
+    ]
 
 
 def _mes(periodo: str | None) -> str:
@@ -80,6 +88,7 @@ def ventas_por_mes(db: Session, bodega: str, n: int = MESES_EN_TABLA) -> list[di
 def cobertura(corrida) -> dict:
     """Cuantos productos de la corrida tienen cada dato. Sale de la corrida ya calculada: no consulta ni recalcula.
 
+    Un costo ausente o menor o igual a 0 cuenta como "sin costo" (igual que en el resto de la plataforma).
     `proveedor_menos_5_muestras` es un subconjunto de `con_proveedor`. `sin_proveedor` es lo mismo que cuenta el
     aviso de la corrida: productos que usan el plazo de respaldo (sin proveedor, o con uno que el motor no mide).
     `costo_sin_respaldo_stock` son los que tienen costo pero hoy no tienen stock en el maestro: costo posiblemente
@@ -92,8 +101,9 @@ def cobertura(corrida) -> dict:
         productos += 1
         sin_proveedor += d.plazo_confianza == calculo.CONFIANZA_PLAZO_SIN_PROVEEDOR
         pocas += d.plazo_confianza == calculo.CONFIANZA_PLAZO_POCAS_MUESTRAS
-        sin_costo += d.costo_actual is None
-        sin_respaldo += d.costo_actual is not None and d.costo_respaldo == calculo.COSTO_SIN_RESPALDO_STOCK
+        tiene_costo = d.costo_actual is not None and d.costo_actual > 0
+        sin_costo += not tiene_costo
+        sin_respaldo += tiene_costo and d.costo_respaldo == calculo.COSTO_SIN_RESPALDO_STOCK
         con_stock += d.stock_disponible > 0
         con_aparte += d.stock_aparte > 0
         con_transito += d.transito > 0
@@ -117,8 +127,15 @@ def _fuente(nombre: str, estado: str, detalle: str) -> dict:
     return {"nombre": nombre, "detalle": detalle, "estado": estado}
 
 
+def _prod(n: int) -> str:
+    """"1 producto", "28 productos"."""
+    return f"{_n(n)} {_s(n, 'producto', 'productos')}"
+
+
 def fuentes(cob: dict, ventas: dict, aviso: dict, agrupados: int, plazos_actualizados: dt.date | None) -> list[dict]:
-    """Una linea por fuente de datos, con su estado: ok, aviso (hay algo que mirar) o falta (no se puede confiar)."""
+    """Una linea por fuente de datos, con su estado: ok, aviso (hay algo que mirar) o falta (no se puede confiar).
+
+    Los textos se muestran tal cual en la pantalla: cada cifra concuerda en numero con su frase."""
     n = cob["productos"]
     sin_productos = "Se revisa cuando haya venta cargada: todavía no hay productos."
     out = []
@@ -126,7 +143,8 @@ def fuentes(cob: dict, ventas: dict, aviso: dict, agrupados: int, plazos_actuali
     # Ventas del canal: lo que manda para la demanda y las clases.
     ultimo, faltan = ventas["ultimo_periodo_cargado"], ventas["meses_sin_cargar"]
     lineas = (
-        f" Hay {_n(ventas['lineas'])} líneas del ERP guardadas, hasta {_mes(ventas['lineas_periodo_hasta'])}."
+        f" Hay {_n(ventas['lineas'])} {_s(ventas['lineas'], 'línea del ERP guardada', 'líneas del ERP guardadas')}, "
+        f"hasta {_mes(ventas['lineas_periodo_hasta'])}."
         if ventas["lineas"] else ""
     )
     if not ultimo:
@@ -136,8 +154,8 @@ def fuentes(cob: dict, ventas: dict, aviso: dict, agrupados: int, plazos_actuali
     else:
         out.append(_fuente(
             "Ventas del canal", ESTADO_AVISO,
-            f"Faltan {faltan} {_s(faltan, 'mes cerrado', 'meses cerrados')}: la venta llega hasta {_mes(ultimo)}. "
-            f"La demanda y las clases se calculan hasta ese mes.{lineas}",
+            f"{_s(faltan, 'Falta', 'Faltan')} {faltan} {_s(faltan, 'mes cerrado', 'meses cerrados')}: la venta llega "
+            f"hasta {_mes(ultimo)}. La demanda y las clases se calculan hasta ese mes.{lineas}",
         ))
 
     # Stock de la bodega.
@@ -146,13 +164,15 @@ def fuentes(cob: dict, ventas: dict, aviso: dict, agrupados: int, plazos_actuali
     elif not cob["con_stock_bodega"]:
         out.append(_fuente(
             "Stock de la bodega", ESTADO_FALTA,
-            f"Ninguno de los {_n(n)} productos tiene stock en la bodega: revisa que el motor haya publicado el stock.",
+            f"{_s(n, 'El producto no tiene', f'Ninguno de los {_n(n)} productos tiene')} stock en la bodega: "
+            "revisa que el motor haya publicado el stock.",
         ))
     else:
+        con, sin, aparte = cob["con_stock_bodega"], cob["sin_stock_bodega"], cob["con_stock_aparte"]
         out.append(_fuente(
             "Stock de la bodega", ESTADO_OK,
-            f"{_n(cob['con_stock_bodega'])} de {_n(n)} productos tienen stock en la bodega y "
-            f"{_n(cob['sin_stock_bodega'])} no. {_n(cob['con_stock_aparte'])} tienen stock aparte, que no suma al disponible.",
+            f"{_n(con)} de {_prod(n)} {_s(con, 'tiene', 'tienen')} stock en la bodega y {_n(sin)} no. "
+            f"{_n(aparte)} {_s(aparte, 'tiene', 'tienen')} stock aparte, que no suma al disponible.",
         ))
 
     # Plazos de entrega: la tabla del motor por proveedor; sin proveedor se usa un respaldo.
@@ -163,32 +183,43 @@ def fuentes(cob: dict, ventas: dict, aviso: dict, agrupados: int, plazos_actuali
     elif not cob["con_proveedor"]:
         out.append(_fuente(
             "Plazos de entrega", ESTADO_FALTA,
-            f"Ningún producto tiene proveedor con plazo medido: los {_n(n)} usan {respaldo} días de respaldo.{fecha}",
+            f"Ningún producto tiene proveedor con plazo medido: {_s(n, 'el único usa', f'los {_n(n)} usan')} "
+            f"{respaldo} días de respaldo.{fecha}",
         ))
     elif cob["sin_proveedor"] or cob["proveedor_menos_5_muestras"]:
+        sin, pocas = cob["sin_proveedor"], cob["proveedor_menos_5_muestras"]
         out.append(_fuente(
             "Plazos de entrega", ESTADO_AVISO,
-            f"{_n(cob['sin_proveedor'])} de {_n(n)} productos sin proveedor: usan {respaldo} días de respaldo. "
-            f"{_n(cob['proveedor_menos_5_muestras'])} tienen un proveedor con menos de 5 pedidos medidos.{fecha}",
+            f"{_n(sin)} de {_prod(n)} sin proveedor: {_s(sin, 'usa', 'usan')} {respaldo} días de respaldo. "
+            f"{_n(pocas)} {_s(pocas, 'tiene', 'tienen')} un proveedor con menos de 5 pedidos medidos.{fecha}",
         ))
     else:
         out.append(_fuente(
-            "Plazos de entrega", ESTADO_OK, f"Todos los productos tienen un proveedor con 5 o más pedidos medidos.{fecha}"
+            "Plazos de entrega", ESTADO_OK,
+            f"{_s(n, 'El producto tiene', 'Todos los productos tienen')} un proveedor con 5 o más pedidos medidos.{fecha}",
         ))
 
-    # Costos: del maestro de precios; sin costo el valor a pedir sale en $0.
+    # Costos: del maestro de precios; sin costo (o con costo 0) el valor a pedir sale en $0.
     if not n:
         out.append(_fuente("Costos", ESTADO_AVISO, sin_productos))
     elif not cob["con_costo"]:
         out.append(_fuente("Costos", ESTADO_FALTA, "Ningún producto tiene costo: el valor a pedir sale en $0."))
     elif cob["sin_costo"] or cob["costo_sin_respaldo_stock"]:
-        out.append(_fuente(
-            "Costos", ESTADO_AVISO,
-            f"{_n(cob['sin_costo'])} de {_n(n)} productos sin costo: su valor a pedir sale en $0. "
-            f"{_n(cob['costo_sin_respaldo_stock'])} tienen costo pero hoy no tienen stock: el costo puede estar viejo.",
-        ))
+        sin, viejo = cob["sin_costo"], cob["costo_sin_respaldo_stock"]
+        partes = []
+        if sin:
+            partes.append(f"{_n(sin)} de {_prod(n)} sin costo: su valor a pedir sale en $0.")
+        if viejo:
+            partes.append(
+                f"{_n(viejo)} {_s(viejo, 'tiene', 'tienen')} costo pero hoy no {_s(viejo, 'tiene', 'tienen')} stock: "
+                f"{_s(viejo, 'el costo puede estar viejo', 'los costos pueden estar viejos')}."
+            )
+        out.append(_fuente("Costos", ESTADO_AVISO, " ".join(partes)))
     else:
-        out.append(_fuente("Costos", ESTADO_OK, f"Los {_n(n)} productos tienen costo y stock que lo respalda."))
+        out.append(_fuente(
+            "Costos", ESTADO_OK,
+            f"{_s(n, 'El producto tiene', f'Los {_n(n)} productos tienen')} costo y stock que lo respalda.",
+        ))
 
     # Grupos de reemplazo: el motor junta bajo un codigo vigente la venta de los que reemplaza.
     dobles = aviso.get("codigos_en_dos_grupos") or 0
@@ -197,40 +228,59 @@ def fuentes(cob: dict, ventas: dict, aviso: dict, agrupados: int, plazos_actuali
     elif dobles:
         out.append(_fuente(
             "Grupos de reemplazo", ESTADO_AVISO,
-            f"{_n(dobles)} {_s(dobles, 'código figura', 'códigos figuran')} en dos grupos a la vez: cada uno se asigna a un solo grupo. "
-            f"{_n(agrupados)} productos reúnen la venta de más de un código.",
+            f"{_n(dobles)} {_s(dobles, 'código figura', 'códigos figuran')} en dos grupos a la vez: cada uno se asigna "
+            f"a un solo grupo. {_n(agrupados)} {_s(agrupados, 'producto reúne', 'productos reúnen')} la venta de más "
+            "de un código.",
         ))
     else:
         out.append(_fuente(
             "Grupos de reemplazo", ESTADO_OK,
-            f"{_n(agrupados)} de {_n(n)} productos reúnen la venta de más de un código; ningún código está en dos grupos.",
+            f"{_n(agrupados)} de {_prod(n)} {_s(agrupados, 'reúne', 'reúnen')} la venta de más de un código; "
+            "ningún código está en dos grupos.",
         ))
 
     # Transito: solo las OC con destino a la bodega suman a la posicion.
+    otro_destino = cob["con_transito_otro_destino"]
     if not n:
         out.append(_fuente("Tránsito", ESTADO_AVISO, sin_productos))
     elif not cob["con_transito_a_la_bodega"]:
         otro = (
-            f" {_n(cob['con_transito_otro_destino'])} tienen pedidos en camino a otro destino, que no suman."
-            if cob["con_transito_otro_destino"] else ""
+            f" {_n(otro_destino)} {_s(otro_destino, 'tiene', 'tienen')} pedidos en camino a otro destino, que no suman."
+            if otro_destino else ""
         )
         out.append(_fuente(
             "Tránsito", ESTADO_AVISO, f"Ningún producto tiene pedidos en camino a la bodega.{otro}"
         ))
     else:
+        con = cob["con_transito_a_la_bodega"]
         out.append(_fuente(
             "Tránsito", ESTADO_OK,
-            f"{_n(cob['con_transito_a_la_bodega'])} productos tienen pedidos en camino a la bodega. "
-            f"{_n(cob['con_transito_otro_destino'])} tienen pedidos a otro destino, que no suman.",
+            f"{_n(con)} {_s(con, 'producto tiene', 'productos tienen')} pedidos en camino a la bodega. "
+            f"{_n(otro_destino)} {_s(otro_destino, 'tiene', 'tienen')} pedidos a otro destino, que no suman.",
         ))
     return out
 
 
 def _plazos_actualizados(db: Session) -> dt.date | None:
-    """Cuando el motor actualizo por ultima vez la tabla de plazos por proveedor (una consulta, una fila)."""
+    """Cuando el motor actualizo por ultima vez la tabla de plazos por proveedor (una consulta, una fila).
+
+    La columna guarda la hora en UTC: se pasa a hora de Chile antes de tomar el dia, o una actualizacion de la noche
+    se veria con la fecha del dia siguiente. (Sin zona, como en SQLite, se toma tal cual.)"""
     L = LeadTimeProveedorSucursal
     ultima = db.scalar(select(func.max(L.actualizado_en)).where(L.tenant_id == _tenant(), L.sucursal_id.is_(None)))
-    return ultima.date() if ultima else None
+    if not ultima:
+        return None
+    if ultima.tzinfo is not None:
+        ultima = ultima.astimezone(TZ_CHILE)
+    return ultima.date()
+
+
+def _anio(aviso: dict) -> int:
+    """El anio de la corrida (el de su fecha de referencia); sin ella, el de hoy."""
+    try:
+        return dt.date.fromisoformat(str(aviso["fecha_referencia"])).year
+    except (KeyError, ValueError):
+        return dt.date.today().year
 
 
 def armar(db: Session, bodega: str, corrida, aviso: dict) -> dict:
@@ -252,5 +302,5 @@ def armar(db: Session, bodega: str, corrida, aviso: dict) -> dict:
         "cobertura": cob,
         "fuentes": fuentes(cob, ventas, aviso, _con_codigos_agrupados(corrida), _plazos_actualizados(db)),
         "validaciones": vista.validaciones(corrida),
-        "como_cargar": list(COMO_CARGAR),
+        "como_cargar": como_cargar(bodega, _anio(aviso)),
     }
