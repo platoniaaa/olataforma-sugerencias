@@ -14,5 +14,5 @@ jobs:
     steps:
       - name: Procesar recurrentes
         run: |
-          curl -fsS -X POST https://sugerido-api.onrender.com/api/cron/procesar-recurrentes \
+          curl -fsS -X POST https://olataforma-sugerencias.onrender.com/api/cron/procesar-recurrentes \
             -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}"

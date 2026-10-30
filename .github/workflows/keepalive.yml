@@ -26,7 +26,7 @@ jobs:
     steps:
       - name: Ping en loop cada 5 min
         run: |
-          url="https://sugerido-api.onrender.com/api/health"
+          url="https://olataforma-sugerencias.onrender.com/api/health"
           fin=$(( SECONDS + 349*60 ))
           n=0
           while [ "$SECONDS" -lt "$fin" ]; do
