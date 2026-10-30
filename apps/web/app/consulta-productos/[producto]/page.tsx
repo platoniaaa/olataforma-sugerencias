@@ -7,6 +7,7 @@ import { api } from "@/lib/api-client";
 import { formatoCLP, formatoNumero } from "@/lib/formato";
 import { GraficoStockSucursal } from "@/components/grafico-stock-sucursal";
 import { GraficoVentas } from "@/components/grafico-ventas";
+import { TablaTransito } from "@/components/tabla-transito";
 import { GrupoReemplazos } from "@/components/grupo-reemplazos";
 import type { ConsultaDetalle } from "@/lib/types";
 
@@ -119,12 +120,18 @@ export default function DetalleConsultaPage({ params }: { params: { producto: st
         <p className="text-sm text-slate-700">{d.glosa ?? "Sin descripción"}</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Dato titulo="Precio de venta" valor={d.precio != null ? formatoCLP(d.precio) : "—"} />
         <Dato
           titulo="Stock total"
           valor={stockTotal > 0 ? formatoNumero(stockTotal) : "Sin stock"}
           acento={stockTotal > 0}
+        />
+        <Dato
+          titulo="En tránsito"
+          valor={(d.en_transito ?? 0) > 0 ? formatoNumero(d.en_transito ?? 0) : "Nada"}
+          acento={(d.en_transito ?? 0) > 0}
+          color="sky"
         />
         <Dato titulo="Unidad" valor={d.unidad ?? "—"} />
       </div>
@@ -182,7 +189,9 @@ export default function DetalleConsultaPage({ params }: { params: { producto: st
         </section>
       )}
 
-      <GraficoStockSucursal filas={d.stock_por_sucursal} />
+      <GraficoStockSucursal filas={d.stock_por_sucursal} transito={d.transito_por_sucursal ?? []} />
+
+      <TablaTransito filas={d.transito_por_sucursal ?? []} />
 
       {/* Filtro de ventas por sucursal: afecta al historial de reemplazos y a la venta de
           los últimos 12 meses. Sin elegir, se ven todas las sucursales juntas. */}
@@ -292,11 +301,25 @@ export default function DetalleConsultaPage({ params }: { params: { producto: st
   );
 }
 
-function Dato({ titulo, valor, acento }: { titulo: string; valor: string; acento?: boolean }) {
+function Dato({
+  titulo,
+  valor,
+  acento,
+  color = "emerald",
+}: {
+  titulo: string;
+  valor: string;
+  acento?: boolean;
+  color?: "emerald" | "sky";
+}) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
       <p className="text-[11px] uppercase tracking-wide text-slate-600">{titulo}</p>
-      <p className={`mt-1 text-lg font-semibold ${acento ? "text-emerald-700" : "text-slate-900"}`}>
+      <p
+        className={`mt-1 text-lg font-semibold ${
+          acento ? (color === "sky" ? "text-sky-800" : "text-emerald-700") : "text-slate-900"
+        }`}
+      >
         {valor}
       </p>
     </div>

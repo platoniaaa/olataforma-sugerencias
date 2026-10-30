@@ -83,6 +83,8 @@ export function GrupoReemplazos({
   if (error || !data || data.miembros.length < 2) return <>{alternativa ?? null}</>;
 
   const fuera = data.miembros.filter((m) => !m.cuenta_en_el_total);
+  // Solo la vista del vendedor trae el transito por codigo: en las demas la columna no existe.
+  const conTransito = data.miembros.some((m) => m.transito !== undefined);
 
   return (
     <Card>
@@ -107,6 +109,7 @@ export function GrupoReemplazos({
                 <th className="px-3 py-2 text-right">Venta total</th>
                 <th className="px-3 py-2">Última venta</th>
                 <th className="px-3 py-2 text-right">Stock</th>
+                {conTransito && <th className="px-3 py-2 text-right">En tránsito</th>}
               </tr>
             </thead>
             <tbody>
@@ -149,6 +152,15 @@ export function GrupoReemplazos({
                   <td className="px-3 py-2 text-right tabular-nums">
                     {formatoNumero(m.stock)}
                   </td>
+                  {conTransito && (
+                    <td
+                      className={`px-3 py-2 text-right tabular-nums ${
+                        (m.transito ?? 0) > 0 ? "font-medium text-sky-800" : "text-slate-500"
+                      }`}
+                    >
+                      {formatoNumero(m.transito ?? 0)}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -165,6 +177,15 @@ export function GrupoReemplazos({
                 <td className="px-3 py-2 text-right tabular-nums">
                   {formatoNumero(data.total_stock ?? 0)}
                 </td>
+                {conTransito && (
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {formatoNumero(
+                      data.miembros
+                        .filter((m) => m.cuenta_en_el_total)
+                        .reduce((a, m) => a + (m.transito ?? 0), 0)
+                    )}
+                  </td>
+                )}
               </tr>
             </tfoot>
           </table>

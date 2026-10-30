@@ -5,6 +5,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Legend,
   LabelList,
   ResponsiveContainer,
   Tooltip,
@@ -13,12 +14,20 @@ import {
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatoNumero } from "@/lib/formato";
-import type { StockSucursalRow } from "@/lib/types";
+import type { StockSucursalRow, TransitoSucursal } from "@/lib/types";
 
 export interface StockDeSucursal {
   sucursal: string;
   stock: number;
 }
+
+export interface StockYTransito extends StockDeSucursal {
+  transito: number;
+}
+
+/** "02 LINDEROS" y "Linderos" son la misma sucursal: sin el código del ERP y en mayúsculas. */
+const sinCodigo = (n: string) => n.trim().replace(/^\d+\s+/, "");
+const clave = (n: string) => sinCodigo(n).toUpperCase();
 
 /**
  * Suma el stock de las bodegas de cada sucursal y deja de mayor a menor. Las que no tienen
@@ -27,44 +36,106 @@ export interface StockDeSucursal {
  * "Sin sucursal": el stock no se pierde.
  */
 export function stockPorSucursal(filas: StockSucursalRow[]): StockDeSucursal[] {
-  const por = new Map<string, number>();
+  return stockYTransitoPorSucursal(filas, [])
+    .filter((d) => d.stock > 0)
+    .map(({ sucursal, stock }) => ({ sucursal, stock }));
+}
+
+/**
+ * Lo mismo, más lo que viene en camino a cada sucursal. Una sucursal con tránsito pero sin stock
+ * SÍ se dibuja: es justo a la que no hay que pedirle más. El tránsito viene escrito con el código
+ * del ERP ("02 LINDEROS") y el stock sin él: se juntan por el nombre normalizado. Orden: más stock
+ * primero y, a igual stock, más tránsito.
+ */
+export function stockYTransitoPorSucursal(
+  filas: StockSucursalRow[],
+  transito: TransitoSucursal[] = []
+): StockYTransito[] {
+  const por = new Map<string, StockYTransito>();
+  const fila = (nombre: string | null | undefined): StockYTransito => {
+    const visible = sinCodigo(nombre ?? "") || "Sin sucursal";
+    const k = clave(visible);
+    let f = por.get(k);
+    if (!f) {
+      f = { sucursal: visible, stock: 0, transito: 0 };
+      por.set(k, f);
+    }
+    return f;
+  };
   for (const f of filas) {
     if (!(f.stock > 0)) continue;
-    const nombre = (f.sucursal_id ?? f.bodega ?? "").trim() || "Sin sucursal";
-    por.set(nombre, (por.get(nombre) ?? 0) + f.stock);
+    fila(f.sucursal_id ?? f.bodega).stock += f.stock;
   }
-  return Array.from(por, ([sucursal, stock]) => ({ sucursal, stock })).sort(
-    (a, b) => b.stock - a.stock || a.sucursal.localeCompare(b.sucursal)
+  for (const t of transito) {
+    if (!(t.cantidad > 0)) continue;
+    fila(t.sucursal_id).transito += t.cantidad;
+  }
+  return Array.from(por.values()).sort(
+    (a, b) => b.stock - a.stock || b.transito - a.transito || a.sucursal.localeCompare(b.sucursal)
   );
 }
 
-const ALTO_BARRA = 34;
+const ALTO_UNA_BARRA = 34;
+const ALTO_DOS_BARRAS = 58;
 
 /**
- * Gráfico de barras horizontales: cuánto stock tiene el producto en cada sucursal. Va junto a
- * la tabla de bodegas, que queda como el detalle y como alternativa en texto del gráfico.
+ * Gráfico de barras horizontales: cuánto stock tiene el producto en cada sucursal y cuánto viene en
+ * camino. Va junto a la tabla de bodegas y a la de tránsito, que quedan como el detalle y como
+ * alternativa en texto del gráfico.
  */
-export function GraficoStockSucursal({ filas }: { filas: StockSucursalRow[] }) {
-  const datos = useMemo(() => stockPorSucursal(filas), [filas]);
-  const total = datos.reduce((a, d) => a + d.stock, 0);
+export function GraficoStockSucursal({
+  filas,
+  transito = [],
+}: {
+  filas: StockSucursalRow[];
+  transito?: TransitoSucursal[];
+}) {
+  const datos = useMemo(() => stockYTransitoPorSucursal(filas, transito), [filas, transito]);
   if (datos.length === 0) return null;
 
-  const resumen = datos.map((d) => `${d.sucursal} ${formatoNumero(d.stock)}`).join(", ");
+  const totalStock = datos.reduce((a, d) => a + d.stock, 0);
+  const totalTransito = datos.reduce((a, d) => a + d.transito, 0);
+  const sucursalesConStock = datos.filter((d) => d.stock > 0).length;
+  const conTransito = totalTransito > 0;
+  const n = formatoNumero;
+  const resumen = datos
+    .map((d) => {
+      const base = d.stock > 0 ? `${d.sucursal} ${n(d.stock)}` : `${d.sucursal} sin stock`;
+      return d.transito > 0 ? `${base} y ${n(d.transito)} en tránsito` : base;
+    })
+    .join(", ");
 
   return (
     <Card>
       <CardHeader className="space-y-1">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <CardTitle>Stock por sucursal</CardTitle>
+          <CardTitle>{conTransito ? "Stock y tránsito por sucursal" : "Stock por sucursal"}</CardTitle>
           <span className="text-[12px] text-slate-600">
-            <b className="tabular text-slate-800">{formatoNumero(total)}</b> u en{" "}
-            {datos.length} {datos.length === 1 ? "sucursal" : "sucursales"}
+            {totalStock > 0 ? (
+              <>
+                <b className="tabular text-slate-800">{n(totalStock)}</b> u en {sucursalesConStock}{" "}
+                {sucursalesConStock === 1 ? "sucursal" : "sucursales"}
+              </>
+            ) : (
+              "Sin stock"
+            )}
+            {conTransito && (
+              <>
+                {" · "}
+                <span>
+                  <b className="tabular text-sky-800">{n(totalTransito)}</b> u en tránsito
+                </span>
+              </>
+            )}
           </span>
         </div>
       </CardHeader>
       <CardContent>
         <div role="img" aria-label={`Stock por sucursal: ${resumen}`}>
-          <ResponsiveContainer width="100%" height={datos.length * ALTO_BARRA + 28}>
+          <ResponsiveContainer
+            width="100%"
+            height={datos.length * (conTransito ? ALTO_DOS_BARRAS : ALTO_UNA_BARRA) + (conTransito ? 56 : 28)}
+          >
             <BarChart
               data={datos}
               layout="vertical"
@@ -91,8 +162,9 @@ export function GraficoStockSucursal({ filas }: { filas: StockSucursalRow[] }) {
               <Tooltip
                 cursor={{ fill: "#f1f5f9" }}
                 contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e2e8f0" }}
-                formatter={(v: number) => [formatoNumero(v), "Stock"]}
+                formatter={(v: number, name: string) => [formatoNumero(v), name]}
               />
+              {conTransito && <Legend iconType="square" wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />}
               <Bar dataKey="stock" name="Stock" fill="#1e40af" radius={[0, 3, 3, 0]} isAnimationActive={false}>
                 {/* El número al final de cada barra: se lee sin pasar el mouse. */}
                 <LabelList
@@ -100,9 +172,26 @@ export function GraficoStockSucursal({ filas }: { filas: StockSucursalRow[] }) {
                   position="right"
                   fontSize={12}
                   fill="#0f172a"
-                  formatter={(v: number) => formatoNumero(v)}
+                  formatter={(v: number) => (v > 0 ? formatoNumero(v) : "")}
                 />
               </Bar>
+              {conTransito && (
+                <Bar
+                  dataKey="transito"
+                  name="En tránsito"
+                  fill="#38bdf8"
+                  radius={[0, 3, 3, 0]}
+                  isAnimationActive={false}
+                >
+                  <LabelList
+                    dataKey="transito"
+                    position="right"
+                    fontSize={12}
+                    fill="#075985"
+                    formatter={(v: number) => (v > 0 ? formatoNumero(v) : "")}
+                  />
+                </Bar>
+              )}
             </BarChart>
           </ResponsiveContainer>
         </div>

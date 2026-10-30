@@ -181,6 +181,7 @@ export default function ConsultaProductosPage() {
 
 function FilaProducto({ p }: { p: ConsultaProducto }) {
   const stock = p.stock_total ?? 0;
+  const transito = p.en_transito ?? 0;
   const reemplazos = (p.reemplazo ?? "").split(",").map((s) => s.trim()).filter(Boolean).length;
   return (
     <Link
@@ -207,6 +208,11 @@ function FilaProducto({ p }: { p: ConsultaProducto }) {
         >
           {stock > 0 ? `Stock ${formatoNumero(stock)}` : "Sin stock"}
         </p>
+        {transito > 0 && (
+          <p className="text-[11.5px] font-medium tabular-nums text-sky-800">
+            +{formatoNumero(transito)} en tránsito
+          </p>
+        )}
       </div>
       <ChevronRight size={18} className="shrink-0 text-slate-400" aria-hidden="true" />
     </Link>

@@ -7,8 +7,8 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { GraficoStockSucursal, stockPorSucursal } from "@/components/grafico-stock-sucursal";
-import type { StockSucursalRow } from "@/lib/types";
+import { GraficoStockSucursal, stockPorSucursal, stockYTransitoPorSucursal } from "@/components/grafico-stock-sucursal";
+import type { StockSucursalRow, TransitoSucursal } from "@/lib/types";
 
 // recharts necesita medir el contenedor y jsdom no mide nada: aquí importa lo que rodea al gráfico.
 vi.mock("recharts", async () => {
@@ -57,7 +57,59 @@ describe("stockPorSucursal", () => {
   });
 });
 
+const tr = (sucursal_id: string | null, cantidad: number, pedido_desde: string | null = null): TransitoSucursal =>
+  ({ sucursal_id, cantidad, pedido_desde });
+
+describe("stockYTransitoPorSucursal", () => {
+  it("une el tránsito escrito con el código del ERP con el stock de la misma sucursal", () => {
+    const r = stockYTransitoPorSucursal(
+      [fila("LINDEROS", "LINDEROS", 5), fila("CURICO", "CURICO", 4)],
+      [tr("02 LINDEROS", 3), tr("CURICO", 10)]
+    );
+    expect(r).toEqual([
+      { sucursal: "LINDEROS", stock: 5, transito: 3 },
+      { sucursal: "CURICO", stock: 4, transito: 10 },
+    ]);
+  });
+
+  it("dibuja una sucursal con tránsito pero sin stock: es a la que no hay que pedirle más", () => {
+    const r = stockYTransitoPorSucursal([fila("CURICO", "CURICO", 2)], [tr("TALCA", 6)]);
+    expect(r).toEqual([
+      { sucursal: "CURICO", stock: 2, transito: 0 },
+      { sucursal: "TALCA", stock: 0, transito: 6 },
+    ]);
+  });
+
+  it("ignora tránsito en cero y lo que no tiene sucursal va como 'Sin sucursal'", () => {
+    expect(stockYTransitoPorSucursal([], [tr("TALCA", 0), tr(null, 2)])).toEqual([
+      { sucursal: "Sin sucursal", stock: 0, transito: 2 },
+    ]);
+  });
+});
+
 describe("GraficoStockSucursal", () => {
+  it("con tránsito cambia el título, suma el total y lo dice en el texto equivalente", () => {
+    render(
+      <GraficoStockSucursal
+        filas={[fila("CURICO", "CURICO", 4)]}
+        transito={[tr("CURICO", 10), tr("TALCA", 6)]}
+      />
+    );
+    expect(screen.getByText("Stock y tránsito por sucursal")).toBeInTheDocument();
+    expect(screen.getByText(/u en tránsito/)).toHaveTextContent("16 u en tránsito");
+    expect(
+      screen.getByRole("img", { name: "Stock por sucursal: CURICO 4 y 10 en tránsito, TALCA sin stock y 6 en tránsito" })
+    ).toBeInTheDocument();
+    // Dos barras por sucursal: más alto que con una.
+    expect(screen.getByTestId("contenedor")).toHaveAttribute("data-alto", String(2 * 58 + 56));
+  });
+
+  it("sin tránsito se ve como antes", () => {
+    render(<GraficoStockSucursal filas={[fila("CURICO", "CURICO", 4)]} transito={[]} />);
+    expect(screen.getByText("Stock por sucursal")).toBeInTheDocument();
+    expect(screen.queryByText(/en tránsito/)).not.toBeInTheDocument();
+  });
+
   it("resume el stock en texto y se ajusta al número de sucursales", () => {
     render(<GraficoStockSucursal filas={[fila("CURICO", "CURICO", 4), fila("LINDEROS", "LINDEROS", 3)]} />);
 

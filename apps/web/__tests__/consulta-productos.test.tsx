@@ -5,7 +5,7 @@
  */
 import "@testing-library/jest-dom/vitest";
 import type { ReactNode } from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Sidebar } from "@/components/sidebar";
@@ -40,8 +40,8 @@ vi.mock("@/components/grafico-ventas", () => ({
   ),
 }));
 vi.mock("@/components/grafico-stock-sucursal", () => ({
-  GraficoStockSucursal: ({ filas }: { filas: unknown[] }) => (
-    <div data-testid="grafico-stock">{filas.length} filas</div>
+  GraficoStockSucursal: ({ filas, transito }: { filas: unknown[]; transito?: unknown[] }) => (
+    <div data-testid="grafico-stock">{filas.length} filas|{transito?.length ?? 0} transitos</div>
   ),
 }));
 vi.mock("@/components/grupo-reemplazos", () => ({
@@ -67,11 +67,11 @@ vi.mock("@/lib/inventario-ciclico", () => ({
 
 const FILTRO: ConsultaProducto = {
   producto: "70 2723982", glosa: "FILTRO DE ACEITE", familia: "FILTROS", subfamilia: null,
-  procedencia: null, categoria: null, unidad: "UN", precio: 8500, stock_total: 0, reemplazo: null,
+  procedencia: null, categoria: null, unidad: "UN", precio: 8500, stock_total: 0, en_transito: 0, reemplazo: null,
 };
 const TERMINAL: ConsultaProducto = {
   producto: "19 SZ6Z3B437B", glosa: "TERMINAL DE DIRECCION", familia: "DIRECCION", subfamilia: null,
-  procedencia: "IMPORTADO", categoria: null, unidad: "UN", precio: 45000, stock_total: 7,
+  procedencia: "IMPORTADO", categoria: null, unidad: "UN", precio: 45000, stock_total: 7, en_transito: 5,
   reemplazo: "19 SZ6Z3B437C, 19 SZ6Z3B437D",
 };
 
@@ -110,6 +110,9 @@ describe("lista de productos", () => {
     expect(enlace).toHaveTextContent("TERMINAL DE DIRECCION");
     expect(enlace).toHaveTextContent("Tiene 2 reemplazos");
     expect(enlace).toHaveTextContent("Stock 7");
+    // Lo que viene en camino se ve en la lista, para no pedir de más.
+    expect(enlace).toHaveTextContent("+5 en tránsito");
+    expect(screen.getByRole("link", { name: /70 2723982/ })).not.toHaveTextContent("en tránsito");
     expect(screen.getByRole("link", { name: /70 2723982/ })).toHaveTextContent("Sin stock");
     expect(screen.queryByText(/costo/i)).not.toBeInTheDocument();
   });
@@ -183,6 +186,10 @@ const DETALLE: ConsultaDetalle = {
     { bodega: "LINDEROS", sucursal_id: "LINDEROS", stock: 3, origen: null },
     { bodega: "TALCA", sucursal_id: "TALCA", stock: 0, origen: null },
   ],
+  transito_por_sucursal: [
+    { sucursal_id: "TALCA", cantidad: 6, pedido_desde: "2026-06-12" },
+    { sucursal_id: "02 LINDEROS", cantidad: 3, pedido_desde: null },
+  ],
   reemplazo_ford: {
     producto: "19 SZ6Z3B437B", reemplazado_por: "19 SZ6Z3B437C", reemplazado_por_ford: "SZ6Z/3B437/C/",
     cadena: "SZ6Z/3B437/B/ > SZ6Z/3B437/C/", reemplaza_a: [], sucesor_confirmado: true,
@@ -198,8 +205,9 @@ describe("detalle de un producto", () => {
     expect(await screen.findByRole("heading", { name: "19 SZ6Z3B437B" })).toBeInTheDocument();
     expect(mocks.consultaDetalle).toHaveBeenCalledWith("19 SZ6Z3B437B");
     expect(screen.getByText("Precio de venta")).toBeInTheDocument();
-    // Solo se listan las sucursales con stock, de mayor a menor.
-    const filas = screen.getAllByRole("row").map((f) => f.textContent ?? "");
+    // Solo se listan las sucursales con stock, de mayor a menor (Talca tiene tránsito, pero no stock).
+    const bodegas = within(screen.getByRole("heading", { name: "Detalle por bodega" }).closest("section")!);
+    const filas = bodegas.getAllByRole("row").map((f) => f.textContent ?? "");
     expect(filas.some((f) => f.includes("CURICO") && f.includes("4"))).toBe(true);
     expect(filas.some((f) => f.includes("TALCA"))).toBe(false);
     // Reemplazos del mix, navegables dentro de la misma vista.
@@ -209,7 +217,14 @@ describe("detalle de un producto", () => {
     expect(screen.getByText("FORD dio de baja este código")).toBeInTheDocument();
     // Ventas y grupo de reemplazos por la ruta de consulta (sin costo).
     // El gráfico de stock por sucursal recibe todas las filas de stock del producto.
-    expect(screen.getByTestId("grafico-stock")).toHaveTextContent("3 filas");
+    expect(screen.getByTestId("grafico-stock")).toHaveTextContent("3 filas|2 transitos");
+    // Tarjeta y tabla de tránsito: ya vienen 9 unidades, 6 a Talca (que no tiene stock) y 3 a Linderos.
+    expect(screen.getByText("En tránsito")).toBeInTheDocument();
+    expect(screen.getByText("Unidades en tránsito")).toBeInTheDocument();
+    const enTransito = within(screen.getByRole("heading", { name: "Unidades en tránsito" }).closest("section")!);
+    const filasTransito = enTransito.getAllByRole("row").map((f) => f.textContent ?? "");
+    expect(filasTransito.some((f) => f.includes("TALCA") && f.includes("6") && f.includes("12-06-2026"))).toBe(true);
+    expect(filasTransito.some((f) => f.includes("LINDEROS") && f.includes("Sin fecha"))).toBe(true);
     expect(screen.getByTestId("grafico-ventas")).toHaveTextContent("19 SZ6Z3B437B|true");
     expect(screen.getByTestId("grupo-reemplazos")).toHaveTextContent("19 SZ6Z3B437B|true");
     expect(screen.queryByText(/costo/i)).not.toBeInTheDocument();

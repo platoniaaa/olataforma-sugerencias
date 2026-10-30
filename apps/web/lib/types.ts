@@ -459,6 +459,8 @@ export interface MiembroGrupo {
   /** Último período con venta ("202506"), para ver cuándo se apagó. */
   ultimo_mes_con_venta: string | null;
   stock: number;
+  /** Unidades en transito de este codigo (solo la vista del vendedor lo trae). */
+  transito?: number;
   /** false cuando FORD lo declara reemplazo pero el motor no los agrupó. */
   cuenta_en_el_total: boolean;
   motivo_fuera: string | null;
@@ -486,6 +488,14 @@ export interface CatalogoDetalle extends CatalogoRow {
 
 /** Consulta de productos del vendedor (`/api/consulta/productos`): la ficha del
  *  catalogo SIN costo, stock minimo/maximo ni clasificacion de stock. */
+/** Unidades pedidas que todavia no llegan, por sucursal de destino. */
+export interface TransitoSucursal {
+  sucursal_id: string | null;
+  cantidad: number;
+  /** La OC mas antigua del grupo (aaaa-mm-dd). null = sin fecha. */
+  pedido_desde: string | null;
+}
+
 export interface ConsultaProducto {
   producto: string;
   glosa: string | null;
@@ -497,6 +507,8 @@ export interface ConsultaProducto {
   /** Precio de venta del ERP. El costo no viaja nunca. */
   precio: number | null;
   stock_total: number | null;
+  /** Unidades ya pedidas que todavia no llegan (todas las sucursales). */
+  en_transito?: number | null;
   /** Equivalentes del mix, separados por coma. */
   reemplazo: string | null;
 }
@@ -516,6 +528,7 @@ export interface ConsultaDetalle extends ConsultaProducto {
   combustible: string | null;
   anio: string | null;
   stock_por_sucursal: StockSucursalRow[];
+  transito_por_sucursal: TransitoSucursal[];
   reemplazo_ford: ReemplazoFord | null;
 }
 
