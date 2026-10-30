@@ -39,20 +39,26 @@ const COLORES = ["#1e40af", "#94a3b8", "#cbd5e1", "#e2e8f0", "#f1f5f9"];
  * No se muestra nada cuando el codigo no tiene reemplazos: una tabla de una sola
  * fila no dice nada.
  */
-export function GrupoReemplazos({ producto }: { producto: string }) {
+export function GrupoReemplazos({
+  producto,
+  consulta = false,
+}: {
+  producto: string;
+  /** Vista del vendedor: usa la ruta de consulta y enlaza a su propia ficha. */
+  consulta?: boolean;
+}) {
   const [data, setData] = useState<GrupoVentas | null>(null);
   const [error, setError] = useState(false);
 
   useEffect(() => {
     let activo = true;
-    api
-      .grupoVentas(producto)
+    (consulta ? api.consultaGrupoVentas(producto) : api.grupoVentas(producto))
       .then((r) => activo && setData(r))
       .catch(() => activo && setError(true));
     return () => {
       activo = false;
     };
-  }, [producto]);
+  }, [producto, consulta]);
 
   const filas = useMemo(() => {
     if (!data) return [];
@@ -101,7 +107,7 @@ export function GrupoReemplazos({ producto }: { producto: string }) {
                 >
                   <td className="px-3 py-2">
                     <Link
-                      href={`/catalogo/${encodeURIComponent(m.producto)}`}
+                      href={`${consulta ? "/consulta-productos" : "/catalogo"}/${encodeURIComponent(m.producto)}`}
                       className="font-mono text-[12px] text-slate-700 hover:text-brand"
                     >
                       {m.producto}

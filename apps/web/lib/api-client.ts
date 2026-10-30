@@ -10,6 +10,8 @@ import type {
   CargaResultado,
   CarrosResponse,
   CatalogoDetalle,
+  ConsultaDetalle,
+  ConsultaPage,
   CatalogoFiltros,
   CatalogoOpciones,
   CatalogoPage,
@@ -507,6 +509,31 @@ export const api = {
    *  miembro: devuelve el grupo entero, no solo ese código. */
   async grupoVentas(producto: string): Promise<GrupoVentas> {
     return getJSON(`/api/catalogo/${encodeURIComponent(producto)}/grupo-ventas`);
+  },
+
+  // --- Consulta de productos del vendedor (sin costo) ---------------------
+  async consultaProductos(
+    f: { q?: string; con_stock?: boolean },
+    opts: { page?: number; limit?: number } = {}
+  ): Promise<ConsultaPage> {
+    const p = new URLSearchParams();
+    if (f.q) p.set("q", f.q);
+    if (f.con_stock) p.set("con_stock", "true");
+    p.set("page", String(opts.page ?? 1));
+    p.set("limit", String(opts.limit ?? 50));
+    return getJSON(`/api/consulta/productos?${p.toString()}`);
+  },
+
+  async consultaDetalle(producto: string): Promise<ConsultaDetalle> {
+    return getJSON(`/api/consulta/productos/${encodeURIComponent(producto)}`);
+  },
+
+  async consultaVentas(producto: string): Promise<VentasResponse> {
+    return getJSON(`/api/consulta/productos/${encodeURIComponent(producto)}/ventas`);
+  },
+
+  async consultaGrupoVentas(producto: string): Promise<GrupoVentas> {
+    return getJSON(`/api/consulta/productos/${encodeURIComponent(producto)}/grupo-ventas`);
   },
 
   async sugerenciasManuales(

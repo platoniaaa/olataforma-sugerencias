@@ -22,6 +22,7 @@ import {
   LogOut,
   PackageCheck,
   PlusCircle,
+  Search,
   ShoppingCart,
   Sigma,
   SlidersHorizontal,
@@ -59,6 +60,7 @@ const NAV_INVENTARIO: NavItem = { href: "/inventario-ciclico", label: "Inventari
 // OTRO menu, con las dos unicas cosas que tiene que hacer. Un vendedor que ve
 // catorce secciones que no le sirven se equivoca de una; con dos, no.
 const NAV_VENDEDOR: NavItem[] = [
+  { href: "/consulta-productos", label: "Productos", icon: Search },
   { href: "/mis-requerimientos/nuevo", label: "Nuevo requerimiento", icon: PlusCircle },
   { href: "/mis-requerimientos", label: "Mis requerimientos", icon: ClipboardList },
 ];
