@@ -467,6 +467,8 @@ export interface MiembroGrupo {
 export interface GrupoVentas {
   producto: string;
   vigente?: string;
+  /** Si se pidió una sucursal: la venta y el stock son solo de ella. null = todas. */
+  sucursal?: string | null;
   /** Vacío si el código no tiene reemplazos: la tarjeta no se muestra. */
   miembros: MiembroGrupo[];
   /** Un objeto por mes: { mes, [codigo]: cantidad, ... }. */

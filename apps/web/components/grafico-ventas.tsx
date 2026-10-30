@@ -46,7 +46,7 @@ export function GraficoVentas({
   useEffect(() => {
     let activo = true;
     const promesa = consulta
-      ? api.consultaVentas(producto)
+      ? api.consultaVentas(producto, sucursalId)
       : sucursalId
         ? api.ventas(producto, sucursalId)
         : api.catalogoVentas(producto);

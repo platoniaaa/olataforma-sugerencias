@@ -794,6 +794,43 @@ def misma_sucursal(sucursal_id: str):
     )
 
 
+def clave_sucursal(nombre: str | None) -> str:
+    """El nombre de una sucursal sin el codigo numerico del ERP (`normalizar_sucursal`) y en mayusculas.
+
+    "02 LINDEROS", "Linderos" y "LINDEROS" son el mismo lugar. Sirve para ofrecer UNA
+    opcion por sucursal en un filtro y para reconocer, despues, todas las formas en que
+    la venta o el stock la escribieron.
+    """
+    return (normalizar_sucursal(nombre) or "").upper()
+
+
+def variantes_de_sucursal(db: Session, productos: list[str], nombre: str | None) -> list[str]:
+    """Los nombres CRUDOS con que `venta_historica` escribe esa sucursal para esos productos.
+
+    Se buscan los que existen en vez de armar un patron: la venta viene de Excel y la
+    misma sucursal puede venir como "02 LINDEROS" un mes y "LINDEROS" otro. Vacia si la
+    sucursal no vendio ninguno de esos productos.
+    """
+    clave = clave_sucursal(nombre)
+    if not clave or not productos:
+        return []
+    stmt = select(VentaHistorica.sucursal).where(VentaHistorica.producto.in_(list(productos))).distinct()
+    return [s for (s,) in db.execute(stmt).all() if s and clave_sucursal(s) == clave]
+
+
+def sucursales_con_venta(db: Session, producto: str) -> list[str]:
+    """Las sucursales (una opcion por sucursal) que vendieron el producto, o alguno de su
+    grupo de reemplazos, en los ultimos 12 meses. Alimenta el filtro de la vista del vendedor."""
+    miembros = set(reemplazo_service.miembros_del_grupo(db, producto)) | {producto}
+    ventana = _ventana_12_meses(db)
+    stmt = (
+        select(VentaHistorica.sucursal)
+        .where(VentaHistorica.producto.in_(list(miembros)), VentaHistorica.periodo.in_(ventana))
+        .distinct()
+    )
+    return sorted({clave_sucursal(s) for (s,) in db.execute(stmt).all() if s} - {""})
+
+
 def _mes_anterior_yyyymm(hoy: "date | None" = None) -> str:
     """Devuelve el mes calendario anterior en formato YYYYMM (string).
 
@@ -2118,7 +2155,8 @@ def detalle(db: Session, producto: str, sucursal_id: str) -> Sugerido | None:
     return db.scalars(stmt).first()
 
 
-def ventas_12m(db: Session, producto: str, sucursal_id: str | None = None) -> dict:
+def ventas_12m(db: Session, producto: str, sucursal_id: str | None = None,
+               sucursales_crudas: list[str] | None = None) -> dict:
     """Histórico de venta de un producto (últimos 12 meses).
 
     Devuelve DOS series:
@@ -2136,7 +2174,10 @@ def ventas_12m(db: Session, producto: str, sucursal_id: str | None = None) -> di
             VentaHistorica.periodo,
             func.coalesce(func.sum(VentaHistorica.cantidad), 0).label("cantidad"),
         ).where(VentaHistorica.producto == producto)
-        if suc:
+        if suc and sucursales_crudas is not None:
+            # La vista del vendedor ya resolvio con que nombres escribe esa sucursal la venta.
+            stmt = stmt.where(VentaHistorica.sucursal.in_(sucursales_crudas))
+        elif suc:
             # "02 LINDEROS" tambien es Linderos: con igualdad, la serie de la
             # sucursal salia plana en cero para la mayoria de los productos.
             stmt = stmt.where(misma_sucursal(suc))
@@ -2184,7 +2225,7 @@ def _ventana_12_meses(db: Session) -> list[str]:
     return sorted(salida)
 
 
-def grupo_ventas(db: Session, producto: str) -> dict:
+def grupo_ventas(db: Session, producto: str, sucursal: str | None = None) -> dict:
     """Venta mes a mes de CADA codigo del grupo de reemplazos.
 
     El comprador ve un numero consolidado y no sabe de donde viene. Con esto puede
@@ -2194,6 +2235,9 @@ def grupo_ventas(db: Session, producto: str) -> dict:
 
     El dato ya estaba: `venta_historica` guarda la venta POR CODIGO CRUDO desde
     2018, asi que no hay que cargar nada ni pedirle nada al motor.
+
+    `sucursal` (opcional, el nombre normalizado de `clave_sucursal`): la venta y el stock
+    de esa sucursal solamente. Sin ella, todas las sucursales, como siempre.
 
     Ojo con `agrupado`: la tabla tiene que mostrar el grupo que el MOTOR armo, no
     el que FORD declara. FORD puede declarar un reemplazo que el motor descarto
@@ -2211,9 +2255,15 @@ def grupo_ventas(db: Session, producto: str) -> dict:
     vigente = miembros[0]
     ventana = set(_ventana_12_meses(db))
 
+    clave = clave_sucursal(sucursal) if sucursal else ""
+    crudas = variantes_de_sucursal(db, miembros, clave) if clave else None
+
     stock = {}
     for m in miembros:
-        stock[m] = sum(r["stock"] for r in stock_service.stock_por_sucursal(db, m))
+        filas_stock = stock_service.stock_por_sucursal(db, m)
+        if clave:
+            filas_stock = [r for r in filas_stock if clave_sucursal(r.get("sucursal_id")) == clave]
+        stock[m] = sum(r["stock"] for r in filas_stock)
 
     meses: dict[str, dict[str, float]] = {}
     salida = []
@@ -2225,6 +2275,8 @@ def grupo_ventas(db: Session, producto: str) -> dict:
             .group_by(VentaHistorica.periodo)
             .order_by(VentaHistorica.periodo.asc())
         )
+        if crudas is not None:
+            stmt = stmt.where(VentaHistorica.sucursal.in_(crudas))
         serie = [(p, float(c)) for p, c in db.execute(stmt).all()]
         # Solo los periodos de la ventana: ver `_ventana_12_meses`.
         ult12 = [(p, c) for p, c in serie if p in ventana]
@@ -2265,6 +2317,7 @@ def grupo_ventas(db: Session, producto: str) -> dict:
     return {
         "producto": producto,
         "vigente": vigente,
+        "sucursal": clave or None,
         "miembros": salida,
         # Los 12 periodos completos, no solo los que tuvieron venta: un repuesto
         # que se dejo de vender tiene que MOSTRAR la caida, y con el eje lleno de

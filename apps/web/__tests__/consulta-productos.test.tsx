@@ -16,6 +16,7 @@ import type { ConsultaDetalle, ConsultaProducto } from "@/lib/types";
 const mocks = vi.hoisted(() => ({
   consultaProductos: vi.fn(),
   consultaDetalle: vi.fn(),
+  consultaSucursales: vi.fn(),
   esVendedor: vi.fn(),
 }));
 
@@ -29,12 +30,13 @@ vi.mock("@/lib/api-client", () => ({
   api: {
     consultaProductos: mocks.consultaProductos,
     consultaDetalle: mocks.consultaDetalle,
+    consultaSucursales: mocks.consultaSucursales,
   },
 }));
 // Los gráficos tienen sus propias pruebas: aquí solo importa que se pidan por la ruta de consulta.
 vi.mock("@/components/grafico-ventas", () => ({
-  GraficoVentas: ({ producto, consulta }: { producto: string; consulta?: boolean }) => (
-    <div data-testid="grafico-ventas">{producto}|{String(consulta)}</div>
+  GraficoVentas: ({ producto, consulta, sucursalId }: { producto: string; consulta?: boolean; sucursalId?: string }) => (
+    <div data-testid="grafico-ventas">{producto}|{String(consulta)}|{sucursalId ?? ""}</div>
   ),
 }));
 vi.mock("@/components/grafico-stock-sucursal", () => ({
@@ -43,8 +45,8 @@ vi.mock("@/components/grafico-stock-sucursal", () => ({
   ),
 }));
 vi.mock("@/components/grupo-reemplazos", () => ({
-  GrupoReemplazos: ({ producto, consulta }: { producto: string; consulta?: boolean }) => (
-    <div data-testid="grupo-reemplazos">{producto}|{String(consulta)}</div>
+  GrupoReemplazos: ({ producto, consulta, sucursalId }: { producto: string; consulta?: boolean; sucursalId?: string }) => (
+    <div data-testid="grupo-reemplazos">{producto}|{String(consulta)}|{sucursalId ?? ""}</div>
   ),
 }));
 vi.mock("@/lib/auth", () => ({
@@ -78,6 +80,8 @@ function pagina(items: ConsultaProducto[], total = items.length) {
 beforeEach(() => {
   mocks.consultaProductos.mockReset();
   mocks.consultaDetalle.mockReset();
+  mocks.consultaSucursales.mockReset();
+  mocks.consultaSucursales.mockResolvedValue({ producto: "", sucursales: [] });
   mocks.esVendedor.mockReset();
   sessionStorage.clear();
 });
@@ -207,6 +211,60 @@ describe("detalle de un producto", () => {
     expect(screen.getByTestId("grafico-ventas")).toHaveTextContent("19 SZ6Z3B437B|true");
     expect(screen.getByTestId("grupo-reemplazos")).toHaveTextContent("19 SZ6Z3B437B|true");
     expect(screen.queryByText(/costo/i)).not.toBeInTheDocument();
+  });
+
+  it("sin sucursales con venta no muestra el filtro", async () => {
+    mocks.consultaDetalle.mockResolvedValue(DETALLE);
+    render(<DetalleConsultaPage params={{ producto: encodeURIComponent("19 SZ6Z3B437B") }} />);
+    await screen.findByRole("heading", { name: "19 SZ6Z3B437B" });
+    expect(screen.queryByLabelText("Ver ventas de")).not.toBeInTheDocument();
+  });
+
+  it("filtra las ventas y el historial de reemplazos por sucursal y recuerda la elección", async () => {
+    mocks.consultaDetalle.mockResolvedValue(DETALLE);
+    mocks.consultaSucursales.mockResolvedValue({ producto: "19 SZ6Z3B437B", sucursales: ["CURICO", "LINDEROS"] });
+    render(<DetalleConsultaPage params={{ producto: encodeURIComponent("19 SZ6Z3B437B") }} />);
+
+    const filtro = await screen.findByLabelText("Ver ventas de");
+    expect(mocks.consultaSucursales).toHaveBeenCalledWith("19 SZ6Z3B437B");
+    // Sin elegir: todas las sucursales, y los gráficos no reciben sucursal.
+    expect(filtro).toHaveValue("");
+    expect(screen.getByRole("option", { name: "Todas las sucursales" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "LINDEROS" })).toBeInTheDocument();
+    expect(screen.getByTestId("grafico-ventas")).toHaveTextContent("19 SZ6Z3B437B|true|");
+    expect(screen.getByTestId("grafico-ventas")).not.toHaveTextContent("LINDEROS");
+
+    fireEvent.change(filtro, { target: { value: "LINDEROS" } });
+
+    // Las dos gráficas piden la venta de esa sucursal.
+    expect(screen.getByTestId("grafico-ventas")).toHaveTextContent("19 SZ6Z3B437B|true|LINDEROS");
+    expect(screen.getByTestId("grupo-reemplazos")).toHaveTextContent("19 SZ6Z3B437B|true|LINDEROS");
+    expect(screen.getByText(/Venta y stock de/)).toHaveTextContent("LINDEROS");
+    expect(sessionStorage.getItem("consulta_productos_sucursal")).toBe("LINDEROS");
+
+    // Y volver a "todas" quita el filtro.
+    fireEvent.change(filtro, { target: { value: "" } });
+    expect(screen.getByTestId("grafico-ventas")).not.toHaveTextContent("LINDEROS");
+  });
+
+  it("al abrir otro producto aplica la sucursal elegida antes si también vendió ahí", async () => {
+    sessionStorage.setItem("consulta_productos_sucursal", "CURICO");
+    mocks.consultaDetalle.mockResolvedValue(DETALLE);
+    mocks.consultaSucursales.mockResolvedValue({ producto: "19 SZ6Z3B437B", sucursales: ["CURICO", "TALCA"] });
+    render(<DetalleConsultaPage params={{ producto: encodeURIComponent("19 SZ6Z3B437B") }} />);
+
+    await waitFor(() => expect(screen.getByLabelText("Ver ventas de")).toHaveValue("CURICO"));
+    expect(screen.getByTestId("grafico-ventas")).toHaveTextContent("|CURICO");
+  });
+
+  it("si la sucursal recordada no vendió este producto, vuelve a todas", async () => {
+    sessionStorage.setItem("consulta_productos_sucursal", "OVALLE");
+    mocks.consultaDetalle.mockResolvedValue(DETALLE);
+    mocks.consultaSucursales.mockResolvedValue({ producto: "19 SZ6Z3B437B", sucursales: ["CURICO"] });
+    render(<DetalleConsultaPage params={{ producto: encodeURIComponent("19 SZ6Z3B437B") }} />);
+
+    await screen.findByLabelText("Ver ventas de");
+    expect(screen.getByLabelText("Ver ventas de")).toHaveValue("");
   });
 
   it("si el producto no existe, lo dice y deja volver a la lista", async () => {
