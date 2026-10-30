@@ -50,7 +50,7 @@ claves se borra al cerrar o guardar.
 |---|---|
 | Admin | Administra la plataforma: usuarios, carga de datos y todo lo demas. Tiene todos los permisos especiales. |
 | Solo lectura | Ve todo pero no crea ni modifica sugerencias manuales, pedidos de compra ni la lista InStock (`requiere_escritura`). Los requerimientos de sucursal no pasan por ahi: los puede procesar o rechazar. |
-| Vendedor de sucursal | Menu propio: solo arma y sigue requerimientos (`requiere_comprador` lo saca del resto). |
+| Vendedor de sucursal | Menu propio: consulta productos (`Productos`, sin costo; ver `docs/consulta-productos.md`), arma y sigue requerimientos (`requiere_comprador` lo saca del resto, incluido el chat). |
 
 **Sucursales** (`sucursales_permitidas`): para un vendedor son por las que puede
 pedir, y necesita al menos una (si no, el servidor rechaza el alta). Para el
