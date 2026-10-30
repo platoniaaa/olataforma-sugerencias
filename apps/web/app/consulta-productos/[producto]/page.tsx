@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { formatoCLP, formatoNumero } from "@/lib/formato";
+import { GraficoStockSucursal } from "@/components/grafico-stock-sucursal";
 import { GraficoVentas } from "@/components/grafico-ventas";
 import { GrupoReemplazos } from "@/components/grupo-reemplazos";
 import type { ConsultaDetalle } from "@/lib/types";
@@ -147,13 +148,15 @@ export default function DetalleConsultaPage({ params }: { params: { producto: st
 
       <GrupoReemplazos producto={d.producto} consulta />
 
+      <GraficoStockSucursal filas={d.stock_por_sucursal} />
+
       <GraficoVentas producto={d.producto} consulta />
 
       <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-4 py-3">
-          <h2 className="text-sm font-semibold text-slate-900">Stock por sucursal</h2>
+          <h2 className="text-sm font-semibold text-slate-900">Detalle por bodega</h2>
           <p className="text-xs text-slate-600">
-            Todas las sucursales y bodegas. Se actualiza en cada corrida del sugerido.
+            El mismo stock del gráfico, bodega por bodega. Se actualiza en cada corrida del sugerido.
           </p>
         </div>
         {conStock.length === 0 ? (

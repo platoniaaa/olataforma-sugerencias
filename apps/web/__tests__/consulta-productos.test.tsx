@@ -37,6 +37,11 @@ vi.mock("@/components/grafico-ventas", () => ({
     <div data-testid="grafico-ventas">{producto}|{String(consulta)}</div>
   ),
 }));
+vi.mock("@/components/grafico-stock-sucursal", () => ({
+  GraficoStockSucursal: ({ filas }: { filas: unknown[] }) => (
+    <div data-testid="grafico-stock">{filas.length} filas</div>
+  ),
+}));
 vi.mock("@/components/grupo-reemplazos", () => ({
   GrupoReemplazos: ({ producto, consulta }: { producto: string; consulta?: boolean }) => (
     <div data-testid="grupo-reemplazos">{producto}|{String(consulta)}</div>
@@ -197,6 +202,8 @@ describe("detalle de un producto", () => {
     // Lo que dice FORD.
     expect(screen.getByText("FORD dio de baja este código")).toBeInTheDocument();
     // Ventas y grupo de reemplazos por la ruta de consulta (sin costo).
+    // El gráfico de stock por sucursal recibe todas las filas de stock del producto.
+    expect(screen.getByTestId("grafico-stock")).toHaveTextContent("3 filas");
     expect(screen.getByTestId("grafico-ventas")).toHaveTextContent("19 SZ6Z3B437B|true");
     expect(screen.getByTestId("grupo-reemplazos")).toHaveTextContent("19 SZ6Z3B437B|true");
     expect(screen.queryByText(/costo/i)).not.toBeInTheDocument();
