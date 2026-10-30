@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { api } from "@/lib/api-client";
+import { api, mensajeLectura } from "@/lib/api-client";
+import { Button } from "@/components/ui/button";
 import { formatoCLP, formatoNumero } from "@/lib/formato";
 import { GraficoStockSucursal } from "@/components/grafico-stock-sucursal";
 import { GraficoVentas } from "@/components/grafico-ventas";
@@ -26,6 +27,9 @@ export default function DetalleConsultaPage({ params }: { params: { producto: st
   // Filtro de ventas: "" = todas las sucursales. Se recuerda al pasar de un producto a otro.
   const [sucursales, setSucursales] = useState<string[]>([]);
   const [sucursal, setSucursal] = useState("");
+  // Los gráficos de venta esperan a saber la sucursal recordada: si no, piden primero las de 'todas'.
+  const [sucursalesListas, setSucursalesListas] = useState(false);
+  const [intento, setIntento] = useState(0);
 
   useEffect(() => {
     let activo = true;
@@ -34,16 +38,20 @@ export default function DetalleConsultaPage({ params }: { params: { producto: st
     api
       .consultaDetalle(producto)
       .then((r) => activo && setD(r))
-      .catch((e) => activo && setError(e instanceof Error ? e.message : "No se pudo cargar el producto"))
+      .catch((e) => activo && setError(mensajeLectura(e)))
       .finally(() => activo && setCargando(false));
     return () => {
       activo = false;
     };
-  }, [producto]);
+  }, [producto, intento]);
 
   // Las sucursales que vendieron este producto (o su grupo) son las opciones del filtro.
   useEffect(() => {
     let activo = true;
+    // Al pasar de un producto a otro no sirven ni las opciones ni la sucursal del anterior.
+    setSucursales([]);
+    setSucursal("");
+    setSucursalesListas(false);
     api
       .consultaSucursales(producto)
       .then((r) => {
@@ -57,7 +65,8 @@ export default function DetalleConsultaPage({ params }: { params: { producto: st
         }
         setSucursal(r.sucursales.includes(guardada) ? guardada : "");
       })
-      .catch(() => activo && setSucursales([]));
+      .catch(() => activo && setSucursales([]))
+      .finally(() => activo && setSucursalesListas(true));
     return () => {
       activo = false;
     };
@@ -89,6 +98,11 @@ export default function DetalleConsultaPage({ params }: { params: { producto: st
         <p role="alert" className="text-sm text-slate-700">
           {error ?? "Este producto no está en el catálogo."}
         </p>
+        {error && !error.startsWith("Este producto") && (
+          <Button variant="outline" className="min-h-[44px]" onClick={() => setIntento((n) => n + 1)}>
+            Reintentar
+          </Button>
+        )}
       </div>
     );
   }
@@ -215,7 +229,7 @@ export default function DetalleConsultaPage({ params }: { params: { producto: st
           </select>
           {sucursal && (
             <span className="text-[12px] text-slate-600">
-              Mostrando solo la venta y el stock de <b>{sucursal}</b>.
+              Mostrando la venta de <b>{sucursal}</b>. El stock de arriba es de todas las sucursales.
             </span>
           )}
         </section>
@@ -223,19 +237,23 @@ export default function DetalleConsultaPage({ params }: { params: { producto: st
 
       {/* UN solo gráfico de ventas: el historial de reemplazos (este código y los que lo
           reemplazan, apilados) cuando hay grupo; si no, la venta del código solo. */}
-      <GrupoReemplazos
-        producto={d.producto}
-        consulta
-        sucursalId={sucursal || undefined}
-        alternativa={
-          <GraficoVentas
-            producto={d.producto}
-            consulta
-            sucursalId={sucursal || undefined}
-            sucursalNombre={sucursal || undefined}
-          />
-        }
-      />
+      {sucursalesListas ? (
+        <GrupoReemplazos
+          producto={d.producto}
+          consulta
+          sucursalId={sucursal || undefined}
+          alternativa={
+            <GraficoVentas
+              producto={d.producto}
+              consulta
+              sucursalId={sucursal || undefined}
+              sucursalNombre={sucursal || undefined}
+            />
+          }
+        />
+      ) : (
+        <p role="status" className="text-[13px] text-slate-600">Cargando ventas…</p>
+      )}
 
       <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-4 py-3">

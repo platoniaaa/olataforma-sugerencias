@@ -1,7 +1,8 @@
 """Endpoint del chatbot del sugerido.
 
-Disponible para todo usuario autenticado. Si Gemini no esta configurado, responde
-503 con un mensaje accionable.
+Disponible para Abastecimiento: sus herramientas devuelven costo, proveedor y
+parametros de compra, y el vendedor nunca ve el costo (el gate esta en `main.py`).
+Si Gemini no esta configurado, responde 503 con un mensaje accionable.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field

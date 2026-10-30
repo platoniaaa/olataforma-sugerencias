@@ -5,11 +5,12 @@ import Link from "next/link";
 import { ChevronRight, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { api } from "@/lib/api-client";
+import { api, mensajeLectura } from "@/lib/api-client";
 import { formatoCLP, formatoNumero } from "@/lib/formato";
 import type { ConsultaProducto } from "@/lib/types";
 
 const LS_BUSQUEDA = "consulta_productos_q";
+const LS_CON_STOCK = "consulta_productos_con_stock";
 const POR_PAGINA = 50;
 
 /**
@@ -38,6 +39,7 @@ export default function ConsultaProductosPage() {
     try {
       const guardada = sessionStorage.getItem(LS_BUSQUEDA);
       if (guardada) setQ(guardada);
+      if (sessionStorage.getItem(LS_CON_STOCK) === "1") setConStock(true);
     } catch {
       /* sin sessionStorage: se parte vacío */
     }
@@ -60,7 +62,7 @@ export default function ConsultaProductosPage() {
         setPagina(pag);
       } catch (e) {
         if (mio !== pedido.current) return;
-        setError(e instanceof Error ? e.message : "No se pudo cargar la lista");
+        setError(mensajeLectura(e));
       } finally {
         if (mio === pedido.current) setCargando(false);
       }
@@ -73,9 +75,13 @@ export default function ConsultaProductosPage() {
     if (!listo) return;
     try {
       sessionStorage.setItem(LS_BUSQUEDA, q);
+      sessionStorage.setItem(LS_CON_STOCK, conStock ? "1" : "0");
     } catch {
       /* noop */
     }
+    // Desde que cambia la busqueda ya no vale lo que dice la pantalla (p. ej. 'sin resultados'):
+    // se marca como cargando de inmediato y no recien cuando vence la pausa.
+    setCargando(true);
     const t = setTimeout(() => cargar(1, true), 300);
     return () => clearTimeout(t);
   }, [listo, q, conStock, cargar]);

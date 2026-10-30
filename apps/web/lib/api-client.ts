@@ -84,6 +84,18 @@ function errorCargaSinConfirmar(): Error {
 export const MENSAJE_SIN_SERVIDOR =
   "No se pudo conectar con el servidor. Puede estar reiniciándose: espera un minuto y vuelve a intentar.";
 
+/**
+ * Texto para el vendedor cuando falla una lectura de la vista Productos: nunca la ruta de la API
+ * ni el codigo HTTP. Un corte de red o un reinicio de Render (hasta un minuto) se dice como tal.
+ */
+export function mensajeLectura(e: unknown): string {
+  if (e instanceof TypeError) return MENSAJE_SIN_SERVIDOR;
+  const estado = e instanceof Error ? Number(/^Error (\d+) /.exec(e.message)?.[1]) : NaN;
+  if (estado === 404) return "Este producto no está en el catálogo.";
+  if ([502, 503, 504].includes(estado)) return MENSAJE_SIN_SERVIDOR;
+  return "No se pudo cargar la información. Intenta de nuevo.";
+}
+
 /** Error de una solicitud al buzon del PC del motor, con el codigo HTTP (0 = sin
  *  respuesta). La tarjeta distingue el 409: ya hay otra solicitud viva. */
 export class ErrorSolicitud extends Error {

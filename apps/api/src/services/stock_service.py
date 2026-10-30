@@ -105,6 +105,69 @@ def stock_operativo_por_producto(db: Session, productos: list[str]) -> dict[str,
         return {}
 
 
+def _bodegas_excluidas(db: Session) -> set[str]:
+    # Import local: precios_service importa de aqui y un import de modulo haria un ciclo.
+    from .precios_service import bodegas_excluidas
+
+    return bodegas_excluidas(db)
+
+
+def filtro_vendible(db: Session):
+    """Funcion que deja de una lista de filas de stock solo las que un vendedor puede prometer.
+
+    Misma regla que la lista de precios (`precios_service._stock`): sin las bodegas no
+    disponibles (danados, devolucion, scrap, sin bodega), sin el stock de Frontera -que
+    `stock_unificado` trae junto al de Curifor- y sin saldos en cero o negativos. Una
+    unidad en Danados o en la otra empresa no se le puede vender a un cliente.
+
+    Cada fila es un dict con `bodega`, `origen` y `stock` (lo que devuelve `stock_por_sucursal`).
+    """
+    excluidas = _bodegas_excluidas(db)
+
+    def _filtrar(filas: list[dict]) -> list[dict]:
+        return [
+            r for r in filas
+            if (r.get("stock") or 0) > 0
+            and str(r.get("origen") or "CURIFOR").upper() != "FRONTERA"
+            and (r.get("bodega") or "") not in excluidas
+        ]
+
+    return _filtrar
+
+
+def _cuenta_para_el_vendedor(db: Session):
+    """Condiciones SQL de la misma regla, para sumar o filtrar sin traer las filas."""
+    condiciones = [
+        StockUnificado.stock > 0,
+        func.upper(func.coalesce(StockUnificado.origen, "CURIFOR")) != "FRONTERA",
+    ]
+    excluidas = _bodegas_excluidas(db)
+    if excluidas:
+        condiciones.append(func.coalesce(StockUnificado.bodega, "").notin_(excluidas))
+    return condiciones
+
+
+def stock_vendible_por_producto(db: Session, productos: list[str]) -> dict[str, float]:
+    """{producto: stock que se puede vender}. Un producto sin stock vendible no aparece."""
+    if not productos:
+        return {}
+    stmt = (
+        select(StockUnificado.producto, func.coalesce(func.sum(StockUnificado.stock), 0))
+        .where(StockUnificado.producto.in_(productos), *_cuenta_para_el_vendedor(db))
+        .group_by(StockUnificado.producto)
+    )
+    try:
+        return {p: float(t) for p, t in db.execute(stmt).all()}
+    except Exception:
+        db.rollback()
+        return {}
+
+
+def productos_con_stock_vendible(db: Session):
+    """Subconsulta con los productos que tienen stock vendible (para el filtro 'solo con stock')."""
+    return select(StockUnificado.producto).where(*_cuenta_para_el_vendedor(db))
+
+
 def stock_por_sucursal(db: Session, producto: str) -> list[dict]:
     """Lista filas (bodega, sucursal_id, stock, origen) de un producto, orden por stock desc."""
     stmt = (

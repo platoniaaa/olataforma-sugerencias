@@ -59,6 +59,9 @@ export function GrupoReemplazos({
 
   useEffect(() => {
     let activo = true;
+    // Un fallo de antes no deja el historial oculto para siempre. Los datos viejos se quedan
+    // mientras llegan los nuevos (la tabla dice de que sucursal son), para no saltar el diseño.
+    setError(false);
     (consulta ? api.consultaGrupoVentas(producto, sucursalId) : api.grupoVentas(producto))
       .then((r) => activo && setData(r))
       .catch(() => activo && setError(true));

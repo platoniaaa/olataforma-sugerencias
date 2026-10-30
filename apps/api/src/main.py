@@ -164,7 +164,9 @@ app.include_router(usuarios.router, dependencies=[Depends(requiere_admin)])
 # Calibracion NO va bajo /api/admin: su permiso es admin O autorizado (Abastecimiento).
 app.include_router(calibracion.router, dependencies=[Depends(requiere_calibracion)])
 # Chatbot: disponible para todo usuario autenticado.
-app.include_router(chat.router, dependencies=_protegido)
+# El asistente tiene herramientas que devuelven costo, proveedor y parametros de compra: se cierra al
+# vendedor, que nunca ve el costo (ver `consulta_productos`).
+app.include_router(chat.router, dependencies=_abastecimiento)
 
 
 @app.get("/", include_in_schema=False)

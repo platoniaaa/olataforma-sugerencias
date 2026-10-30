@@ -21,7 +21,7 @@ from ..schemas.consulta_productos import (
     ProductoConsultaPage,
     ProductoConsultaRow,
 )
-from ..services import catalogo_service, sugerido_service, transito_service
+from ..services import catalogo_service, stock_service, sugerido_service, transito_service
 
 router = APIRouter(prefix="/api/consulta/productos", tags=["consulta-productos"])
 
@@ -44,12 +44,22 @@ def listar(
         q=q, familia=familia, procedencia=procedencia,
         categoria=categoria, con_stock=con_stock,
     )
-    items, total = catalogo_service.listar(db, f, page=page, limit=limit, sort="producto")
+    # 'Solo con stock' mira el stock vivo y no la foto del maestro, para que el filtro y la fila coincidan.
+    items, total = catalogo_service.listar(
+        db, f, page=page, limit=limit, sort="producto",
+        con_stock_de=stock_service.productos_con_stock_vendible(db),
+    )
+    codigos = [i["producto"] for i in items]
+    # El vendedor ve lo que puede prometer: sin danados, devolucion ni Frontera (ver `filtro_vendible`).
+    vendible = stock_service.stock_vendible_por_producto(db, codigos)
     # Una sola consulta para las filas de la pagina: lo que viene en camino se ve en la lista.
-    transito = transito_service.unidades_por_producto(db, {i["producto"] for i in items})
+    transito = transito_service.unidades_por_producto(db, set(codigos), solo_curifor=True)
     return ProductoConsultaPage(
         items=[
-            ProductoConsultaRow.model_validate(i).model_copy(update={"en_transito": transito.get(i["producto"], 0.0)})
+            ProductoConsultaRow.model_validate(i).model_copy(update={
+                "stock_total": vendible.get(i["producto"], 0.0),
+                "en_transito": transito.get(i["producto"], 0.0),
+            })
             for i in items
         ],
         total=total,
@@ -80,10 +90,10 @@ def ventas(
     """Venta del producto, mes a mes (12 meses): el total de todas las sucursales y, si se
     pide `sucursal_id`, la de esa sucursal aparte. Solo unidades: no lleva costo ni margen."""
     if not sucursal_id:
-        return VentasResponse(**sugerido_service.ventas_12m(db, producto))
+        return VentasResponse(**sugerido_service.ventas_12m(db, producto, solo_ventana=True))
     clave = sugerido_service.clave_sucursal(sucursal_id)
     crudas = sugerido_service.variantes_de_sucursal(db, [producto], clave)
-    datos = sugerido_service.ventas_12m(db, producto, clave, sucursales_crudas=crudas)
+    datos = sugerido_service.ventas_12m(db, producto, clave, sucursales_crudas=crudas, solo_ventana=True)
     return VentasResponse(**datos)
 
 
@@ -95,11 +105,14 @@ def grupo_ventas(
 ) -> dict:
     """Venta mes a mes de cada código del grupo de reemplazos (vacío si no tiene). Con
     `sucursal_id`, la venta y el stock de esa sucursal solamente."""
-    d = sugerido_service.grupo_ventas(db, producto, sucursal_id or None)
+    d = sugerido_service.grupo_ventas(db, producto, sucursal_id or None, filtro_stock=stock_service.filtro_vendible(db))
     # Lo que viene en camino de cada codigo del grupo: un reemplazo en transito tambien evita pedir de mas.
-    transito = transito_service.unidades_por_producto(db, {m["producto"] for m in d["miembros"]}, sucursal_id or None)
+    transito = transito_service.unidades_por_producto(
+        db, {m["producto"] for m in d["miembros"]}, sucursal_id or None, solo_curifor=True)
     for m in d["miembros"]:
         m["transito"] = transito.get(m["producto"], 0.0)
+        # Habla del sugerido de compras: la pantalla no lo muestra, tampoco debe viajar.
+        m.pop("motivo_fuera", None)
     return d
 
 
@@ -108,6 +121,9 @@ def detalle(producto: str, db: Session = Depends(get_db)) -> ProductoConsultaDet
     d = catalogo_service.detalle(db, producto)
     if not d:
         raise HTTPException(status_code=404, detail="Producto no esta en el catalogo")
-    d["transito_por_sucursal"] = transito_service.detalle_por_sucursal(db, producto)
+    # Solo lo que un vendedor puede prometer: sin danados, devolucion ni Frontera.
+    d["stock_por_sucursal"] = stock_service.filtro_vendible(db)(d["stock_por_sucursal"])
+    d["stock_total"] = sum(r["stock"] for r in d["stock_por_sucursal"])
+    d["transito_por_sucursal"] = transito_service.detalle_por_sucursal(db, producto, solo_curifor=True)
     d["en_transito"] = sum(t["cantidad"] for t in d["transito_por_sucursal"])
     return ProductoConsultaDetalle.model_validate(d)

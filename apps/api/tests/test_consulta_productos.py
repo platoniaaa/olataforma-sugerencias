@@ -252,7 +252,7 @@ def con_transito(con_sucursales):
         StockTransito(tenant_id="curifor", producto=CODIGO, sucursal_id="TALCA", cantidad=6.0,
                       pedido_desde=date(2026, 6, 12), origen="CURIFOR"),
         StockTransito(tenant_id="curifor", producto=CODIGO, sucursal_id="02 LINDEROS", cantidad=3.0,
-                      pedido_desde=None, origen="FRONTERA"),
+                      pedido_desde=None, origen="CURIFOR"),
         StockTransito(tenant_id="curifor", producto=VIGENTE, sucursal_id="LINDEROS", cantidad=4.0,
                       pedido_desde=date(2026, 10, 5), origen="CURIFOR"),
     ])
@@ -295,3 +295,134 @@ def test_el_transito_del_grupo_se_filtra_por_sucursal_aunque_venga_con_codigo(cl
 def test_un_producto_sin_transito_responde_vacio_y_en_cero(client, con_sucursales):
     d = client.get(f"/api/consulta/productos/{CODIGO}").json()
     assert d["transito_por_sucursal"] == [] and d["en_transito"] == 0
+
+
+# --- Lo que la revision encontro: el chat, el stock que se puede prometer y la ventana de 12 meses ---
+
+
+def test_el_vendedor_no_pasa_del_gate_del_asistente_de_chat(client, como_vendedor):
+    """Las herramientas del chat devuelven costo y proveedor: el vendedor no puede usarlo."""
+    r = client.post("/api/chat", json={"pregunta": "cual es el costo del 19 SZ6Z3B437B"})
+    assert r.status_code == 403
+
+
+def test_abastecimiento_si_pasa_del_gate_del_asistente_de_chat(client, datos):
+    """Sin Gemini configurado responde 503/502, pero no 403: el gate solo cierra al vendedor."""
+    r = client.post("/api/chat", json={"pregunta": "hola"})
+    assert r.status_code != 403
+
+
+@pytest.fixture()
+def con_bodegas_no_vendibles(con_sucursales):
+    """Lo que el ERP mezcla con el stock: Danados (NODISP), una bodega de Frontera y un producto
+    que solo tiene stock en Danados. Un vendedor no puede prometerle eso a un cliente."""
+    from src.models.bodega_tipo import NODISP, REAL, BodegaTipo
+    from src.services import precios_service
+
+    db = con_sucursales
+    for bodega, tipo in (("DAÑADOS", NODISP), ("LINDEROS", REAL), ("CURICO", REAL)):
+        db.add(BodegaTipo(tenant_id="curifor", bodega=bodega,
+                          clave=precios_service.clave_bodega(bodega), tipo=tipo))
+    db.add_all([
+        StockUnificado(tenant_id="curifor", producto=CODIGO, sucursal_id=None, bodega="DAÑADOS", stock=40),
+        StockUnificado(tenant_id="curifor", producto=CODIGO, sucursal_id="CURICO", bodega="CURICO FRONTERA",
+                       stock=25, origen="FRONTERA"),
+        # Saldo negativo: no es stock.
+        StockUnificado(tenant_id="curifor", producto=CODIGO, sucursal_id="TALCA", bodega="TALCA", stock=-2),
+        StockUnificado(tenant_id="curifor", producto=VIGENTE, sucursal_id=None, bodega="DAÑADOS", stock=8),
+        StockUnificado(tenant_id="curifor", producto="70 2723982", sucursal_id=None, bodega="DAÑADOS", stock=12),
+    ])
+    db.commit()
+    return db
+
+
+def test_el_detalle_no_cuenta_danados_ni_frontera_ni_saldos_negativos(client, con_bodegas_no_vendibles):
+    d = client.get(f"/api/consulta/productos/{CODIGO}").json()
+    assert {s["bodega"] for s in d["stock_por_sucursal"]} == {"LINDEROS", "CURICO"}
+    assert d["stock_total"] == 7
+    assert "DAÑADOS" not in json.dumps(d, ensure_ascii=False)
+
+
+def test_la_lista_no_cuenta_danados_ni_frontera(client, con_bodegas_no_vendibles):
+    items = {x["producto"]: x for x in client.get("/api/consulta/productos").json()["items"]}
+    assert items[CODIGO]["stock_total"] == 7
+    # Solo tiene stock en Danados: para el vendedor no tiene stock.
+    assert items["70 2723982"]["stock_total"] == 0
+
+
+def test_el_grupo_de_reemplazos_no_suma_danados(client, con_bodegas_no_vendibles):
+    d = client.get(f"/api/consulta/productos/{CODIGO}/grupo-ventas").json()
+    por = {m["producto"]: m["stock"] for m in d["miembros"]}
+    assert por == {CODIGO: 7, VIGENTE: 15}
+    assert d["total_stock"] == 22
+
+
+def test_solo_con_stock_usa_el_stock_vivo_y_no_la_foto_del_maestro(client, como_vendedor, datos):
+    """El maestro trae un `stock_total` viejo: VIVO tiene stock hoy y el maestro dice 0; VIEJO al revés."""
+    datos.add_all([
+        ProductoCatalogo(tenant_id="curifor", producto="VIVO", glosa="TIENE STOCK HOY", stock_total=0),
+        ProductoCatalogo(tenant_id="curifor", producto="VIEJO", glosa="YA NO TIENE", stock_total=9),
+        StockUnificado(tenant_id="curifor", producto="VIVO", sucursal_id="LINDEROS", bodega="LINDEROS", stock=5),
+    ])
+    datos.commit()
+    r = client.get("/api/consulta/productos", params={"con_stock": "true"}).json()
+    codigos = {x["producto"] for x in r["items"]}
+    assert "VIVO" in codigos and "VIEJO" not in codigos
+    assert r["total"] == len(r["items"])
+    # La fila muestra el mismo stock con el que se filtro.
+    assert next(x for x in r["items"] if x["producto"] == "VIVO")["stock_total"] == 5
+
+
+def test_solo_con_stock_no_deja_pasar_lo_que_solo_esta_en_danados(client, con_bodegas_no_vendibles):
+    r = client.get("/api/consulta/productos", params={"con_stock": "true"}).json()
+    assert "70 2723982" not in {x["producto"] for x in r["items"]}
+
+
+def test_el_transito_de_frontera_no_se_le_muestra_al_vendedor(client, con_transito):
+    con_transito.add(StockTransito(tenant_id="curifor", producto=CODIGO, sucursal_id="OVALLE",
+                                   cantidad=9.0, pedido_desde=None, origen="FRONTERA"))
+    con_transito.commit()
+    d = client.get(f"/api/consulta/productos/{CODIGO}").json()
+    assert "OVALLE" not in {t["sucursal_id"] for t in d["transito_por_sucursal"]}
+    assert d["en_transito"] == 19.0
+    items = {x["producto"]: x for x in client.get("/api/consulta/productos").json()["items"]}
+    assert items[CODIGO]["en_transito"] == 19.0
+    g = client.get(f"/api/consulta/productos/{CODIGO}/grupo-ventas").json()
+    assert {m["producto"]: m["transito"] for m in g["miembros"]}[CODIGO] == 19.0
+
+
+def test_el_grupo_de_reemplazos_no_manda_el_texto_del_sugerido_de_compras(client, con_sucursales):
+    r = client.get(f"/api/consulta/productos/{CODIGO}/grupo-ventas")
+    assert "motivo_fuera" not in r.text
+
+
+@pytest.fixture()
+def con_venta_fuera_de_ventana(con_sucursales):
+    """PLACILLA vendio hace años (fuera de los 12 meses) y tambien este mes: es opcion del filtro."""
+    con_sucursales.add_all([
+        VentaHistorica(tenant_id="curifor", periodo="202510", producto=CODIGO,
+                       sucursal="PLACILLA", cantidad=2.0, neto=100000.0),
+    ])
+    con_sucursales.commit()
+    return con_sucursales
+
+
+def test_las_ventas_del_vendedor_son_solo_los_12_meses_de_la_ventana(client, con_venta_fuera_de_ventana):
+    """Antes eran las ultimas 12 FILAS con venta: los 9 de 2022 arrastraban un mes viejo al grafico y
+    a los promedios, y no coincidian con el historial de reemplazos de la misma pantalla."""
+    d = client.get(f"/api/consulta/productos/{CODIGO}/ventas", params={"sucursal_id": "PLACILLA"}).json()
+    assert [(m["mes"], m["cantidad"]) for m in d["meses_sucursal"]] == [("202510", 2.0)]
+    assert d["total_sucursal"] == 2.0
+    assert "202201" not in {m["mes"] for m in d["meses_general"]}
+    # Sin filtro, el total tambien se queda en la ventana.
+    g = client.get(f"/api/consulta/productos/{CODIGO}/ventas").json()
+    assert "202201" not in {m["mes"] for m in g["meses_general"]}
+
+
+def test_el_grafico_de_abastecimiento_no_cambia(con_venta_fuera_de_ventana):
+    """El cambio de la ventana es solo para la vista del vendedor: el sugerido sigue con las ultimas
+    12 filas, como siempre."""
+    from src.services import sugerido_service
+
+    antes = sugerido_service.ventas_12m(con_venta_fuera_de_ventana, CODIGO)
+    assert "202201" in {m["mes"] for m in antes["meses_general"]}

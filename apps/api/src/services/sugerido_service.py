@@ -2156,7 +2156,7 @@ def detalle(db: Session, producto: str, sucursal_id: str) -> Sugerido | None:
 
 
 def ventas_12m(db: Session, producto: str, sucursal_id: str | None = None,
-               sucursales_crudas: list[str] | None = None) -> dict:
+               sucursales_crudas: list[str] | None = None, solo_ventana: bool = False) -> dict:
     """Histórico de venta de un producto (últimos 12 meses).
 
     Devuelve DOS series:
@@ -2168,6 +2168,11 @@ def ventas_12m(db: Session, producto: str, sucursal_id: str | None = None,
     quedo congelado en la ultima corrida del BI, en las tres pantallas que lo usan
     (detalle de producto, ficha del catalogo y el chat).
     """
+
+    # Con `solo_ventana` (la vista del vendedor) los dos ejes son los 12 meses de `_ventana_12_meses`,
+    # igual que el historial de reemplazos de la misma pantalla. Sin ella, las ultimas 12 FILAS con
+    # venta, como siempre: una sucursal que vendio hace dos años arrastraba meses viejos al grafico.
+    ventana = _ventana_12_meses(db) if solo_ventana else None
 
     def _consulta(suc: str | None) -> list[tuple[str, float]]:
         stmt = select(
@@ -2181,6 +2186,8 @@ def ventas_12m(db: Session, producto: str, sucursal_id: str | None = None,
             # "02 LINDEROS" tambien es Linderos: con igualdad, la serie de la
             # sucursal salia plana en cero para la mayoria de los productos.
             stmt = stmt.where(misma_sucursal(suc))
+        if ventana is not None:
+            stmt = stmt.where(VentaHistorica.periodo.in_(ventana))
         stmt = stmt.group_by(VentaHistorica.periodo).order_by(VentaHistorica.periodo.asc())
         return [(m, float(c)) for m, c in db.execute(stmt).all()]
 
@@ -2225,7 +2232,7 @@ def _ventana_12_meses(db: Session) -> list[str]:
     return sorted(salida)
 
 
-def grupo_ventas(db: Session, producto: str, sucursal: str | None = None) -> dict:
+def grupo_ventas(db: Session, producto: str, sucursal: str | None = None, filtro_stock=None) -> dict:
     """Venta mes a mes de CADA codigo del grupo de reemplazos.
 
     El comprador ve un numero consolidado y no sabe de donde viene. Con esto puede
@@ -2238,6 +2245,9 @@ def grupo_ventas(db: Session, producto: str, sucursal: str | None = None) -> dic
 
     `sucursal` (opcional, el nombre normalizado de `clave_sucursal`): la venta y el stock
     de esa sucursal solamente. Sin ella, todas las sucursales, como siempre.
+
+    `filtro_stock` (opcional): funcion que recibe las filas de stock de un codigo y devuelve
+    las que cuentan; la vista del vendedor deja fuera danados, devolucion y Frontera.
 
     Ojo con `agrupado`: la tabla tiene que mostrar el grupo que el MOTOR armo, no
     el que FORD declara. FORD puede declarar un reemplazo que el motor descarto
@@ -2261,6 +2271,8 @@ def grupo_ventas(db: Session, producto: str, sucursal: str | None = None) -> dic
     stock = {}
     for m in miembros:
         filas_stock = stock_service.stock_por_sucursal(db, m)
+        if filtro_stock is not None:
+            filas_stock = filtro_stock(filas_stock)
         if clave:
             filas_stock = [r for r in filas_stock if clave_sucursal(r.get("sucursal_id")) == clave]
         stock[m] = sum(r["stock"] for r in filas_stock)

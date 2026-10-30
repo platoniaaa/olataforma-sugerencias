@@ -109,11 +109,17 @@ def por_producto(
         return {}
 
 
-def detalle_por_sucursal(db: Session, producto: str) -> list[dict]:
+def _es_curifor():
+    # Una fila sin origen -cargas viejas- se cuenta como Curifor, igual que en la lista de precios.
+    return func.upper(func.coalesce(StockTransito.origen, "CURIFOR")) != "FRONTERA"
+
+
+def detalle_por_sucursal(db: Session, producto: str, solo_curifor: bool = False) -> list[dict]:
     """Donde esta el transito de un producto, de mayor a menor.
 
     Sirve para la decision real: si vienen 10 a Curico y ninguno a Linderos, la
-    respuesta puede ser un traslado y no una compra.
+    respuesta puede ser un traslado y no una compra. `solo_curifor` deja fuera lo que
+    pidio Frontera (la vista del vendedor, que vende lo de Curifor).
     """
     stmt = (
         select(
@@ -125,6 +131,8 @@ def detalle_por_sucursal(db: Session, producto: str) -> list[dict]:
         .group_by(StockTransito.sucursal_id)
         .order_by(func.sum(StockTransito.cantidad).desc())
     )
+    if solo_curifor:
+        stmt = stmt.where(_es_curifor())
     try:
         return [
             {"sucursal_id": s, "cantidad": float(c or 0),
@@ -136,7 +144,8 @@ def detalle_por_sucursal(db: Session, producto: str) -> list[dict]:
         return []
 
 
-def unidades_por_producto(db: Session, productos: set[str], sucursal: str | None = None) -> dict[str, float]:
+def unidades_por_producto(db: Session, productos: set[str], sucursal: str | None = None,
+                          solo_curifor: bool = False) -> dict[str, float]:
     """{producto: unidades en transito}, sumando todas las sucursales o solo una.
 
     `sucursal` es el nombre normalizado de `sugerido_service.clave_sucursal`: la comparacion
@@ -153,6 +162,8 @@ def unidades_por_producto(db: Session, productos: set[str], sucursal: str | None
         .where(StockTransito.producto.in_(productos))
         .group_by(StockTransito.producto, StockTransito.sucursal_id)
     )
+    if solo_curifor:
+        stmt = stmt.where(_es_curifor())
     try:
         filas = db.execute(stmt).all()
     except Exception:  # noqa: BLE001 - tabla ausente antes de la primera corrida

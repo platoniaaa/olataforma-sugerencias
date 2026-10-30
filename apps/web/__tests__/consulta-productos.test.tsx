@@ -26,13 +26,18 @@ vi.mock("next/link", () => ({
     <a href={href} {...resto}>{children}</a>
   ),
 }));
-vi.mock("@/lib/api-client", () => ({
-  api: {
-    consultaProductos: mocks.consultaProductos,
-    consultaDetalle: mocks.consultaDetalle,
-    consultaSucursales: mocks.consultaSucursales,
-  },
-}));
+vi.mock("@/lib/api-client", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/api-client")>();
+  return {
+    mensajeLectura: real.mensajeLectura,
+    MENSAJE_SIN_SERVIDOR: real.MENSAJE_SIN_SERVIDOR,
+    api: {
+      consultaProductos: mocks.consultaProductos,
+      consultaDetalle: mocks.consultaDetalle,
+      consultaSucursales: mocks.consultaSucursales,
+    },
+  };
+});
 // Los gráficos tienen sus propias pruebas: aquí solo importa que se pidan por la ruta de consulta.
 vi.mock("@/components/grafico-ventas", () => ({
   GraficoVentas: ({ producto, consulta, sucursalId }: { producto: string; consulta?: boolean; sucursalId?: string }) => (
@@ -166,14 +171,59 @@ describe("lista de productos", () => {
     expect(screen.queryByRole("button", { name: "Ver más productos" })).not.toBeInTheDocument();
   });
 
-  it("si falla, avisa y deja reintentar", async () => {
-    mocks.consultaProductos.mockRejectedValueOnce(new Error("sin conexión"));
+  it("si falla, avisa en palabras del vendedor y deja reintentar", async () => {
+    // Un corte de red llega como TypeError("Failed to fetch"): el vendedor no debe leer eso.
+    mocks.consultaProductos.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     mocks.consultaProductos.mockResolvedValue(pagina([FILTRO]));
     render(<ConsultaProductosPage />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("sin conexión");
+    const aviso = await screen.findByRole("alert");
+    expect(aviso).toHaveTextContent("No se pudo conectar con el servidor");
+    expect(aviso).not.toHaveTextContent("Failed to fetch");
     fireEvent.click(screen.getByRole("button", { name: "Reintentar" }));
     expect(await screen.findByRole("link", { name: /70 2723982/ })).toBeInTheDocument();
+  });
+
+  it("un error del servidor no enseña la ruta de la API ni el texto buscado", async () => {
+    sessionStorage.setItem("consulta_productos_q", "filtro");
+    mocks.consultaProductos.mockRejectedValue(new Error("Error 500 en /api/consulta/productos?q=filtro&page=1"));
+    render(<ConsultaProductosPage />);
+
+    const aviso = await screen.findByRole("alert");
+    expect(aviso).toHaveTextContent("No se pudo cargar la información");
+    expect(aviso).not.toHaveTextContent("/api/");
+    expect(aviso).not.toHaveTextContent("500");
+  });
+
+  it("recuerda 'Solo productos con stock' al volver desde el detalle", async () => {
+    mocks.consultaProductos.mockResolvedValue(pagina([TERMINAL]));
+    const primera = render(<ConsultaProductosPage />);
+    await screen.findByRole("link", { name: /19 SZ6Z3B437B/ });
+    fireEvent.click(screen.getByLabelText("Solo productos con stock"));
+    await waitFor(() =>
+      expect(mocks.consultaProductos).toHaveBeenLastCalledWith(
+        expect.objectContaining({ con_stock: true }), expect.anything()));
+
+    // Se va al detalle (la lista se desmonta) y vuelve: la casilla sigue marcada y se pide con stock.
+    primera.unmount();
+    mocks.consultaProductos.mockClear();
+    render(<ConsultaProductosPage />);
+    await waitFor(() => expect(screen.getByLabelText("Solo productos con stock")).toBeChecked());
+    await waitFor(() =>
+      expect(mocks.consultaProductos).toHaveBeenLastCalledWith(
+        expect.objectContaining({ con_stock: true }), expect.anything()));
+  });
+
+  it("no dice 'no encontramos' mientras se escribe otra búsqueda", async () => {
+    mocks.consultaProductos.mockResolvedValue(pagina([], 0));
+    render(<ConsultaProductosPage />);
+    await screen.findByText(/No hay productos para mostrar/);
+
+    // Con la búsqueda anterior vacía, escribir otra letra no puede afirmar un resultado que no se buscó.
+    mocks.consultaProductos.mockImplementation(() => new Promise(() => undefined));
+    fireEvent.change(screen.getByLabelText("Buscar producto"), { target: { value: "zzzy" } });
+    expect(screen.queryByText(/No encontramos productos/)).not.toBeInTheDocument();
+    expect(screen.getByText("Buscando…")).toBeInTheDocument();
   });
 });
 
@@ -259,7 +309,10 @@ describe("detalle de un producto", () => {
     // Las dos gráficas piden la venta de esa sucursal.
     expect(screen.getByTestId("grafico-ventas")).toHaveTextContent("19 SZ6Z3B437B|true|LINDEROS");
     expect(screen.getByTestId("grupo-reemplazos")).toHaveTextContent("19 SZ6Z3B437B|true|LINDEROS");
-    expect(screen.getByText(/Mostrando solo la venta y el stock de/)).toHaveTextContent("LINDEROS");
+    const aviso = screen.getByText(/Mostrando la venta de/);
+    expect(aviso).toHaveTextContent("LINDEROS");
+    // El stock de las tarjetas y del gráfico es de todas las sucursales: el texto lo dice.
+    expect(aviso).toHaveTextContent("El stock de arriba es de todas las sucursales");
     expect(sessionStorage.getItem("consulta_productos_sucursal")).toBe("LINDEROS");
 
     // Y volver a "todas" quita el filtro.
@@ -288,11 +341,41 @@ describe("detalle de un producto", () => {
   });
 
   it("si el producto no existe, lo dice y deja volver a la lista", async () => {
-    mocks.consultaDetalle.mockRejectedValue(new Error("Producto no esta en el catalogo"));
+    // El 404 real de getJSON: nunca debe llegar al vendedor con la ruta de la API.
+    mocks.consultaDetalle.mockRejectedValue(new Error("Error 404 en /api/consulta/productos/NO%20EXISTE"));
     render(<DetalleConsultaPage params={{ producto: "NO%20EXISTE" }} />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Producto no esta en el catalogo");
+    const aviso = await screen.findByRole("alert");
+    expect(aviso).toHaveTextContent("Este producto no está en el catálogo.");
+    expect(aviso).not.toHaveTextContent("/api/");
     expect(screen.getByRole("link", { name: /Volver a productos/ })).toHaveAttribute(
       "href", "/consulta-productos");
+    // Reintentar no sirve de nada si el producto no existe.
+    expect(screen.queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument();
+  });
+
+  it("si falla el servidor, avisa sin códigos y deja reintentar", async () => {
+    mocks.consultaDetalle.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    mocks.consultaDetalle.mockResolvedValue(DETALLE);
+    render(<DetalleConsultaPage params={{ producto: encodeURIComponent("19 SZ6Z3B437B") }} />);
+
+    const aviso = await screen.findByRole("alert");
+    expect(aviso).toHaveTextContent("No se pudo conectar con el servidor");
+    expect(aviso).not.toHaveTextContent("Failed to fetch");
+    fireEvent.click(screen.getByRole("button", { name: "Reintentar" }));
+    expect(await screen.findByRole("heading", { name: "19 SZ6Z3B437B" })).toBeInTheDocument();
+    expect(mocks.consultaDetalle).toHaveBeenCalledTimes(2);
+  });
+
+  it("no pide las ventas de 'todas' antes de saber la sucursal recordada", async () => {
+    sessionStorage.setItem("consulta_productos_sucursal", "CURICO");
+    mocks.consultaDetalle.mockResolvedValue(DETALLE);
+    mocks.consultaSucursales.mockResolvedValue({ producto: "19 SZ6Z3B437B", sucursales: ["CURICO", "TALCA"] });
+    render(<DetalleConsultaPage params={{ producto: encodeURIComponent("19 SZ6Z3B437B") }} />);
+
+    await waitFor(() => expect(screen.getByTestId("grafico-ventas")).toBeInTheDocument());
+    // El gráfico se monta una sola vez y ya con la sucursal: sin parpadeo de 'todas' ni pedido de más.
+    expect(screen.getByTestId("grafico-ventas")).toHaveTextContent("|CURICO");
+    expect(screen.getByTestId("grupo-reemplazos")).toHaveTextContent("|CURICO");
   });
 });

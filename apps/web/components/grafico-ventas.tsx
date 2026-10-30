@@ -45,6 +45,10 @@ export function GraficoVentas({
 
   useEffect(() => {
     let activo = true;
+    // Al cambiar de producto o de sucursal no se muestran las cifras de la anterior bajo el titulo
+    // nuevo, y un fallo de antes no deja el grafico oculto para siempre.
+    setData(null);
+    setError(false);
     const promesa = consulta
       ? api.consultaVentas(producto, sucursalId)
       : sucursalId
