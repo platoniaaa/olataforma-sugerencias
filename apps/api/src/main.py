@@ -20,6 +20,7 @@ from .routers import (
     catalogo,
     chat,
     compras,
+    consulta_productos,
     cron,
     fuentes,
     health,
@@ -135,6 +136,9 @@ app.include_router(requerimiento.router, dependencies=_abastecimiento)
 # dentro, porque cada uno ve una cosa distinta del mismo dato).
 app.include_router(requerimientos.router, dependencies=_protegido)
 app.include_router(catalogo.router, dependencies=_abastecimiento)
+# Consulta de productos del vendedor: la ficha del catalogo sin costo, abierta a
+# cualquier usuario con sesion (el gate es el modelo de respuesta, no el rol).
+app.include_router(consulta_productos.router, dependencies=_protegido)
 # Lista de precios: ver es de Abastecimiento; editar exige EMAILS_PRECIOS (o admin)
 # y la politica exige admin. Los gates finos van por endpoint dentro del router.
 app.include_router(precios.router, dependencies=_abastecimiento)

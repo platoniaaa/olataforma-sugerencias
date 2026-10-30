@@ -482,6 +482,41 @@ export interface CatalogoDetalle extends CatalogoRow {
   reemplazo_ford: ReemplazoFord | null;
 }
 
+/** Consulta de productos del vendedor (`/api/consulta/productos`): la ficha del
+ *  catalogo SIN costo, stock minimo/maximo ni clasificacion de stock. */
+export interface ConsultaProducto {
+  producto: string;
+  glosa: string | null;
+  familia: string | null;
+  subfamilia: string | null;
+  procedencia: string | null;
+  categoria: string | null;
+  unidad: string | null;
+  /** Precio de venta del ERP. El costo no viaja nunca. */
+  precio: number | null;
+  stock_total: number | null;
+  /** Equivalentes del mix, separados por coma. */
+  reemplazo: string | null;
+}
+
+export interface ConsultaPage {
+  items: ConsultaProducto[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface ConsultaDetalle extends ConsultaProducto {
+  sub_categoria: string | null;
+  tipo_producto: string | null;
+  sub_modelo: string | null;
+  cilindrada: string | null;
+  combustible: string | null;
+  anio: string | null;
+  stock_por_sucursal: StockSucursalRow[];
+  reemplazo_ford: ReemplazoFord | null;
+}
+
 export interface CargaResultado {
   filas_cargadas: number;
   productos: number;

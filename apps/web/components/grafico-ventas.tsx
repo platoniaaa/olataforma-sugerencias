@@ -31,8 +31,11 @@ export function GraficoVentas({
   producto,
   sucursalId,
   sucursalNombre,
+  consulta = false,
 }: {
   producto: string;
+  /** Vista del vendedor: pide la venta por la ruta de consulta (sin costo). */
+  consulta?: boolean;
   /** Si se omite, muestra solo la serie total (vista catalogo sin sucursal). */
   sucursalId?: string;
   sucursalNombre?: string | null;
@@ -42,16 +45,18 @@ export function GraficoVentas({
 
   useEffect(() => {
     let activo = true;
-    const promesa = sucursalId
-      ? api.ventas(producto, sucursalId)
-      : api.catalogoVentas(producto);
+    const promesa = consulta
+      ? api.consultaVentas(producto)
+      : sucursalId
+        ? api.ventas(producto, sucursalId)
+        : api.catalogoVentas(producto);
     promesa
       .then((r) => activo && setData(r))
       .catch(() => activo && setError(true));
     return () => {
       activo = false;
     };
-  }, [producto, sucursalId]);
+  }, [producto, sucursalId, consulta]);
 
   // Combina las dos series por mes para Recharts.
   const filas = useMemo(() => {
