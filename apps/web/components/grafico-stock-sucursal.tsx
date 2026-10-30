@@ -179,7 +179,7 @@ export function GraficoStockSucursal({
                 <Bar
                   dataKey="transito"
                   name="En tránsito"
-                  fill="#38bdf8"
+                  fill="#0284c7"
                   radius={[0, 3, 3, 0]}
                   isAnimationActive={false}
                 >

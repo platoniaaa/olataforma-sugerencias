@@ -91,5 +91,29 @@ sucursal cambie la venta y la columna Stock del historial pero no las tarjetas d
   `extraido_en`. No son costo, pero convendria modelos propios.
 - **Tabla de reemplazos en el celular** (6 columnas, scroll horizontal) y **texto equivalente
   de los graficos de venta** (hoy solo el de stock lo tiene).
+- **Revision final del 30-10-2026** (4 revisores independientes + 2 escepticos por hallazgo, sobre
+  `05076cc..b1fc6af`). Ninguna fuga de costo en las rutas nuevas. Quedaron sin corregir, por decision
+  de tiempo, y conviene verlos en este orden:
+  1. **Inventario ciclico (media, heredado).** Un `es_vendedor` al que se le asigna un rol en `ic_rol`
+     recibe `costo_unitario`, `diferencia_valor` y los montos de sobrante/faltante en
+     `/api/inventario-ciclico/items` y `/resumen`. Decidir con el dueño: o se quitan esos campos cuando
+     el usuario es vendedor, o `guardar_rol` rechaza vendedores. **Mientras tanto: no asignar roles de
+     inventario ciclico a los 24 vendedores nuevos.**
+  2. **"Nuevo requerimiento" del vendedor (media, heredado).** `/api/requerimientos/buscar`, `/pegar` y
+     `/producto/{p}` siguen sumando todas las bodegas (danados, Frontera, saldos negativos) y todo el
+     transito: el mismo producto da 13 ahi y 5 en `Productos`. Arreglo: usar
+     `stock_service.stock_vendible_por_producto`, `filtro_vendible` y `transito solo_curifor=True` en
+     `requerimiento_service`. Es un cambio visible para el vendedor: consultarlo antes.
+  3. **Modelos de respuesta propios** para `grupo-ventas`, `sucursales` y `filtros` (hoy son diccionarios
+     con un `pop` manual) y para FORD y stock (viajan `aviso`, `extraido_en`, `origen`, `agrupado`).
+  4. **Stock con error silencioso:** si falla la lectura de `stock_unificado`, la lista responde 200 con
+     "Sin stock" en vez de un error.
+  5. **Combinacion admin + vendedor:** el formulario de Usuarios la permite y conserva el acceso admin.
+  6. `GET /api/actualizacion/estado` esta abierto a cualquier sesion y devuelve al vendedor el nombre
+     del PC del motor y quien pidio el recalculo (heredado).
+  7. Web: al elegir una sucursal desde "todas", la tabla del historial no avisa que esta actualizando;
+     al volver del detalle no se restauran las paginas de "Ver mas" ni el scroll; objetivos tactiles
+     de 19 px en los enlaces de codigo; el menu no resalta `Productos` dentro de un detalle; la tabla de
+     reemplazos en celular (ver arriba).
 - Estan sin tocar a proposito (heredados): botones de menos de 44 px en `Button`, el cajon del
   menu cerrado sigue en el orden de tabulacion, inputs de 13 px (zoom en iOS).

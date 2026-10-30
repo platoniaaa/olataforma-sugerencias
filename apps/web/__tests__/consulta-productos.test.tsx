@@ -214,6 +214,37 @@ describe("lista de productos", () => {
         expect.objectContaining({ con_stock: true }), expect.anything()));
   });
 
+  it("una respuesta vacía que ya venía en camino no pisa la búsqueda siguiente", async () => {
+    // 'zzz' queda en vuelo; se escribe otra letra y la respuesta vacía de 'zzz' llega durante la pausa.
+    let responderZzz: (v: ReturnType<typeof pagina>) => void = () => undefined;
+    mocks.consultaProductos.mockResolvedValueOnce(pagina([FILTRO]));
+    render(<ConsultaProductosPage />);
+    await screen.findByRole("link", { name: /70 2723982/ });
+
+    mocks.consultaProductos.mockImplementationOnce(() => new Promise((res) => { responderZzz = res; }));
+    fireEvent.change(screen.getByLabelText("Buscar producto"), { target: { value: "zzz" } });
+    await waitFor(() => expect(mocks.consultaProductos).toHaveBeenCalledTimes(2), { timeout: 2000 });
+    mocks.consultaProductos.mockImplementation(() => new Promise(() => undefined));
+    fireEvent.change(screen.getByLabelText("Buscar producto"), { target: { value: "zzzy" } });
+    responderZzz(pagina([], 0));
+    await new Promise((r) => setTimeout(r, 50));
+
+    // La respuesta vacía de 'zzz' se descartó: no afirma que 'zzzy' no tiene resultados.
+    expect(screen.queryByText(/No encontramos productos/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/No hay productos para mostrar/)).not.toBeInTheDocument();
+  });
+
+  it("si una búsqueda nueva falla, no deja la lista anterior debajo del aviso", async () => {
+    mocks.consultaProductos.mockResolvedValueOnce(pagina([FILTRO]));
+    render(<ConsultaProductosPage />);
+    await screen.findByRole("link", { name: /70 2723982/ });
+
+    mocks.consultaProductos.mockRejectedValue(new TypeError("Failed to fetch"));
+    fireEvent.change(screen.getByLabelText("Buscar producto"), { target: { value: "zzz" } });
+    expect(await screen.findByRole("alert", {}, { timeout: 2000 })).toHaveTextContent("No se pudo conectar");
+    expect(screen.queryByRole("link", { name: /70 2723982/ })).not.toBeInTheDocument();
+  });
+
   it("no dice 'no encontramos' mientras se escribe otra búsqueda", async () => {
     mocks.consultaProductos.mockResolvedValue(pagina([], 0));
     render(<ConsultaProductosPage />);

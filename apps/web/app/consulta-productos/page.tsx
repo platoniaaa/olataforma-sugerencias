@@ -62,6 +62,11 @@ export default function ConsultaProductosPage() {
         setPagina(pag);
       } catch (e) {
         if (mio !== pedido.current) return;
+        // Una busqueda nueva que falla no deja a la vista la lista de la anterior.
+        if (reemplazar) {
+          setItems([]);
+          setTotal(0);
+        }
         setError(mensajeLectura(e));
       } finally {
         if (mio === pedido.current) setCargando(false);
@@ -80,7 +85,9 @@ export default function ConsultaProductosPage() {
       /* noop */
     }
     // Desde que cambia la busqueda ya no vale lo que dice la pantalla (p. ej. 'sin resultados'):
-    // se marca como cargando de inmediato y no recien cuando vence la pausa.
+    // se marca como cargando de inmediato y no recien cuando vence la pausa. Lo que ya estaba en
+    // vuelo se invalida: su respuesta (p. ej. una lista vacia) no puede llegar durante la pausa.
+    pedido.current += 1;
     setCargando(true);
     const t = setTimeout(() => cargar(1, true), 300);
     return () => clearTimeout(t);
@@ -116,7 +123,7 @@ export default function ConsultaProductosPage() {
             type="search"
             inputMode="search"
             autoComplete="off"
-            placeholder="Código o descripción, por ejemplo «filtro de aceite»"
+            placeholder="Código o descripción"
             className="h-11 pl-9"
             value={q}
             onChange={(e) => setQ(e.target.value)}

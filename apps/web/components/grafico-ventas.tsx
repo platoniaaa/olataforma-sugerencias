@@ -79,6 +79,23 @@ export function GraficoVentas({
       .map((r) => ({ ...r, mes: etiquetaMes(r.mes) }));
   }, [data]);
 
+  // En la vista del vendedor (un solo grafico de ventas) la tarjeta no desaparece sin decir por que.
+  if (consulta && (error || (data && filas.length === 0))) {
+    return (
+      <Card>
+        <CardHeader className="space-y-1">
+          <CardTitle>Venta últimos 12 meses</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p role="status" className="text-[13px] text-slate-700">
+            {error
+              ? "No se pudo cargar la venta. Cambia de sucursal o vuelve a abrir el producto."
+              : "Sin ventas en los últimos 12 meses."}
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
   if (error || (data && filas.length === 0)) return null;
 
   const promGeneral =

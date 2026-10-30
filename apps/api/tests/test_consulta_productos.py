@@ -15,7 +15,10 @@ from src.services import reemplazo_service
 from src.services.auth import hash_password, requiere_auth
 
 CODIGO = "19 SZ6Z3B437B"
-PROHIBIDOS = ("costo", "stock_minimo", "stock_maximo", "clasificacion_stock", "tipo_repuesto")
+# Se compara por PREFIJO de la clave (`"costo` atrapa costo, costo_unitario, costo_neto...): un campo nuevo
+# con otro nombre no puede colarse solo porque no se llame exactamente igual.
+PROHIBIDOS = ("costo", "stock_minimo", "stock_maximo", "clasificacion_stock", "tipo_repuesto",
+              "proveedor", "margen", "neto", "minimo", "maximo", "punto_de_pedido", "stock_seguridad")
 
 
 @pytest.fixture()
@@ -65,7 +68,7 @@ def como_vendedor(datos):
 
 def _sin_prohibidos(texto: str):
     for campo in PROHIBIDOS:
-        assert f'"{campo}"' not in texto, f"salió {campo} en la respuesta del vendedor"
+        assert f'"{campo}' not in texto, f"salió {campo} en la respuesta del vendedor"
 
 
 def test_la_lista_trae_precio_pero_no_costo(client, como_vendedor):
