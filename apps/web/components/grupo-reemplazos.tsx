@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   Bar,
@@ -43,12 +43,16 @@ export function GrupoReemplazos({
   producto,
   consulta = false,
   sucursalId,
+  alternativa,
 }: {
   producto: string;
   /** Vista del vendedor: usa la ruta de consulta y enlaza a su propia ficha. */
   consulta?: boolean;
   /** Vista del vendedor: venta y stock de una sola sucursal (sin esto, de todas). */
   sucursalId?: string;
+  /** Qué mostrar cuando el código NO tiene reemplazos (hoy la tarjeta desaparece). La vista del
+   *  vendedor pone aquí la venta del código, para tener siempre un solo gráfico de ventas. */
+  alternativa?: ReactNode;
 }) {
   const [data, setData] = useState<GrupoVentas | null>(null);
   const [error, setError] = useState(false);
@@ -74,7 +78,9 @@ export function GrupoReemplazos({
     });
   }, [data]);
 
-  if (error || !data || data.miembros.length < 2) return null;
+  // Mientras carga no se muestra nada (ni la alternativa: parpadearía antes de saber si hay grupo).
+  if (!data && !error) return null;
+  if (error || !data || data.miembros.length < 2) return <>{alternativa ?? null}</>;
 
   const fuera = data.miembros.filter((m) => !m.cuenta_en_el_total);
 

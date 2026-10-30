@@ -45,8 +45,10 @@ vi.mock("@/components/grafico-stock-sucursal", () => ({
   ),
 }));
 vi.mock("@/components/grupo-reemplazos", () => ({
-  GrupoReemplazos: ({ producto, consulta, sucursalId }: { producto: string; consulta?: boolean; sucursalId?: string }) => (
-    <div data-testid="grupo-reemplazos">{producto}|{String(consulta)}|{sucursalId ?? ""}</div>
+  GrupoReemplazos: ({ producto, consulta, sucursalId, alternativa }: {
+    producto: string; consulta?: boolean; sucursalId?: string; alternativa?: React.ReactNode;
+  }) => (
+    <div data-testid="grupo-reemplazos">{producto}|{String(consulta)}|{sucursalId ?? ""}{alternativa}</div>
   ),
 }));
 vi.mock("@/lib/auth", () => ({
@@ -233,13 +235,16 @@ describe("detalle de un producto", () => {
     expect(screen.getByRole("option", { name: "LINDEROS" })).toBeInTheDocument();
     expect(screen.getByTestId("grafico-ventas")).toHaveTextContent("19 SZ6Z3B437B|true|");
     expect(screen.getByTestId("grafico-ventas")).not.toHaveTextContent("LINDEROS");
+    // Un solo gráfico de ventas: el del código va como alternativa DENTRO del grupo de reemplazos.
+    expect(screen.getByTestId("grupo-reemplazos")).toContainElement(screen.getByTestId("grafico-ventas"));
+    expect(screen.getAllByTestId("grafico-ventas")).toHaveLength(1);
 
     fireEvent.change(filtro, { target: { value: "LINDEROS" } });
 
     // Las dos gráficas piden la venta de esa sucursal.
     expect(screen.getByTestId("grafico-ventas")).toHaveTextContent("19 SZ6Z3B437B|true|LINDEROS");
     expect(screen.getByTestId("grupo-reemplazos")).toHaveTextContent("19 SZ6Z3B437B|true|LINDEROS");
-    expect(screen.getByText(/Venta y stock de/)).toHaveTextContent("LINDEROS");
+    expect(screen.getByText(/Mostrando solo la venta y el stock de/)).toHaveTextContent("LINDEROS");
     expect(sessionStorage.getItem("consulta_productos_sucursal")).toBe("LINDEROS");
 
     // Y volver a "todas" quita el filtro.

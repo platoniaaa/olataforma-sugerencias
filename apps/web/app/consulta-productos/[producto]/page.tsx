@@ -206,26 +206,33 @@ export default function DetalleConsultaPage({ params }: { params: { producto: st
           </select>
           {sucursal && (
             <span className="text-[12px] text-slate-600">
-              Venta y stock de <b>{sucursal}</b>. El gráfico de ventas la compara con el total.
+              Mostrando solo la venta y el stock de <b>{sucursal}</b>.
             </span>
           )}
         </section>
       )}
 
-      <GrupoReemplazos producto={d.producto} consulta sucursalId={sucursal || undefined} />
-
-      <GraficoVentas
+      {/* UN solo gráfico de ventas: el historial de reemplazos (este código y los que lo
+          reemplazan, apilados) cuando hay grupo; si no, la venta del código solo. */}
+      <GrupoReemplazos
         producto={d.producto}
         consulta
         sucursalId={sucursal || undefined}
-        sucursalNombre={sucursal || undefined}
+        alternativa={
+          <GraficoVentas
+            producto={d.producto}
+            consulta
+            sucursalId={sucursal || undefined}
+            sucursalNombre={sucursal || undefined}
+          />
+        }
       />
 
       <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-4 py-3">
           <h2 className="text-sm font-semibold text-slate-900">Detalle por bodega</h2>
           <p className="text-xs text-slate-600">
-            El mismo stock del gráfico, bodega por bodega. Se actualiza en cada corrida del sugerido.
+            El mismo stock del gráfico, bodega por bodega.
           </p>
         </div>
         {conStock.length === 0 ? (
