@@ -115,5 +115,18 @@ sucursal cambie la venta y la columna Stock del historial pero no las tarjetas d
      al volver del detalle no se restauran las paginas de "Ver mas" ni el scroll; objetivos tactiles
      de 19 px en los enlaces de codigo; el menu no resalta `Productos` dentro de un detalle; la tabla de
      reemplazos en celular (ver arriba).
+  8. **Rendimiento de la lista:** cada pedido arma la subconsulta de "solo con stock" aunque no se
+     pida (9 consultas, 2 lecturas de `bodega_tipo` y 2 `DISTINCT bodega`). Arreglo de una linea:
+     pasar `con_stock_de` solo si `con_stock`, y calcular `bodegas_excluidas` una vez por pedido.
+  9. **Bordes del stock y el transito** (bajos): saldos negativos de transito se suman en la API pero la
+     tabla solo cuenta los mayores a cero; filas de stock sin `sucursal_id` se dibujan con el nombre de la
+     bodega en el grafico y se descartan al filtrar por sucursal; `clave_sucursal` no es idempotente
+     (una sucursal llamada "02 3 NORTE" daria "3 NORTE" y luego "NORTE"); si `bodega_tipo` esta vacia o
+     falla su lectura no se excluye nada y se cuentan los danados.
+  10. Orden: `/api/catalogo/{p}/grupo-ventas` (comprador) ahora trae ademas la clave `sucursal: null`;
+     el comentario de `main.py` sobre el chat quedo viejo.
+  11. **Rama remota `respaldo-salida-vista-vendedor-productos`:** su commit `c7bfad8` contiene la capa
+     temporal de vista previa (`apps/web/app/consulta-productos/layout.tsx`), que REEMPLAZA los datos de la
+     vista por datos inventados. No fusionarla ni hacer cherry-pick a `main`; borrarla cuando ya no sirva.
 - Estan sin tocar a proposito (heredados): botones de menos de 44 px en `Button`, el cajon del
   menu cerrado sigue en el orden de tabulacion, inputs de 13 px (zoom en iOS).
