@@ -12,6 +12,16 @@ from pydantic import BaseModel, ConfigDict, Field
 from .producto_catalogo import ReemplazoFordRow, StockSucursalRow
 
 
+class TransitoSucursalRow(BaseModel):
+    """Unidades pedidas que todavia no llegan, por sucursal de destino."""
+
+    sucursal_id: str | None = None
+    cantidad: float = 0
+    # La OC mas antigua del grupo (aaaa-mm-dd). "Vienen 5" no dice lo mismo que "vienen 5
+    # pedidas hace 4 meses": esas probablemente no lleguen.
+    pedido_desde: str | None = None
+
+
 class ProductoConsultaRow(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -25,6 +35,8 @@ class ProductoConsultaRow(BaseModel):
     # Precio de venta del ERP (el que cobra el vendedor). El costo NO va.
     precio: float | None = None
     stock_total: float | None = None
+    # Unidades ya pedidas que todavia no llegan (todas las sucursales): para no pedir de mas.
+    en_transito: float | None = None
     # Equivalentes del mix, separados por coma (se arma igual que en el catálogo).
     reemplazo: str | None = None
 
@@ -44,4 +56,5 @@ class ProductoConsultaDetalle(ProductoConsultaRow):
     combustible: str | None = None
     anio: str | None = None
     stock_por_sucursal: list[StockSucursalRow] = Field(default_factory=list)
+    transito_por_sucursal: list[TransitoSucursalRow] = Field(default_factory=list)
     reemplazo_ford: ReemplazoFordRow | None = None

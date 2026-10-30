@@ -21,7 +21,7 @@ from ..schemas.consulta_productos import (
     ProductoConsultaPage,
     ProductoConsultaRow,
 )
-from ..services import catalogo_service, sugerido_service
+from ..services import catalogo_service, sugerido_service, transito_service
 
 router = APIRouter(prefix="/api/consulta/productos", tags=["consulta-productos"])
 
@@ -45,8 +45,13 @@ def listar(
         categoria=categoria, con_stock=con_stock,
     )
     items, total = catalogo_service.listar(db, f, page=page, limit=limit, sort="producto")
+    # Una sola consulta para las filas de la pagina: lo que viene en camino se ve en la lista.
+    transito = transito_service.unidades_por_producto(db, {i["producto"] for i in items})
     return ProductoConsultaPage(
-        items=[ProductoConsultaRow.model_validate(i) for i in items],
+        items=[
+            ProductoConsultaRow.model_validate(i).model_copy(update={"en_transito": transito.get(i["producto"], 0.0)})
+            for i in items
+        ],
         total=total,
         page=page,
         limit=limit,
@@ -90,7 +95,12 @@ def grupo_ventas(
 ) -> dict:
     """Venta mes a mes de cada código del grupo de reemplazos (vacío si no tiene). Con
     `sucursal_id`, la venta y el stock de esa sucursal solamente."""
-    return sugerido_service.grupo_ventas(db, producto, sucursal_id or None)
+    d = sugerido_service.grupo_ventas(db, producto, sucursal_id or None)
+    # Lo que viene en camino de cada codigo del grupo: un reemplazo en transito tambien evita pedir de mas.
+    transito = transito_service.unidades_por_producto(db, {m["producto"] for m in d["miembros"]}, sucursal_id or None)
+    for m in d["miembros"]:
+        m["transito"] = transito.get(m["producto"], 0.0)
+    return d
 
 
 @router.get("/{producto:path}", response_model=ProductoConsultaDetalle)
@@ -98,4 +108,6 @@ def detalle(producto: str, db: Session = Depends(get_db)) -> ProductoConsultaDet
     d = catalogo_service.detalle(db, producto)
     if not d:
         raise HTTPException(status_code=404, detail="Producto no esta en el catalogo")
+    d["transito_por_sucursal"] = transito_service.detalle_por_sucursal(db, producto)
+    d["en_transito"] = sum(t["cantidad"] for t in d["transito_por_sucursal"])
     return ProductoConsultaDetalle.model_validate(d)

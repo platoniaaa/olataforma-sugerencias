@@ -134,3 +134,34 @@ def detalle_por_sucursal(db: Session, producto: str) -> list[dict]:
     except Exception:  # noqa: BLE001
         db.rollback()
         return []
+
+
+def unidades_por_producto(db: Session, productos: set[str], sucursal: str | None = None) -> dict[str, float]:
+    """{producto: unidades en transito}, sumando todas las sucursales o solo una.
+
+    `sucursal` es el nombre normalizado de `sugerido_service.clave_sucursal`: la comparacion
+    ignora el codigo numerico del ERP y las mayusculas ("02 LINDEROS" = "Linderos"), a
+    diferencia de `por_producto`, que compara por igualdad exacta. Vacio si la tabla todavia
+    no existe (antes de la primera corrida del motor con el cambio).
+    """
+    if not productos:
+        return {}
+    from .sugerido_service import clave_sucursal  # import local: evita un ciclo entre servicios
+
+    stmt = (
+        select(StockTransito.producto, StockTransito.sucursal_id, func.sum(StockTransito.cantidad))
+        .where(StockTransito.producto.in_(productos))
+        .group_by(StockTransito.producto, StockTransito.sucursal_id)
+    )
+    try:
+        filas = db.execute(stmt).all()
+    except Exception:  # noqa: BLE001 - tabla ausente antes de la primera corrida
+        db.rollback()
+        return {}
+    clave = clave_sucursal(sucursal) if sucursal else ""
+    out: dict[str, float] = {}
+    for producto, suc, cantidad in filas:
+        if clave and clave_sucursal(suc) != clave:
+            continue
+        out[producto] = out.get(producto, 0.0) + float(cantidad or 0)
+    return out

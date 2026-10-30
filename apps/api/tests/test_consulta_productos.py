@@ -10,7 +10,7 @@ import json
 import pytest
 
 from src.main import app
-from src.models import ProductoCatalogo, StockUnificado, Usuario, VentaHistorica
+from src.models import ProductoCatalogo, StockTransito, StockUnificado, Usuario, VentaHistorica
 from src.services import reemplazo_service
 from src.services.auth import hash_password, requiere_auth
 
@@ -235,3 +235,63 @@ def test_sin_filtro_las_ventas_siguen_igual(client, con_sucursales):
     """El parámetro es opcional: sin él, la respuesta es la de siempre."""
     d = client.get(f"/api/consulta/productos/{CODIGO}/ventas").json()
     assert d["sucursal_id"] == "" and d["meses_sucursal"] == [] and d["total_sucursal"] == 0
+
+
+# --- Unidades en tránsito: para que el vendedor no pida de más ---------------------------------
+
+
+@pytest.fixture()
+def con_transito(con_sucursales):
+    """Vienen 10 a Curicó (también hay stock ahí), 6 a Talca (que no tiene stock) y 3 a Linderos,
+    escrita con el código del ERP. El reemplazo vigente tiene 4 en camino a Linderos."""
+    from datetime import date
+
+    con_sucursales.add_all([
+        StockTransito(tenant_id="curifor", producto=CODIGO, sucursal_id="CURICO", cantidad=10.0,
+                      pedido_desde=date(2026, 9, 1), origen="CURIFOR"),
+        StockTransito(tenant_id="curifor", producto=CODIGO, sucursal_id="TALCA", cantidad=6.0,
+                      pedido_desde=date(2026, 6, 12), origen="CURIFOR"),
+        StockTransito(tenant_id="curifor", producto=CODIGO, sucursal_id="02 LINDEROS", cantidad=3.0,
+                      pedido_desde=None, origen="FRONTERA"),
+        StockTransito(tenant_id="curifor", producto=VIGENTE, sucursal_id="LINDEROS", cantidad=4.0,
+                      pedido_desde=date(2026, 10, 5), origen="CURIFOR"),
+    ])
+    con_sucursales.commit()
+    return con_sucursales
+
+
+def test_el_detalle_trae_el_transito_por_sucursal_de_mayor_a_menor_y_su_total(client, con_transito):
+    d = client.get(f"/api/consulta/productos/{CODIGO}").json()
+    assert [(t["sucursal_id"], t["cantidad"]) for t in d["transito_por_sucursal"]] == [
+        ("CURICO", 10.0), ("TALCA", 6.0), ("02 LINDEROS", 3.0)]
+    assert d["en_transito"] == 19.0
+    por = {t["sucursal_id"]: t["pedido_desde"] for t in d["transito_por_sucursal"]}
+    assert por["TALCA"] == "2026-06-12" and por["02 LINDEROS"] is None
+    # Incluye a Talca, que no tiene stock: es justo la sucursal a la que no hay que pedir más.
+    assert "TALCA" not in {s["sucursal_id"] for s in d["stock_por_sucursal"]}
+    # El origen de la OC (CURIFOR / FRONTERA) no sale.
+    assert "origen" not in json.dumps(d["transito_por_sucursal"])
+    _sin_prohibidos(json.dumps(d))
+
+
+def test_la_lista_muestra_lo_que_viene_en_camino_de_cada_producto(client, con_transito):
+    items = {x["producto"]: x for x in client.get("/api/consulta/productos").json()["items"]}
+    assert items[CODIGO]["en_transito"] == 19.0
+    assert items["70 2723982"]["en_transito"] == 0.0
+
+
+def test_el_grupo_de_reemplazos_trae_el_transito_de_cada_codigo(client, con_transito):
+    d = client.get(f"/api/consulta/productos/{CODIGO}/grupo-ventas").json()
+    por = {m["producto"]: m["transito"] for m in d["miembros"]}
+    assert por == {CODIGO: 19.0, VIGENTE: 4.0}
+
+
+def test_el_transito_del_grupo_se_filtra_por_sucursal_aunque_venga_con_codigo(client, con_transito):
+    d = client.get(f"/api/consulta/productos/{CODIGO}/grupo-ventas", params={"sucursal_id": "LINDEROS"}).json()
+    por = {m["producto"]: m["transito"] for m in d["miembros"]}
+    assert por == {CODIGO: 3.0, VIGENTE: 4.0}
+
+
+def test_un_producto_sin_transito_responde_vacio_y_en_cero(client, con_sucursales):
+    d = client.get(f"/api/consulta/productos/{CODIGO}").json()
+    assert d["transito_por_sucursal"] == [] and d["en_transito"] == 0
